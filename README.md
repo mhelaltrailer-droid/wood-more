@@ -10,9 +10,9 @@ A Flutter application for construction/site management: attendance, daily report
 - **Roles**  Site engineer, site engineer manager, app admin.
 - **Attendance**  Check-in/check-out with optional location and project.
 - **Daily reports**  Multi-step reports with work place, report text, materials, expenses, documents, and images.
-- **Projects & structure**  Projects � Zones � Buildings � Units; project stores (materials stock); building materials and cutlists.
+- **Projects & structure**  Projects ? Zones ? Buildings ? Units; project stores (materials stock); building materials and cutlists.
 - **Admin**  Users, projects, zones, buildings, supervisors, contractors, materials, cutlists, project stores.
-- **Finance**  Engineer balances, custody (9G/)), salary deductions.
+- **Finance**  Engineer balances, custody (contract), salary deductions.
 - **Reports**  Attendance and daily report filters and exports (e.g. PDF).
 - **Localization**  Arabic (default) and English.
 
@@ -119,7 +119,7 @@ To run the app locally with **`flutter run -d chrome`** (or another browser) and
 
 ### 1. Set up your local PostgreSQL
 
-Create the database and user (if you don�t have them yet). For example, in `psql` or Beekeeper:
+Create the database and user (if you don't have them yet). For example, in `psql` or Beekeeper:
 
 ```sql
 CREATE USER wood_more WITH PASSWORD 'wood_more';
@@ -213,7 +213,7 @@ With Docker Compose running, you can connect to PostgreSQL from your machine usi
 1. Click **New connection** and choose **PostgreSQL**.
 2. Enter the values above (Host: `localhost`, Port: `5432`, User: `wood_more`, Password: `wood_more`, Database: `wood_more`).
 3. Click **Test** to verify, then **Connect**.
-4. In the left sidebar you�ll see tables: `users`, `projects`, `zones`, `buildings`, `attendance_records`, `daily_reports`, `materials`, `engineer_balance`, `engineer_custody`, `supervisors`, `contractors`, `project_stock`, `units`, `building_materials`, `building_cutlist_images`. Open any table to view or query data.
+4. In the left sidebar you'll see tables: `users`, `projects`, `zones`, `buildings`, `attendance_records`, `daily_reports`, `materials`, `engineer_balance`, `engineer_custody`, `supervisors`, `contractors`, `project_stock`, `units`, `building_materials`, `building_cutlist_images`. Open any table to view or query data.
 
 ### 4. Stop services
 
