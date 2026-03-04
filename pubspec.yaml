@@ -61,6 +61,9 @@ dependencies:
   # اختيار الملفات (مستندات وصور)
   file_picker: ^8.1.6
 
+  # HTTP للاتصال بالـ API (وضع PostgreSQL)
+  http: ^1.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
