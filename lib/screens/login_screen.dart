@@ -14,13 +14,16 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   final _db = getStorage();
   bool _isLoading = false;
+  bool _obscurePassword = true;
   String? _errorMessage;
 
   @override
   void dispose() {
     _emailController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
@@ -33,12 +36,15 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final user = await _db.getUserByEmail(_emailController.text.trim());
+      final user = await _db.validateLogin(
+        _emailController.text.trim(),
+        _passwordController.text,
+      );
       if (!mounted) return;
 
       if (user == null) {
         setState(() {
-          _errorMessage = 'البريد الإلكتروني غير مسجل في النظام';
+          _errorMessage = 'البريد الإلكتروني أو كلمة السر غير صحيحة';
           _isLoading = false;
         });
         return;
@@ -140,6 +146,28 @@ class _LoginScreenState extends State<LoginScreen> {
                             validator: (v) {
                               if (v == null || v.trim().isEmpty) {
                                 return 'أدخل البريد الإلكتروني';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _passwordController,
+                            obscureText: _obscurePassword,
+                            textDirection: TextDirection.ltr,
+                            decoration: InputDecoration(
+                              labelText: 'كلمة السر',
+                              hintText: 'الافتراضية المؤقتة: 0000',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              border: const OutlineInputBorder(),
+                              suffixIcon: IconButton(
+                                icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
+                                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                              ),
+                            ),
+                            validator: (v) {
+                              if (v == null || v.isEmpty) {
+                                return 'أدخل كلمة السر';
                               }
                               return null;
                             },

@@ -3,7 +3,7 @@ import '../models/user_model.dart';
 import '../services/storage_service.dart';
 
 /// واجهة المالية: تظهر لمدير مهندسين المواقع ومسؤول التطبيق فقط
-/// عرض الرصيد، إضافة عهدة، وتقرير مصروفات لكل مهندس
+/// عرض الرصيد، إضافة عهدة، وتقرير مصروفات لكل مهندس (+ Abderhman في القائمة المنسدلة فقط)
 class FinanceScreen extends StatefulWidget {
   final UserModel currentUser;
 
@@ -28,13 +28,20 @@ class _FinanceScreenState extends State<FinanceScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final engineers = await _db.getSiteEngineers();
+    // إضافة Abderhman إلى القائمة في الماليات فقط (إن وُجد ولم يكن ضمن المهندسين)
+    final abderhman = await _db.getUserByEmail('AbdelrhmanEllaithy828@gmail.com');
+    final list = List<UserModel>.from(engineers);
+    if (abderhman != null && !list.any((e) => e.id == abderhman.id)) {
+      list.add(abderhman);
+      list.sort((a, b) => a.name.compareTo(b.name));
+    }
     final balances = <int, double>{};
-    for (final e in engineers) {
+    for (final e in list) {
       balances[e.id] = await _db.getEngineerBalance(e.id);
     }
     if (!mounted) return;
     setState(() {
-      _engineers = engineers;
+      _engineers = list;
       _balances = balances;
       _loading = false;
     });
@@ -84,7 +91,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 if (amount == null || amount <= 0) return;
                 Navigator.pop(ctx);
                 try {
-                  await _db.addCustody(selected!.id, amount, noteC.text.trim());
+                  await _db.addCustody(selected!.id, amount, noteC.text.trim(), null);
                   _load();
                   if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت إضافة العهدة'), backgroundColor: Colors.green));
                 } catch (e) {

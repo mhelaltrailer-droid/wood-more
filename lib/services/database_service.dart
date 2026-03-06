@@ -10,6 +10,7 @@ import '../models/building_model.dart';
 import '../models/supervisor_model.dart';
 import '../models/contractor_model.dart';
 import '../models/project_stock_model.dart';
+import '../models/project_stock_ledger_model.dart';
 import '../models/unit_model.dart';
 import '../models/building_material_model.dart';
 import '../models/building_cutlist_model.dart';
@@ -35,20 +36,21 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 9,
+      version: 13,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // جدول المستخدمين
+    // جدول المستخدمين (كلمة السر الافتراضية المؤقتة: 0000)
     await db.execute('''
       CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
-        role TEXT NOT NULL
+        role TEXT NOT NULL,
+        password TEXT DEFAULT '0000'
       )
     ''');
 
@@ -134,6 +136,46 @@ class DatabaseService {
     if (oldVersion < 9) {
       await _createFinanceTables(db);
     }
+    if (oldVersion < 10) {
+      try {
+        await db.execute("ALTER TABLE users ADD COLUMN password TEXT DEFAULT '0000'");
+        await db.rawUpdate("UPDATE users SET password = ? WHERE password IS NULL", ['0000']);
+      } catch (_) {}
+    }
+    if (oldVersion < 12) {
+      try {
+        await db.execute('ALTER TABLE engineer_custody ADD COLUMN document_path TEXT');
+      } catch (_) {}
+    }
+    if (oldVersion < 13) {
+      final existing = Sqflite.firstIntValue(await db.rawQuery(
+        "SELECT COUNT(*) FROM users WHERE LOWER(email) = 'h@h.com'",
+      ));
+      if (existing == 0) {
+        await db.insert('users', {
+          'name': 'Helal',
+          'email': 'h@h.com',
+          'role': 'app_admin',
+          'password': '123',
+        });
+      }
+    }
+    if (oldVersion < 11) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS project_stock_ledger (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL,
+          material_name TEXT NOT NULL,
+          unit TEXT NOT NULL,
+          quantity_delta REAL NOT NULL,
+          type TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          user_id INTEGER,
+          user_name TEXT NOT NULL,
+          FOREIGN KEY (project_id) REFERENCES projects (id)
+        )
+      ''');
+    }
   }
 
   Future<void> _createFinanceTables(Database db) async {
@@ -151,6 +193,7 @@ class DatabaseService {
         amount REAL NOT NULL,
         created_at TEXT NOT NULL,
         note TEXT,
+        document_path TEXT,
         FOREIGN KEY (user_id) REFERENCES users (id)
       )
     ''');
@@ -193,6 +236,20 @@ class DatabaseService {
         building_id INTEGER NOT NULL,
         image_path TEXT NOT NULL,
         FOREIGN KEY (building_id) REFERENCES buildings (id)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS project_stock_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        material_name TEXT NOT NULL,
+        unit TEXT NOT NULL,
+        quantity_delta REAL NOT NULL,
+        type TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        user_id INTEGER,
+        user_name TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects (id)
       )
     ''');
   }
@@ -252,6 +309,7 @@ class DatabaseService {
     await db.insert('users', {'name': 'Shams', 'email': 'islam.shams2050@gmail.com', 'role': 'site_engineer_manager'});
     await db.insert('users', {'name': 'Abdrhman', 'email': 'AbdelrhmanEllaithy828@gmail.com', 'role': 'site_engineer_manager'});
     await db.insert('users', {'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin'});
+    await db.insert('users', {'name': 'Helal', 'email': 'h@h.com', 'role': 'app_admin', 'password': '123'});
 
     await _seedProjects(db);
   }
@@ -330,6 +388,22 @@ class DatabaseService {
     return UserModel.fromMap(maps.first);
   }
 
+  /// التحقق من تسجيل الدخول (بريد + كلمة سر)، كلمة السر الافتراضية المؤقتة: 0000
+  Future<UserModel?> validateLogin(String email, String password) async {
+    final db = await database;
+    final maps = await db.query(
+      'users',
+      where: 'email = ?',
+      whereArgs: [email.trim().toLowerCase()],
+    );
+    if (maps.isEmpty) return null;
+    final row = maps.first;
+    final stored = row['password']?.toString().trim() ?? '0000';
+    if (stored.isEmpty) return null;
+    if (password.trim() != stored) return null;
+    return UserModel.fromMap(row);
+  }
+
   /// الحصول على جميع المشاريع
   Future<List<ProjectModel>> getProjects() async {
     final db = await database;
@@ -369,7 +443,7 @@ class DatabaseService {
     return maps.map((m) => m['name'] as String).toList();
   }
 
-  /// حفظ التقرير اليومي (ويتم خصم إجمالي بنود الماليات من رصيد المهندس)
+  /// حفظ التقرير اليومي (ويتم خصم إجمالي بنود الماليات من رصيد المهندس، وخصم الخامات من مخزن المشروع)
   Future<int> addDailyReport(DailyReportData report) async {
     final db = await database;
     final rowId = await db.insert('daily_reports', {
@@ -401,6 +475,23 @@ class DatabaseService {
       final current = await getEngineerBalance(report.userId);
       await setEngineerBalance(report.userId, current - total);
     }
+    // خصم الخامات من مخزن المشروع المختار في التقرير
+    if (report.projectId != null) {
+      for (final m in report.materials) {
+        if (m.materialName.isEmpty || m.quantity.isEmpty) continue;
+        final qty = double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+        if (qty <= 0) continue;
+        final unit = m.unit.isEmpty ? 'متر' : m.unit;
+        await deductProjectStock(
+          report.projectId!,
+          m.materialName,
+          unit,
+          qty,
+          report.userName,
+          report.reportDate,
+        );
+      }
+    }
     return rowId;
   }
 
@@ -421,16 +512,17 @@ class DatabaseService {
     );
   }
 
-  Future<void> addCustody(int userId, double amount, String note) async {
+  Future<void> addCustody(int userId, double amount, String note, [String? documentPath]) async {
     final db = await database;
     await db.insert('engineer_custody', {
       'user_id': userId,
       'amount': amount,
       'created_at': DateTime.now().toIso8601String(),
       'note': note,
+      'document_path': documentPath,
     });
     final current = await getEngineerBalance(userId);
-    await setEngineerBalance(userId, current + amount);
+    await setEngineerBalance(userId, current - amount);
   }
 
   Future<List<Map<String, dynamic>>> getCustodyRecords({int? userId}) async {
@@ -438,7 +530,7 @@ class DatabaseService {
     final where = userId != null ? 'user_id = ?' : null;
     final whereArgs = userId != null ? [userId] : null;
     final rows = await db.query('engineer_custody', where: where, whereArgs: whereArgs, orderBy: 'created_at DESC');
-    return rows.map((r) => {'id': r['id'], 'user_id': r['user_id'], 'amount': (r['amount'] as num).toDouble(), 'created_at': r['created_at'], 'note': r['note']}).toList();
+    return rows.map((r) => {'id': r['id'], 'user_id': r['user_id'], 'amount': (r['amount'] as num).toDouble(), 'created_at': r['created_at'], 'note': r['note'], 'document_path': r['document_path']}).toList();
   }
 
   /// الحصول على سجلات الحضور لمستخدم معين
@@ -451,6 +543,21 @@ class DatabaseService {
       orderBy: 'date_time DESC',
     );
     return maps.map((m) => AttendanceRecordModel.fromMap(m)).toList();
+  }
+
+  /// موعد الحضور والانصراف لمستخدم في تاريخ معين (نفس اليوم فقط)
+  Future<({DateTime? checkIn, DateTime? checkOut})> getAttendanceForUserOnDate(int userId, DateTime date) async {
+    final list = await getAttendanceRecordsByUser(userId);
+    final dayStart = DateTime(date.year, date.month, date.day);
+    final dayEnd = DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+    DateTime? checkIn;
+    DateTime? checkOut;
+    for (final r in list) {
+      if (r.dateTime.isBefore(dayStart) || r.dateTime.isAfter(dayEnd)) continue;
+      if (r.isCheckIn && (checkIn == null || r.dateTime.isBefore(checkIn))) checkIn = r.dateTime;
+      if (r.isCheckOut && (checkOut == null || r.dateTime.isAfter(checkOut))) checkOut = r.dateTime;
+    }
+    return (checkIn: checkIn, checkOut: checkOut);
   }
 
   /// الحصول على التقارير اليومية حسب الفلتر (للمدير)
@@ -489,14 +596,24 @@ class DatabaseService {
     return maps.map((m) => UserModel.fromMap(m)).toList();
   }
 
-  Future<int> addUser(String name, String email, String role) async {
+  Future<int> addUser(String name, String email, String password, String role) async {
     final db = await database;
-    return db.insert('users', {'name': name, 'email': email.trim().toLowerCase(), 'role': role});
+    final pwd = password.trim().isEmpty ? '0000' : password.trim();
+    return db.insert('users', {
+      'name': name,
+      'email': email.trim().toLowerCase(),
+      'role': role,
+      'password': pwd,
+    });
   }
 
-  Future<void> updateUser(int id, String name, String email, String role) async {
+  Future<void> updateUser(int id, String name, String email, String role, [String? password]) async {
     final db = await database;
-    await db.update('users', {'name': name, 'email': email.trim().toLowerCase(), 'role': role}, where: 'id = ?', whereArgs: [id]);
+    final data = <String, dynamic>{'name': name, 'email': email.trim().toLowerCase(), 'role': role};
+    if (password != null && password.trim().isNotEmpty) {
+      data['password'] = password.trim();
+    }
+    await db.update('users', data, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> deleteUser(int id) async {
@@ -601,6 +718,69 @@ class DatabaseService {
   Future<void> deleteProjectStock(int id) async {
     final db = await database;
     await db.delete('project_stock', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> addProjectStockLedgerEntry({
+    required int projectId,
+    required String materialName,
+    required String unit,
+    required double quantityDelta,
+    required String type,
+    required String userName,
+    DateTime? createdAt,
+    int? userId,
+  }) async {
+    final db = await database;
+    await db.insert('project_stock_ledger', {
+      'project_id': projectId,
+      'material_name': materialName,
+      'unit': unit,
+      'quantity_delta': quantityDelta,
+      'type': type,
+      'created_at': (createdAt ?? DateTime.now()).toIso8601String(),
+      'user_id': userId,
+      'user_name': userName,
+    });
+  }
+
+  Future<List<ProjectStockLedgerModel>> getStockLedger(int projectId, String materialName) async {
+    final db = await database;
+    final maps = await db.query(
+      'project_stock_ledger',
+      where: 'project_id = ? AND material_name = ?',
+      whereArgs: [projectId, materialName],
+      orderBy: 'created_at DESC',
+    );
+    return maps.map((m) => ProjectStockLedgerModel.fromMap(m)).toList();
+  }
+
+  /// خصم كمية من رصيد خامة في مخزن المشروع (عند حفظ التقرير اليومي). يُرجع true إذا تم الخصم.
+  Future<bool> deductProjectStock(int projectId, String materialName, String unit, double quantity, String engineerName, DateTime reportDate) async {
+    final list = await getProjectStock(projectId);
+    final row = list.cast<ProjectStockModel?>().firstWhere(
+          (r) => r!.materialName == materialName && r.unit == unit,
+          orElse: () => null,
+        );
+    if (row == null) return false;
+    final current = double.tryParse(row.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+    final newQty = current - quantity;
+    await updateProjectStock(ProjectStockModel(
+      id: row.id,
+      projectId: row.projectId,
+      materialName: row.materialName,
+      quantity: newQty.toStringAsFixed(2),
+      unit: row.unit,
+    ));
+    await addProjectStockLedgerEntry(
+      projectId: projectId,
+      materialName: materialName,
+      unit: unit,
+      quantityDelta: -quantity,
+      type: 'deduct_report',
+      userName: engineerName,
+      createdAt: reportDate,
+    );
+    return true;
   }
 
   // ——— الوحدات (مبني → وحدات مثل Th1-M01) ———

@@ -12,6 +12,7 @@ import 'admin_units_screen.dart';
 import 'admin_building_materials_screen.dart';
 import 'admin_cutlists_screen.dart';
 import 'salary_deduction_screen.dart';
+import 'sub_reports_screen.dart';
 import 'home_screen.dart';
 
 /// لوح التحكم - يظهر لمسؤول التطبيق فقط
@@ -34,6 +35,7 @@ class AdminDashboardScreen extends StatelessWidget {
       _Item('إدارة المشرفين', 'أسماء المشرفين', Icons.badge, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminSupervisorsScreen(admin: currentUser)))),
       _Item('إدارة المقاولين', 'أسماء المقاولين', Icons.engineering, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminContractorsScreen(admin: currentUser)))),
       _Item('إدارة الخامات', 'إضافة وتعديل وحذف الخامات', Icons.inventory_2, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminMaterialsScreen(admin: currentUser)))),
+      _Item('تقارير فرعية', 'تقرير المقاول، عدد العمال، عهدة المستخدم، حضور وانصراف', Icons.assignment, () => Navigator.push(context, MaterialPageRoute(builder: (_) => SubReportsScreen(admin: currentUser)))),
       _Item('خصم من المرتب', 'نموذج خصم من المرتب | Salary Deduction Form', Icons.receipt_long, () => Navigator.push(context, MaterialPageRoute(builder: (_) => SalaryDeductionScreen(admin: currentUser)))),
     ];
     return Scaffold(

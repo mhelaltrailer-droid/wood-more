@@ -143,17 +143,20 @@ class MaterialItem {
 class ExpenseItem {
   String description;
   String amount;
+  String? imagePath;
 
-  ExpenseItem({this.description = '', this.amount = ''});
+  ExpenseItem({this.description = '', this.amount = '', this.imagePath});
 
   Map<String, dynamic> toJson() => {
         'description': description,
         'amount': amount,
+        'image_path': imagePath,
       };
 
   factory ExpenseItem.fromJson(Map<String, dynamic> map) => ExpenseItem(
         description: map['description'] as String? ?? '',
         amount: map['amount'] as String? ?? '',
+        imagePath: map['image_path'] as String?,
       );
 }
 

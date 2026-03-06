@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -28,6 +29,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   DateTime _dateFrom = DateTime.now();
   DateTime _dateTo = DateTime.now();
   List<DailyReportData> _reports = [];
+  /// مفتاح: 'userId_year_month_day' — قيمة: (حضور، انصراف)
+  Map<String, ({DateTime? checkIn, DateTime? checkOut})> _attendanceMap = {};
   bool _loading = false;
   bool _hasSearched = false;
 
@@ -59,9 +62,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
         userId: _selectedEngineer?.id,
         projectId: _selectedProject?.id,
       );
+      final map = <String, ({DateTime? checkIn, DateTime? checkOut})>{};
+      for (final r in reports) {
+        final key = '${r.userId}_${r.reportDate.year}_${r.reportDate.month}_${r.reportDate.day}';
+        map[key] = await _db.getAttendanceForUserOnDate(r.userId, r.reportDate);
+      }
       if (!mounted) return;
       setState(() {
         _reports = reports;
+        _attendanceMap = map;
         _loading = false;
       });
     } catch (e) {
@@ -77,6 +86,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   void _newReport() {
     setState(() {
       _reports = [];
+      _attendanceMap = {};
       _hasSearched = false;
       _dateFrom = DateTime.now();
       _dateTo = DateTime.now();
@@ -84,6 +94,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
       _selectedProject = null;
     });
   }
+
+  String _attendanceKey(DailyReportData r) =>
+      '${r.userId}_${r.reportDate.year}_${r.reportDate.month}_${r.reportDate.day}';
 
   Future<void> _exportPdf() async {
     if (_reports.isEmpty) {
@@ -93,46 +106,127 @@ class _ReportsScreenState extends State<ReportsScreen> {
       return;
     }
     final dateFormat = DateFormat('yyyy/MM/dd', 'ar');
+    final timeFormat = DateFormat('hh:mm a', 'ar');
     final fontBase = await PdfGoogleFonts.tajawalRegular();
     final fontBold = await PdfGoogleFonts.tajawalBold();
     final theme = pw.ThemeData.withFont(base: fontBase, bold: fontBold);
+    pw.ImageProvider? logoImage;
+    try {
+      final logoBytes = await rootBundle.load('assets/images/logo.png');
+      logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
+    } catch (_) {}
     final doc = pw.Document();
     for (final r in _reports) {
+      final att = _attendanceMap[_attendanceKey(r)];
+      final checkInStr = att?.checkIn != null ? timeFormat.format(att!.checkIn!) : '—';
+      final checkOutStr = att?.checkOut != null ? timeFormat.format(att!.checkOut!) : '—';
       doc.addPage(
-        pw.MultiPage(
+        pw.Page(
           theme: theme,
           pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(24),
-          build: (context) => [
-            pw.Header(
-              level: 0,
-              child: pw.Text(
-                'تقرير يومي - ${r.userName} - ${dateFormat.format(r.reportDate)}',
-                style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
-              ),
+          margin: const pw.EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+          build: (ctx) => pw.Directionality(
+            textDirection: pw.TextDirection.rtl,
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                if (logoImage != null)
+                  pw.Center(
+                    child: pw.Container(
+                      height: 56,
+                      margin: const pw.EdgeInsets.only(bottom: 12),
+                      child: pw.Image(logoImage!, fit: pw.BoxFit.contain),
+                    ),
+                  ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(vertical: 12),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.green50,
+                    borderRadius: pw.BorderRadius.circular(8),
+                    border: pw.Border.all(color: PdfColors.green800),
+                  ),
+                  child: pw.Center(
+                    child: pw.Text(
+                      'التقرير اليومي | Daily Report',
+                      textDirection: pw.TextDirection.rtl,
+                      style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.green900),
+                    ),
+                  ),
+                ),
+                pw.SizedBox(height: 16),
+                _pdfSectionTitle('بيانات التقرير | Report Data'),
+                pw.SizedBox(height: 6),
+                _pdfRow('المهندس | Engineer', r.userName),
+                _pdfRow('موعد الحضور | Check-in', checkInStr),
+                _pdfRow('موعد الانصراف | Check-out', checkOutStr),
+                _pdfRow('التاريخ | Date', dateFormat.format(r.reportDate)),
+                _pdfRow('المشروع | Project', r.projectName ?? '—'),
+                _pdfRow('مكان العمل | Work Place', r.workPlace),
+                pw.SizedBox(height: 14),
+                _pdfSectionTitle('تفاصيل الأعمال | Work Details'),
+                pw.SizedBox(height: 6),
+                _pdfRow('تقرير الأعمال | Work Report', r.workReport),
+                _pdfRow('ما تم تنفيذه اليوم | Executed Today', r.executedToday),
+                _pdfRow('المشرف | Supervisor', r.supervisorName),
+                _pdfRow('المقاول | Contractor', r.contractorName),
+                _pdfRow('عدد العمال | Workers Count', r.workersCount),
+                _pdfRow('خطة الغد | Tomorrow Plan', r.tomorrowPlan),
+                if (r.notes.isNotEmpty) _pdfRow('ملاحظات | Notes', r.notes),
+                pw.SizedBox(height: 14),
+                _pdfSectionTitle('الخامات والكميات | Materials & Quantities'),
+                pw.SizedBox(height: 6),
+                pw.Table(
+                  border: pw.TableBorder.all(width: 0.5),
+                  columnWidths: {0: const pw.FlexColumnWidth(2), 1: const pw.FlexColumnWidth(1), 2: const pw.FlexColumnWidth(1)},
+                  children: [
+                    pw.TableRow(
+                      decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                      children: [
+                        _pdfCell('الخامة | Material', isHeader: true),
+                        _pdfCell('الكمية | Qty', isHeader: true),
+                        _pdfCell('الوحدة | Unit', isHeader: true),
+                      ],
+                    ),
+                    ...List.generate(5, (i) {
+                      final m = r.materials[i];
+                      return pw.TableRow(
+                        children: [
+                          _pdfCell(m.materialName.isEmpty ? '—' : m.materialName, isHeader: false),
+                          _pdfCell(m.quantity, isHeader: false),
+                          _pdfCell(m.unit, isHeader: false),
+                        ],
+                      );
+                    }),
+                  ],
+                ),
+                pw.SizedBox(height: 14),
+                _pdfSectionTitle('المصروفات | Expenses'),
+                pw.SizedBox(height: 6),
+                pw.Table(
+                  border: pw.TableBorder.all(width: 0.5),
+                  columnWidths: {0: const pw.FlexColumnWidth(2), 1: const pw.FlexColumnWidth(1.2)},
+                  children: [
+                    pw.TableRow(
+                      decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                      children: [
+                        _pdfCell('البيان | Description', isHeader: true),
+                        _pdfCell('المبلغ | Amount', isHeader: true),
+                      ],
+                    ),
+                    ...List.generate(4, (i) {
+                      final e = r.expenses[i];
+                      return pw.TableRow(
+                        children: [
+                          _pdfCell(e.description.isEmpty ? '—' : e.description, isHeader: false),
+                          _pdfCell(e.amount, isHeader: false),
+                        ],
+                      );
+                    }),
+                  ],
+                ),
+              ],
             ),
-            pw.Paragraph(text: 'المشروع: ${r.projectName ?? "-"}'),
-            pw.Paragraph(text: 'مكان العمل: ${r.workPlace}'),
-            pw.Paragraph(text: 'تقرير الأعمال: ${r.workReport}'),
-            pw.Paragraph(text: 'ما تم تنفيذه اليوم: ${r.executedToday}'),
-            pw.Paragraph(text: 'المشرف: ${r.supervisorName}'),
-            pw.Paragraph(text: 'المقاول: ${r.contractorName}'),
-            pw.Paragraph(text: 'عدد العمال: ${r.workersCount}'),
-            pw.Paragraph(text: 'خطة الغد: ${r.tomorrowPlan}'),
-            if (r.notes.isNotEmpty) pw.Paragraph(text: 'ملاحظات: ${r.notes}'),
-            pw.SizedBox(height: 12),
-            pw.Text('الخامات والكميات', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-            ...r.materials.where((m) => m.materialName.isNotEmpty).map((m) => pw.Padding(
-                  padding: const pw.EdgeInsets.only(right: 12),
-                  child: pw.Text('${m.materialName} - ${m.quantity} ${m.unit}'),
-                )),
-            pw.SizedBox(height: 12),
-            pw.Text('المصروفات', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-            ...r.expenses.where((e) => e.description.isNotEmpty || e.amount.isNotEmpty).map((e) => pw.Padding(
-                  padding: const pw.EdgeInsets.only(right: 12),
-                  child: pw.Text('${e.description} - ${e.amount}'),
-                )),
-          ],
+          ),
         ),
       );
     }
@@ -142,6 +236,58 @@ class _ReportsScreenState extends State<ReportsScreen> {
     await Printing.sharePdf(
       bytes: bytes,
       filename: 'تقارير_يومية_${dateFromStr}_${dateToStr}.pdf',
+    );
+  }
+
+  pw.Widget _pdfSectionTitle(String text) {
+    return pw.Align(
+      alignment: pw.Alignment.centerRight,
+      child: pw.Text(
+        text,
+        textDirection: pw.TextDirection.rtl,
+        style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.green800),
+      ),
+    );
+  }
+
+  pw.Widget _pdfRow(String label, String value) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 6),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.SizedBox(
+            width: 180,
+            child: pw.Text(
+              label,
+              textDirection: pw.TextDirection.rtl,
+              style: pw.TextStyle(fontSize: 10, color: PdfColors.grey800),
+            ),
+          ),
+          pw.Expanded(
+            child: pw.Text(
+              value.isEmpty ? '—' : value,
+              textDirection: pw.TextDirection.rtl,
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _pdfCell(String text, {required bool isHeader}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: pw.Text(
+        text,
+        textDirection: pw.TextDirection.rtl,
+        style: pw.TextStyle(
+          fontSize: 10,
+          fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal,
+          color: isHeader ? PdfColors.green900 : PdfColors.black,
+        ),
+      ),
     );
   }
 
@@ -249,7 +395,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 ),
               )
             else
-              ..._reports.map((r) => _ReportCard(report: r)),
+              ..._reports.map((r) => _ReportCard(
+                    report: r,
+                    checkIn: _attendanceMap[_attendanceKey(r)]?.checkIn,
+                    checkOut: _attendanceMap[_attendanceKey(r)]?.checkOut,
+                  )),
             const SizedBox(height: 32),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -314,12 +464,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
 class _ReportCard extends StatelessWidget {
   final DailyReportData report;
+  final DateTime? checkIn;
+  final DateTime? checkOut;
 
-  const _ReportCard({required this.report});
+  const _ReportCard({required this.report, this.checkIn, this.checkOut});
 
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('yyyy/MM/dd', 'ar');
+    final timeFormat = DateFormat('hh:mm a', 'ar');
+    final checkInStr = checkIn != null ? timeFormat.format(checkIn!) : '—';
+    final checkOutStr = checkOut != null ? timeFormat.format(checkOut!) : '—';
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
@@ -332,9 +487,15 @@ class _ReportCard extends StatelessWidget {
             Text(dateFormat.format(report.reportDate), style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
           ],
         ),
-        subtitle: report.projectName != null && report.projectName!.isNotEmpty
-            ? Text(report.projectName!, style: TextStyle(fontSize: 13, color: Colors.grey.shade700))
-            : null,
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (report.projectName != null && report.projectName!.isNotEmpty)
+              Text(report.projectName!, style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+            Text('حضور: $checkInStr  |  انصراف: $checkOutStr', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+          ],
+        ),
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
