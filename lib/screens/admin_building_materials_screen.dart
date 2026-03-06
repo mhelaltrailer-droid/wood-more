@@ -24,6 +24,7 @@ class _AdminBuildingMaterialsScreenState extends State<AdminBuildingMaterialsScr
   List<ProjectModel> _projects = [];
   List<ZoneModel> _zones = [];
   List<BuildingModel> _buildings = [];
+  List<String> _materials = [];
   ProjectModel? _selectedProject;
   ZoneModel? _selectedZone;
   BuildingModel? _selectedBuilding;
@@ -38,8 +39,12 @@ class _AdminBuildingMaterialsScreenState extends State<AdminBuildingMaterialsScr
 
   Future<void> _loadProjects() async {
     final list = await _db.getProjects();
+    final materials = await _db.getMaterials();
     if (!mounted) return;
-    setState(() => _projects = list);
+    setState(() {
+      _projects = list;
+      _materials = materials;
+    });
   }
 
   Future<void> _loadZones() async {
@@ -78,7 +83,9 @@ class _AdminBuildingMaterialsScreenState extends State<AdminBuildingMaterialsScr
 
   Future<void> _showForm([BuildingMaterialModel? item]) async {
     if (_selectedBuilding == null) return;
-    final nameC = TextEditingController(text: item?.materialName ?? '');
+    String? selectedMaterial = (item?.materialName != null && item!.materialName.isNotEmpty && _materials.contains(item.materialName))
+        ? item.materialName
+        : null;
     final lengthC = TextEditingController(text: item?.length ?? '');
     final piecesC = TextEditingController(text: item?.piecesCount ?? '');
     final totalLengthC = TextEditingController(text: item?.totalLength ?? '');
@@ -93,7 +100,15 @@ class _AdminBuildingMaterialsScreenState extends State<AdminBuildingMaterialsScr
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameC, decoration: const InputDecoration(labelText: 'الخامة'), textDirection: TextDirection.ltr),
+                DropdownButtonFormField<String>(
+                  value: selectedMaterial,
+                  decoration: const InputDecoration(labelText: 'الخامة'),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('— اختر الخامة —')),
+                    ..._materials.map((s) => DropdownMenuItem(value: s, child: Text(s))),
+                  ],
+                  onChanged: (v) => setDialog(() => selectedMaterial = v),
+                ),
                 const SizedBox(height: 12),
                 TextField(controller: lengthC, decoration: const InputDecoration(labelText: 'الطول'), keyboardType: TextInputType.number, textDirection: TextDirection.ltr),
                 const SizedBox(height: 12),
@@ -127,8 +142,11 @@ class _AdminBuildingMaterialsScreenState extends State<AdminBuildingMaterialsScr
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
             FilledButton(
               onPressed: () async {
-                final name = nameC.text.trim();
-                if (name.isEmpty) return;
+                final name = selectedMaterial?.trim() ?? '';
+                if (name.isEmpty) {
+                  if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('اختر الخامة')));
+                  return;
+                }
                 final imagePath = imageC.text.trim().isEmpty ? null : imageC.text.trim();
                 Navigator.pop(ctx);
                 try {

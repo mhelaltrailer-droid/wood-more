@@ -45,6 +45,27 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   bool get _canSubmit => _selectedProject != null && _selectedType != null;
 
+  Future<void> _requestLocationAndSetType(String type) async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+    final granted = await LocationService.requestPermissionIfNeeded();
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+    if (!granted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'الموقع مطلوب لتسجيل الحضور والانصراف. يرجى السماح بالوصول للموقع من إعدادات التطبيق.',
+          ),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 5),
+        ),
+      );
+      return;
+    }
+    setState(() => _selectedType = type);
+  }
+
   Future<void> _submit() async {
     if (!_canSubmit || _isLoading) return;
 
@@ -56,6 +77,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     try {
       final now = DateTime.now();
       final location = await LocationService.getCurrentLocation();
+
+      if (!LocationService.looksLikeCoordinates(location)) {
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'الموقع مطلوب لتسجيل الحضور والانصراف. يرجى السماح بالوصول للموقع ثم المحاولة مرة أخرى.';
+            _isLoading = false;
+          });
+        }
+        return;
+      }
 
       final record = AttendanceRecordModel(
         id: 0,
@@ -171,7 +202,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: projectSelected && !_isLoading
-                        ? () => setState(() => _selectedType = 'check_in')
+                        ? () => _requestLocationAndSetType('check_in')
                         : null,
                     icon: const Icon(Icons.login),
                     label: const Text('CHECK-IN'),
@@ -187,7 +218,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: projectSelected && !_isLoading
-                        ? () => setState(() => _selectedType = 'check_out')
+                        ? () => _requestLocationAndSetType('check_out')
                         : null,
                     icon: const Icon(Icons.logout),
                     label: const Text('CHECK-OUT'),

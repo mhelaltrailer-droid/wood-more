@@ -9,6 +9,7 @@ import '../models/building_model.dart';
 import '../models/supervisor_model.dart';
 import '../models/contractor_model.dart';
 import '../models/project_stock_model.dart';
+import '../models/project_stock_ledger_model.dart';
 import '../models/unit_model.dart';
 import '../models/building_material_model.dart';
 import '../models/building_cutlist_model.dart';
@@ -26,6 +27,7 @@ class WebStorageService {
   static const _supervisorsKey = 'wood_supervisors';
   static const _contractorsKey = 'wood_contractors';
   static const _projectStockKey = 'wood_project_stock';
+  static const _projectStockLedgerKey = 'wood_project_stock_ledger';
   static const _unitsKey = 'wood_units';
   static const _buildingMaterialsKey = 'wood_building_materials';
   static const _buildingCutlistKey = 'wood_building_cutlist';
@@ -37,20 +39,22 @@ class WebStorageService {
   Future<void> _initData() async {
     final prefs = await _prefs;
     if (prefs.getString(_usersKey) == null) {
+      const defaultPassword = '0000';
       final users = [
-        {'id': 1, 'name': 'Hany', 'email': 'hany.samir1708@gmail.com', 'role': 'site_engineer'},
-        {'id': 2, 'name': 'Emam', 'email': 'amirelazab46@gmail.com', 'role': 'site_engineer'},
-        {'id': 3, 'name': 'Mansur', 'email': 'saedm0566@gmail.com', 'role': 'site_engineer'},
-        {'id': 4, 'name': 'Mahmud', 'email': 'mahmoudsiko630@gmail.com', 'role': 'site_engineer'},
-        {'id': 5, 'name': 'Abdhusseny', 'email': 'abdallaelhosseny1011@gmail.com', 'role': 'site_engineer'},
-        {'id': 6, 'name': 'Hamza', 'email': 'hamzamhamad704@gmail.com', 'role': 'site_engineer'},
-        {'id': 7, 'name': 'Gohary', 'email': 'mohamedelgohary371@gmail.com', 'role': 'site_engineer'},
-        {'id': 8, 'name': 'Amr', 'email': 'amrelshabrawy55@gmail.com', 'role': 'site_engineer'},
-        {'id': 9, 'name': 'Hassan', 'email': 'mouhammed.helal@gmail.com', 'role': 'site_engineer'},
-        {'id': 10, 'name': 'Helal', 'email': 'mouhamedhelal.cor@gmail.com', 'role': 'site_engineer_manager'},
-        {'id': 11, 'name': 'Shams', 'email': 'islam.shams2050@gmail.com', 'role': 'site_engineer_manager'},
-        {'id': 12, 'name': 'Abdrhman', 'email': 'AbdelrhmanEllaithy828@gmail.com', 'role': 'site_engineer_manager'},
-        {'id': 13, 'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin'},
+        {'id': 1, 'name': 'Hany', 'email': 'hany.samir1708@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+        {'id': 2, 'name': 'Emam', 'email': 'amirelazab46@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+        {'id': 3, 'name': 'Mansur', 'email': 'saedm0566@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+        {'id': 4, 'name': 'Mahmud', 'email': 'mahmoudsiko630@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+        {'id': 5, 'name': 'Abdhusseny', 'email': 'abdallaelhosseny1011@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+        {'id': 6, 'name': 'Hamza', 'email': 'hamzamhamad704@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+        {'id': 7, 'name': 'Gohary', 'email': 'mohamedelgohary371@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+        {'id': 8, 'name': 'Amr', 'email': 'amrelshabrawy55@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+        {'id': 9, 'name': 'Hassan', 'email': 'mouhammed.helal@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+        {'id': 10, 'name': 'Helal', 'email': 'mouhamedhelal.cor@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
+        {'id': 11, 'name': 'Shams', 'email': 'islam.shams2050@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
+        {'id': 12, 'name': 'Abdrhman', 'email': 'AbdelrhmanEllaithy828@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
+        {'id': 13, 'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin', 'password': defaultPassword},
+        {'id': 14, 'name': 'Helal', 'email': 'h@h.com', 'role': 'app_admin', 'password': '123'},
       ];
       await prefs.setString(_usersKey, jsonEncode(users));
     } else {
@@ -58,7 +62,13 @@ class WebStorageService {
       final hasAdmin = list.any((e) => ((e as Map)['email'] as String).toLowerCase() == 'mouhammedhelal@gmail.com');
       if (!hasAdmin) {
         final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-        list.add({'id': nextId, 'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin'});
+        list.add({'id': nextId, 'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin', 'password': '0000'});
+        await prefs.setString(_usersKey, jsonEncode(list));
+      }
+      final hasHelal = list.any((e) => ((e as Map)['email'] as String).toLowerCase() == 'h@h.com');
+      if (!hasHelal) {
+        final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+        list.add({'id': nextId, 'name': 'Helal', 'email': 'h@h.com', 'role': 'app_admin', 'password': '123'});
         await prefs.setString(_usersKey, jsonEncode(list));
       }
     }
@@ -91,6 +101,7 @@ class WebStorageService {
     if (prefs.getString(_supervisorsKey) == null) await prefs.setString(_supervisorsKey, jsonEncode([]));
     if (prefs.getString(_contractorsKey) == null) await prefs.setString(_contractorsKey, jsonEncode([]));
     if (prefs.getString(_projectStockKey) == null) await prefs.setString(_projectStockKey, jsonEncode([]));
+    if (prefs.getString(_projectStockLedgerKey) == null) await prefs.setString(_projectStockLedgerKey, jsonEncode([]));
     if (prefs.getString(_unitsKey) == null) await prefs.setString(_unitsKey, jsonEncode([]));
     if (prefs.getString(_buildingMaterialsKey) == null) await prefs.setString(_buildingMaterialsKey, jsonEncode([]));
     if (prefs.getString(_buildingCutlistKey) == null) await prefs.setString(_buildingCutlistKey, jsonEncode([]));
@@ -167,6 +178,24 @@ class WebStorageService {
       final current = await getEngineerBalance(report.userId);
       await setEngineerBalance(report.userId, current - total);
     }
+
+    // خصم الخامات من مخزن المشروع المختار في التقرير
+    if (report.projectId != null) {
+      for (final m in report.materials) {
+        if (m.materialName.isEmpty || m.quantity.isEmpty) continue;
+        final qty = double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+        if (qty <= 0) continue;
+        final unit = m.unit.isEmpty ? 'متر' : m.unit;
+        await deductProjectStock(
+          report.projectId!,
+          m.materialName,
+          unit,
+          qty,
+          report.userName,
+          report.reportDate,
+        );
+      }
+    }
   }
 
   Future<double> getEngineerBalance(int userId) async {
@@ -189,15 +218,15 @@ class WebStorageService {
     await prefs.setString(_engineerBalanceKey, jsonEncode(newList));
   }
 
-  Future<void> addCustody(int userId, double amount, String note) async {
+  Future<void> addCustody(int userId, double amount, String note, [String? documentPath]) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_engineerCustodyKey)!) as List;
     final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'user_id': userId, 'amount': amount, 'created_at': DateTime.now().toIso8601String(), 'note': note});
+    list.add({'id': nextId, 'user_id': userId, 'amount': amount, 'created_at': DateTime.now().toIso8601String(), 'note': note, 'document_path': documentPath});
     await prefs.setString(_engineerCustodyKey, jsonEncode(list));
     final current = await getEngineerBalance(userId);
-    await setEngineerBalance(userId, current + amount);
+    await setEngineerBalance(userId, current - amount);
   }
 
   Future<List<Map<String, dynamic>>> getCustodyRecords({int? userId}) async {
@@ -207,7 +236,7 @@ class WebStorageService {
     var result = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     if (userId != null) result = result.where((e) => e['user_id'] == userId).toList();
     result.sort((a, b) => (b['created_at'] as String).compareTo(a['created_at'] as String));
-    return result.map((e) => {'id': e['id'], 'user_id': e['user_id'], 'amount': (e['amount'] as num).toDouble(), 'created_at': e['created_at'], 'note': e['note']}).toList();
+    return result.map((e) => {'id': e['id'], 'user_id': e['user_id'], 'amount': (e['amount'] as num).toDouble(), 'created_at': e['created_at'], 'note': e['note'], 'document_path': e['document_path']}).toList();
   }
 
   Future<List<UserModel>> getSiteEngineers() async {
@@ -231,6 +260,23 @@ class WebStorageService {
       if ((m['email'] as String).toLowerCase() == emailLower) {
         return UserModel.fromMap(Map<String, dynamic>.from(m as Map));
       }
+    }
+    return null;
+  }
+
+  /// التحقق من تسجيل الدخول (بريد + كلمة سر)، كلمة السر الافتراضية المؤقتة: 0000
+  Future<UserModel?> validateLogin(String email, String password) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_usersKey)!) as List;
+    final emailLower = email.trim().toLowerCase();
+    final pwd = password.trim();
+    for (final m in list) {
+      final map = Map<String, dynamic>.from(m as Map);
+      if ((map['email'] as String).toLowerCase() != emailLower) continue;
+      final stored = (map['password']?.toString() ?? '0000').trim();
+      if (stored.isEmpty || pwd != stored) return null;
+      return UserModel.fromMap(map);
     }
     return null;
   }
@@ -277,6 +323,21 @@ class WebStorageService {
     return list;
   }
 
+  /// موعد الحضور والانصراف لمستخدم في تاريخ معين (نفس اليوم فقط)
+  Future<({DateTime? checkIn, DateTime? checkOut})> getAttendanceForUserOnDate(int userId, DateTime date) async {
+    final list = await getAttendanceRecordsByUser(userId);
+    final dayStart = DateTime(date.year, date.month, date.day);
+    final dayEnd = DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+    DateTime? checkIn;
+    DateTime? checkOut;
+    for (final r in list) {
+      if (r.dateTime.isBefore(dayStart) || r.dateTime.isAfter(dayEnd)) continue;
+      if (r.isCheckIn && (checkIn == null || r.dateTime.isBefore(checkIn))) checkIn = r.dateTime;
+      if (r.isCheckOut && (checkOut == null || r.dateTime.isAfter(checkOut))) checkOut = r.dateTime;
+    }
+    return (checkIn: checkIn, checkOut: checkOut);
+  }
+
   Future<List<DailyReportData>> getDailyReports({
     required DateTime dateFrom,
     required DateTime dateTo,
@@ -310,25 +371,40 @@ class WebStorageService {
     return list.map((m) => UserModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()..sort((a, b) => a.name.compareTo(b.name));
   }
 
-  Future<int> addUser(String name, String email, String role) async {
+  Future<int> addUser(String name, String email, String password, String role) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_usersKey)!) as List;
     final nextId = list.isEmpty ? 1 : (list.map((e) => e['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'name': name, 'email': email.trim().toLowerCase(), 'role': role});
+    final pwd = password.trim().isEmpty ? '0000' : password.trim();
+    list.add({
+      'id': nextId,
+      'name': name,
+      'email': email.trim().toLowerCase(),
+      'role': role,
+      'password': pwd,
+    });
     await prefs.setString(_usersKey, jsonEncode(list));
     return nextId;
   }
 
-  Future<void> updateUser(int id, String name, String email, String role) async {
+  Future<void> updateUser(int id, String name, String email, String role, [String? password]) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_usersKey)!) as List;
     for (var i = 0; i < list.length; i++) {
-      if ((list[i] as Map)['id'] == id) {
-        list[i] = {'id': id, 'name': name, 'email': email.trim().toLowerCase(), 'role': role};
-        break;
-      }
+      final map = Map<String, dynamic>.from(list[i] as Map);
+      if (map['id'] != id) continue;
+      final existingPassword = map['password']?.toString().trim() ?? '0000';
+      final pwd = (password != null && password.trim().isNotEmpty) ? password.trim() : existingPassword;
+      list[i] = {
+        'id': id,
+        'name': name,
+        'email': email.trim().toLowerCase(),
+        'role': role,
+        'password': pwd.isEmpty ? '0000' : pwd,
+      };
+      break;
     }
     await prefs.setString(_usersKey, jsonEncode(list));
   }
@@ -493,6 +569,67 @@ class WebStorageService {
     final prefs = await _prefs;
     final list = (jsonDecode(prefs.getString(_projectStockKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
     await prefs.setString(_projectStockKey, jsonEncode(list));
+  }
+
+  Future<void> addProjectStockLedgerEntry({
+    required int projectId,
+    required String materialName,
+    required String unit,
+    required double quantityDelta,
+    required String type,
+    required String userName,
+    DateTime? createdAt,
+    int? userId,
+  }) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_projectStockLedgerKey)!) as List;
+    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    list.insert(0, {
+      'id': nextId,
+      'project_id': projectId,
+      'material_name': materialName,
+      'unit': unit,
+      'quantity_delta': quantityDelta,
+      'type': type,
+      'created_at': (createdAt ?? DateTime.now()).toIso8601String(),
+      'user_id': userId,
+      'user_name': userName,
+    });
+    await prefs.setString(_projectStockLedgerKey, jsonEncode(list));
+  }
+
+  Future<List<ProjectStockLedgerModel>> getStockLedger(int projectId, String materialName) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_projectStockLedgerKey)!) as List;
+    final filtered = list.where((e) => (e as Map)['project_id'] == projectId && (e)['material_name'] == materialName).toList();
+    return filtered.map((m) => ProjectStockLedgerModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  Future<bool> deductProjectStock(int projectId, String materialName, String unit, double quantity, String engineerName, DateTime reportDate) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_projectStockKey)!) as List;
+    final idx = list.indexWhere((e) => (e as Map)['project_id'] == projectId && e['material_name'] == materialName && e['unit'] == unit);
+    if (idx < 0) return false;
+    final row = Map<String, dynamic>.from(list[idx] as Map);
+    final current = double.tryParse((row['quantity'] as String).replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+    final newQty = current - quantity;
+    row['quantity'] = newQty.toStringAsFixed(2);
+    list[idx] = row;
+    await prefs.setString(_projectStockKey, jsonEncode(list));
+    await addProjectStockLedgerEntry(
+      projectId: projectId,
+      materialName: materialName,
+      unit: unit,
+      quantityDelta: -quantity,
+      type: 'deduct_report',
+      userName: engineerName,
+      createdAt: reportDate,
+    );
+    return true;
   }
 
   Future<List<UnitModel>> getUnits(int buildingId) async {

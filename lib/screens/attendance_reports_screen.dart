@@ -44,64 +44,76 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
     }
     final dateFormat = DateFormat('yyyy/MM/dd', 'ar');
     final timeFormat = DateFormat('hh:mm a', 'ar');
+    final fontBase = await PdfGoogleFonts.tajawalRegular();
+    final fontBold = await PdfGoogleFonts.tajawalBold();
+    final theme = pw.ThemeData.withFont(base: fontBase, bold: fontBold);
     final doc = pw.Document();
     doc.addPage(
       pw.MultiPage(
+        theme: theme,
         pageFormat: PdfPageFormat.a4.landscape,
         margin: const pw.EdgeInsets.all(24),
-        header: (context) => pw.Padding(
-          padding: const pw.EdgeInsets.only(bottom: 12),
-          child: pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(
-                'تقرير الحضور والانصراف - Wood & More',
-                style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
-              ),
-              pw.Text(
-                'تاريخ التقرير: ${dateFormat.format(DateTime.now())}',
-                style: const pw.TextStyle(fontSize: 10),
-              ),
-            ],
+        header: (context) => pw.Directionality(
+          textDirection: pw.TextDirection.rtl,
+          child: pw.Padding(
+            padding: const pw.EdgeInsets.only(bottom: 12),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'تقرير الحضور والانصراف - Wood & More',
+                  textDirection: pw.TextDirection.rtl,
+                  style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+                ),
+                pw.Text(
+                  'تاريخ التقرير: ${dateFormat.format(DateTime.now())}',
+                  textDirection: pw.TextDirection.rtl,
+                  style: const pw.TextStyle(fontSize: 10),
+                ),
+              ],
+            ),
           ),
         ),
         build: (context) => [
-          pw.Table(
-            border: pw.TableBorder.all(width: 0.5),
-            columnWidths: {
-              0: const pw.FlexColumnWidth(1.2),
-              1: const pw.FlexColumnWidth(0.8),
-              2: const pw.FlexColumnWidth(1),
-              3: const pw.FlexColumnWidth(1),
-              4: const pw.FlexColumnWidth(1.5),
-              5: const pw.FlexColumnWidth(2),
-              6: const pw.FlexColumnWidth(1.5),
-            },
-            children: [
-              pw.TableRow(
-                decoration: const pw.BoxDecoration(color: PdfColors.grey300),
-                children: [
-                  _cell('المهندس', isHeader: true),
-                  _cell('نوع التسجيل', isHeader: true),
-                  _cell('التاريخ', isHeader: true),
-                  _cell('الوقت', isHeader: true),
-                  _cell('المشروع', isHeader: true),
-                  _cell('الموقع', isHeader: true),
-                  _cell('ملاحظات', isHeader: true),
-                ],
-              ),
-              ..._records.map((r) => pw.TableRow(
-                    children: [
-                      _cell(r.userName),
-                      _cell(r.isCheckIn ? 'حضور' : 'انصراف'),
-                      _cell(dateFormat.format(r.dateTime)),
-                      _cell(timeFormat.format(r.dateTime)),
-                      _cell(r.projectName ?? '-'),
-                      _cell(r.location),
-                      _cell(r.notes ?? '-'),
-                    ],
-                  )),
-            ],
+          pw.Directionality(
+            textDirection: pw.TextDirection.rtl,
+            child: pw.Table(
+              border: pw.TableBorder.all(width: 0.5),
+              columnWidths: {
+                0: const pw.FlexColumnWidth(1.2),
+                1: const pw.FlexColumnWidth(0.8),
+                2: const pw.FlexColumnWidth(1),
+                3: const pw.FlexColumnWidth(1),
+                4: const pw.FlexColumnWidth(1.5),
+                5: const pw.FlexColumnWidth(2),
+                6: const pw.FlexColumnWidth(1.5),
+              },
+              children: [
+                pw.TableRow(
+                  decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                  children: [
+                    _cell('المهندس', isHeader: true),
+                    _cell('نوع التسجيل', isHeader: true),
+                    _cell('التاريخ', isHeader: true),
+                    _cell('الوقت', isHeader: true),
+                    _cell('المشروع', isHeader: true),
+                    _cell('الموقع', isHeader: true),
+                    _cell('ملاحظات', isHeader: true),
+                  ],
+                ),
+                ..._records.map((r) => pw.TableRow(
+                      children: [
+                        _cell(r.userName),
+                        _cell(r.isCheckIn ? 'حضور' : 'انصراف'),
+                        _cell(dateFormat.format(r.dateTime)),
+                        _cell(timeFormat.format(r.dateTime)),
+                        _cell(r.projectName ?? '-'),
+                        _cell(r.location),
+                        _cell(r.notes ?? '-'),
+                      ],
+                    )),
+              ],
+            ),
           ),
         ],
       ),
@@ -115,6 +127,7 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
       padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 8),
       child: pw.Text(
         text,
+        textDirection: pw.TextDirection.rtl,
         style: pw.TextStyle(fontSize: isHeader ? 10 : 9, fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal),
         maxLines: 2,
         overflow: pw.TextOverflow.clip,

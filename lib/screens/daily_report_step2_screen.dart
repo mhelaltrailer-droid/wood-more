@@ -109,73 +109,103 @@ class _MaterialRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final narrow = MediaQuery.sizeOf(context).width < 400;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text('الخامة $index', style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: DropdownButtonFormField<String>(
-                    value: item.materialName.isEmpty || !materialsList.contains(item.materialName) ? null : item.materialName,
-                    decoration: const InputDecoration(
-                      labelText: 'الخامة',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                    items: [
-                      const DropdownMenuItem(value: null, child: Text('—')),
-                      ...materialsList.map((s) => DropdownMenuItem(value: s, child: Text(s))),
-                    ],
-                    onChanged: (s) {
-                      item.materialName = s ?? '';
-                      onChanged();
-                    },
+            if (narrow) ...[
+              _materialDropdown(),
+              const SizedBox(height: 10),
+              _quantityField(),
+              const SizedBox(height: 10),
+              _unitDropdown(),
+            ] else
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: _materialDropdown(),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    initialValue: item.quantity,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'الكمية',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (v) => item.quantity = v,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _quantityField(),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: item.unit.isEmpty ? null : (materialUnits.contains(item.unit) ? item.unit : null),
-                    decoration: const InputDecoration(
-                      labelText: 'الوحدة',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                    items: [
-                      const DropdownMenuItem(value: null, child: Text('—')),
-                      ...materialUnits.map((u) => DropdownMenuItem(value: u, child: Text(u))),
-                    ],
-                    onChanged: (u) {
-                      item.unit = u ?? '';
-                      onChanged();
-                    },
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _unitDropdown(),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _materialDropdown() {
+    return DropdownButtonFormField<String>(
+      value: item.materialName.isEmpty || !materialsList.contains(item.materialName) ? null : item.materialName,
+      decoration: const InputDecoration(
+        labelText: 'الخامة',
+        isDense: true,
+        border: OutlineInputBorder(),
+      ),
+      isExpanded: true,
+      selectedItemBuilder: (context) => [
+        const Text('—', overflow: TextOverflow.ellipsis, maxLines: 1),
+        ...materialsList.map((s) => Text(s, overflow: TextOverflow.ellipsis, maxLines: 1)),
+      ],
+      items: [
+        const DropdownMenuItem(value: null, child: Text('—')),
+        ...materialsList.map((s) => DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis, maxLines: 1))),
+      ],
+      onChanged: (s) {
+        item.materialName = s ?? '';
+        onChanged();
+      },
+    );
+  }
+
+  Widget _quantityField() {
+    return TextFormField(
+      initialValue: item.quantity,
+      keyboardType: TextInputType.number,
+      decoration: const InputDecoration(
+        labelText: 'الكمية',
+        isDense: true,
+        border: OutlineInputBorder(),
+      ),
+      onChanged: (v) => item.quantity = v,
+    );
+  }
+
+  Widget _unitDropdown() {
+    return DropdownButtonFormField<String>(
+      value: item.unit.isEmpty ? null : (materialUnits.contains(item.unit) ? item.unit : null),
+      decoration: const InputDecoration(
+        labelText: 'الوحدة',
+        isDense: true,
+        border: OutlineInputBorder(),
+      ),
+      isExpanded: true,
+      selectedItemBuilder: (context) => [
+        const Text('—', overflow: TextOverflow.ellipsis, maxLines: 1),
+        ...materialUnits.map((u) => Text(u, overflow: TextOverflow.ellipsis, maxLines: 1)),
+      ],
+      items: [
+        const DropdownMenuItem(value: null, child: Text('—')),
+        ...materialUnits.map((u) => DropdownMenuItem(value: u, child: Text(u, overflow: TextOverflow.ellipsis, maxLines: 1))),
+      ],
+      onChanged: (u) {
+        item.unit = u ?? '';
+        onChanged();
+      },
     );
   }
 }

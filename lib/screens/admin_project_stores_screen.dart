@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../models/project_model.dart';
+import 'package:intl/intl.dart';
 import '../models/project_stock_model.dart';
+import '../models/project_stock_ledger_model.dart';
 import '../models/daily_report_model.dart';
 import '../services/storage_service.dart';
 
@@ -55,7 +57,9 @@ class _AdminProjectStoresScreenState extends State<AdminProjectStoresScreen> {
 
   Future<void> _showForm([ProjectStockModel? item]) async {
     if (_selectedProject == null) return;
-    final materialC = TextEditingController(text: item?.materialName ?? '');
+    String? selectedMaterial = (item?.materialName != null && item!.materialName.isNotEmpty && _materials.contains(item.materialName))
+        ? item.materialName
+        : null;
     final qtyC = TextEditingController(text: item?.quantity ?? '');
     String unit = item?.unit ?? (materialUnits.isNotEmpty ? materialUnits.first : '');
     await showDialog(
@@ -67,9 +71,17 @@ class _AdminProjectStoresScreenState extends State<AdminProjectStoresScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: materialC, decoration: const InputDecoration(labelText: 'اسم الخامة'), textDirection: TextDirection.ltr),
+                DropdownButtonFormField<String>(
+                  value: selectedMaterial,
+                  decoration: const InputDecoration(labelText: 'اسم الخامة'),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('— اختر الخامة —')),
+                    ..._materials.map((s) => DropdownMenuItem(value: s, child: Text(s))),
+                  ],
+                  onChanged: (v) => setDialog(() => selectedMaterial = v),
+                ),
                 const SizedBox(height: 12),
-                TextField(controller: qtyC, decoration: const InputDecoration(labelText: 'الكمية'), keyboardType: TextInputType.number, textDirection: TextDirection.ltr),
+                TextField(controller: qtyC, decoration: const InputDecoration(labelText: 'الكمية'), keyboardType: TextInputType.number),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   value: materialUnits.contains(unit) ? unit : (materialUnits.isNotEmpty ? materialUnits.first : null),
@@ -84,15 +96,26 @@ class _AdminProjectStoresScreenState extends State<AdminProjectStoresScreen> {
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
             FilledButton(
               onPressed: () async {
-                final name = materialC.text.trim();
+                final name = selectedMaterial?.trim() ?? '';
                 final qty = qtyC.text.trim();
-                if (name.isEmpty) return;
+                if (name.isEmpty) {
+                  if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('اختر الخامة')));
+                  return;
+                }
                 Navigator.pop(ctx);
                 try {
-                if (item == null)
+                final adminName = widget.admin.name;
+                if (item == null) {
                   await _db.addProjectStock(ProjectStockModel(id: 0, projectId: _selectedProject!.id, materialName: name, quantity: qty, unit: unit));
-                else
+                  final delta = double.tryParse(qty.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+                  if (delta != 0) await _db.addProjectStockLedgerEntry(projectId: _selectedProject!.id, materialName: name, unit: unit, quantityDelta: delta, type: 'add', userName: adminName);
+                } else {
+                  final oldQty = double.tryParse(item.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+                  final newQty = double.tryParse(qty.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
                   await _db.updateProjectStock(ProjectStockModel(id: item.id, projectId: item.projectId, materialName: name, quantity: qty, unit: unit));
+                  final delta = newQty - oldQty;
+                  if (delta != 0) await _db.addProjectStockLedgerEntry(projectId: item.projectId, materialName: name, unit: unit, quantityDelta: delta, type: 'edit', userName: adminName);
+                }
                 _loadStock();
                 if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحفظ'), backgroundColor: Colors.green));
                 } catch (e) {
@@ -103,6 +126,60 @@ class _AdminProjectStoresScreenState extends State<AdminProjectStoresScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _showLedger(ProjectStockModel s) async {
+    if (_selectedProject == null) return;
+    final list = await _db.getStockLedger(_selectedProject!.id, s.materialName);
+    if (!mounted) return;
+    final dateFormat = DateFormat('yyyy/MM/dd', 'ar');
+    final timeFormat = DateFormat('HH:mm', 'ar');
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('سجل الرصيد: ${s.materialName}'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: list.isEmpty
+              ? const Text('لا توجد حركات مسجلة لهذه الخامة.')
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(flex: 2, child: Text('التاريخ والوقت', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade700))),
+                        Expanded(child: Text('النوع', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade700))),
+                        Expanded(child: Text('الكمية', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade700))),
+                        Expanded(flex: 2, child: Text('اسم المستخدم', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade700))),
+                      ],
+                    ),
+                    const Divider(height: 16),
+                    ...list.map((e) {
+                      final typeLabel = e.type == 'add' ? 'إضافة' : e.type == 'edit' ? 'تعديل' : 'سحب (تقرير يومي)';
+                      final deltaStr = e.quantityDelta >= 0 ? '+${e.quantityDelta}' : '${e.quantityDelta}';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: Text('${dateFormat.format(e.createdAt)} ${timeFormat.format(e.createdAt)}', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+                            ),
+                            Expanded(child: Text(typeLabel, style: const TextStyle(fontWeight: FontWeight.w500))),
+                            Expanded(child: Text(deltaStr, style: TextStyle(color: e.quantityDelta >= 0 ? Colors.green.shade700 : Colors.red.shade700))),
+                            Expanded(flex: 2, child: Text(e.userName, style: const TextStyle(fontSize: 12))),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق'))],
       ),
     );
   }
@@ -154,8 +231,9 @@ class _AdminProjectStoresScreenState extends State<AdminProjectStoresScreen> {
                     title: Text(s.materialName),
                     subtitle: Text('${s.quantity} ${s.unit}'),
                     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                      IconButton(icon: const Icon(Icons.edit), onPressed: () => _showForm(s)),
-                      IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _delete(s)),
+                      IconButton(icon: const Icon(Icons.history), onPressed: () => _showLedger(s), tooltip: 'عرض السجل'),
+                      IconButton(icon: const Icon(Icons.edit), onPressed: () => _showForm(s), tooltip: 'تعديل'),
+                      IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _delete(s), tooltip: 'حذف'),
                     ]),
                   ),
                 )),
