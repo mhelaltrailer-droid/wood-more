@@ -27,9 +27,11 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
   final _workPlaceController = TextEditingController();
   final _workReportController = TextEditingController();
   final _executedTodayController = TextEditingController();
-  final _supervisorController = TextEditingController();
-  final _contractorController = TextEditingController();
   final _workersController = TextEditingController();
+  static const List<String> _supervisorOptions = ['Emam', 'Mansour', 'لايوجد مشرف', 'Ahmed'];
+  static const List<String> _contractorOptions = ['حسام حسن', 'ابراهيم النجار', 'لايوجد مقاول', 'ابراهيم حسن'];
+  String? _selectedSupervisor;
+  String? _selectedContractor;
   final _tomorrowPlanController = TextEditingController();
   final _notesController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -46,8 +48,8 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
     _workPlaceController.text = widget.report.workPlace;
     _workReportController.text = widget.report.workReport;
     _executedTodayController.text = widget.report.executedToday;
-    _supervisorController.text = widget.report.supervisorName;
-    _contractorController.text = widget.report.contractorName;
+    _selectedSupervisor = widget.report.supervisorName.isEmpty ? null : (_supervisorOptions.contains(widget.report.supervisorName) ? widget.report.supervisorName : null);
+    _selectedContractor = widget.report.contractorName.isEmpty ? null : (_contractorOptions.contains(widget.report.contractorName) ? widget.report.contractorName : null);
     _workersController.text = widget.report.workersCount;
     _tomorrowPlanController.text = widget.report.tomorrowPlan;
     _notesController.text = widget.report.notes;
@@ -58,8 +60,6 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
     _workPlaceController.dispose();
     _workReportController.dispose();
     _executedTodayController.dispose();
-    _supervisorController.dispose();
-    _contractorController.dispose();
     _workersController.dispose();
     _tomorrowPlanController.dispose();
     _notesController.dispose();
@@ -161,8 +161,8 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
       workPlace: _workPlaceController.text.trim(),
       workReport: _workReportController.text.trim(),
       executedToday: _executedTodayController.text.trim(),
-      supervisorName: _supervisorController.text.trim(),
-      contractorName: _contractorController.text.trim(),
+      supervisorName: _selectedSupervisor ?? '',
+      contractorName: _selectedContractor ?? '',
       workersCount: _workersController.text.trim(),
       tomorrowPlan: _tomorrowPlanController.text.trim(),
       documentPath: _documentPath,
@@ -241,20 +241,24 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
               validator: (v) => (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
             ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _supervisorController,
+            DropdownButtonFormField<String>(
+              value: _selectedSupervisor,
               decoration: const InputDecoration(
-                labelText: 'اسم المشرف',
+                labelText: 'المشرف',
                 border: OutlineInputBorder(),
               ),
+              items: _supervisorOptions.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+              onChanged: (v) => setState(() => _selectedSupervisor = v),
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _contractorController,
+            DropdownButtonFormField<String>(
+              value: _selectedContractor,
               decoration: const InputDecoration(
-                labelText: 'اسم المقاول',
+                labelText: 'المقاول',
                 border: OutlineInputBorder(),
               ),
+              items: _contractorOptions.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+              onChanged: (v) => setState(() => _selectedContractor = v),
             ),
             const SizedBox(height: 12),
             TextFormField(

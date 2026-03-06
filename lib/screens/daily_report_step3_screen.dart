@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../models/daily_report_model.dart';
@@ -53,7 +55,7 @@ class _DailyReportStep3ScreenState extends State<DailyReportStep3Screen> {
         padding: const EdgeInsets.all(20),
         children: [
           const Text(
-            'بيان الصرف وقيمة المبلغ (4 بنود)',
+            'بيان الصرف وقيمة المبلغ وإرفاق صورة إن وجد (4 بنود)',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
@@ -85,6 +87,40 @@ class _ExpenseRow extends StatelessWidget {
   final VoidCallback onChanged;
 
   const _ExpenseRow({required this.index, required this.item, required this.onChanged});
+
+  static String _mimeFromExtension(String? path) {
+    final ext = path?.split('.').last.toLowerCase() ?? '';
+    switch (ext) {
+      case 'png': return 'image/png';
+      case 'gif': return 'image/gif';
+      case 'webp': return 'image/webp';
+      default: return 'image/jpeg';
+    }
+  }
+
+  Future<void> _pickImage(BuildContext context, VoidCallback onChanged) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
+        allowMultiple: false,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.single;
+      final bytes = file.bytes;
+      if (bytes == null) return;
+      final mime = _mimeFromExtension(file.name);
+      item.imagePath = 'data:$mime;base64,${base64Encode(bytes)}';
+      onChanged();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تم إرفاق صورة: ${file.name}')));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -121,6 +157,39 @@ class _ExpenseRow extends StatelessWidget {
                 onChanged();
               },
             ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.photo_library, size: 20),
+              label: Text(item.imagePath != null && item.imagePath!.isNotEmpty ? 'تم إرفاق صورة' : 'إرفاق صورة (إن وجد)'),
+              onPressed: () => _pickImage(context, onChanged),
+            ),
+            if (item.imagePath != null && item.imagePath!.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  if (item.imagePath!.startsWith('data:') || item.imagePath!.startsWith('http'))
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        item.imagePath!,
+                        width: 64,
+                        height: 64,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.image, size: 64),
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.red),
+                    onPressed: () {
+                      item.imagePath = null;
+                      onChanged();
+                    },
+                    tooltip: 'إزالة الصورة',
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

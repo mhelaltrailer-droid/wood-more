@@ -35,7 +35,9 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
   Future<void> _showForm([UserModel? item]) async {
     final nameC = TextEditingController(text: item?.name ?? '');
     final emailC = TextEditingController(text: item?.email ?? '');
+    final passwordC = TextEditingController();
     String role = item?.role ?? 'site_engineer';
+    bool obscurePassword = true;
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -48,6 +50,20 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                 TextField(controller: nameC, decoration: const InputDecoration(labelText: 'الاسم'), textDirection: TextDirection.ltr),
                 const SizedBox(height: 12),
                 TextField(controller: emailC, decoration: const InputDecoration(labelText: 'البريد الإلكتروني'), keyboardType: TextInputType.emailAddress, textDirection: TextDirection.ltr),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passwordC,
+                  obscureText: obscurePassword,
+                  textDirection: TextDirection.ltr,
+                  decoration: InputDecoration(
+                    labelText: 'كلمة السر',
+                    hintText: item == null ? 'الافتراضية: 0000' : 'اتركها فارغة للإبقاء على الحالية',
+                    suffixIcon: IconButton(
+                      icon: Icon(obscurePassword ? Icons.visibility_off : Icons.visibility),
+                      onPressed: () => setDialog(() => obscurePassword = !obscurePassword),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   value: role,
@@ -68,16 +84,21 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
               onPressed: () async {
                 final name = nameC.text.trim();
                 final email = emailC.text.trim();
+                final password = passwordC.text;
                 if (name.isEmpty || email.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الاسم والبريد مطلوبان')));
+                  return;
+                }
+                if (item == null && password.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('أدخل كلمة السر للمستخدم الجديد')));
                   return;
                 }
                 Navigator.pop(ctx);
                 try {
                   if (item == null) {
-                    await _db.addUser(name, email, role);
+                    await _db.addUser(name, email, password.isEmpty ? '0000' : password, role);
                   } else {
-                    await _db.updateUser(item.id, name, email, role);
+                    await _db.updateUser(item.id, name, email, role, password.isEmpty ? null : password);
                   }
                   _load();
                   if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحفظ'), backgroundColor: Colors.green));

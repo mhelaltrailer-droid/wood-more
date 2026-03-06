@@ -8,6 +8,7 @@ import 'admin_dashboard_screen.dart';
 import 'finance_screen.dart';
 import 'engineer_projects_screen.dart';
 import 'daily_report_step1_screen.dart';
+import 'manager_custody_screen.dart';
 import 'login_screen.dart';
 
 /// الصفحة الرئيسية - تختلف حسب دور المستخدم
@@ -385,6 +386,43 @@ class _ManagerHome extends StatelessWidget {
               ),
             ),
           ),
+          if (user.role == 'site_engineer_manager') ...[
+            const SizedBox(height: 20),
+            InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ManagerCustodyScreen(currentUser: user),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding: const EdgeInsets.all(32),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.3)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Icon(Icons.handshake, size: 64, color: const Color(0xFF1B5E20)),
+                    const SizedBox(height: 16),
+                    const Text('العهدة', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)), textAlign: TextAlign.center),
+                    const SizedBox(height: 8),
+                    Text('إدخال عهدة وتقرير العهدة', style: TextStyle(fontSize: 14, color: const Color(0xFF1B5E20).withOpacity(0.9)), textAlign: TextAlign.center),
+                  ],
+                ),
+              ),
+            ),
+          ],
           if (user.isAdmin) ...[
             const SizedBox(height: 20),
             InkWell(
