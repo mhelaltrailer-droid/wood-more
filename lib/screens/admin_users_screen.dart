@@ -71,6 +71,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                   items: const [
                     DropdownMenuItem(value: 'site_engineer', child: Text('مهندس موقع')),
                     DropdownMenuItem(value: 'site_engineer_manager', child: Text('مدير مهندسين')),
+                    DropdownMenuItem(value: 'accountant', child: Text('محاسب')),
                     DropdownMenuItem(value: 'app_admin', child: Text('مسؤول التطبيق')),
                   ],
                   onChanged: (v) => setDialog(() => role = v ?? role),
@@ -133,6 +134,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
   String _roleLabel(String r) {
     if (r == 'site_engineer') return 'مهندس موقع';
     if (r == 'site_engineer_manager') return 'مدير مهندسين';
+    if (r == 'accountant') return 'محاسب';
     if (r == 'app_admin') return 'مسؤول التطبيق';
     return r;
   }

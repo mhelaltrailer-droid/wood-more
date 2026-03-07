@@ -7,7 +7,13 @@ import 'screens/login_screen.dart';
 import 'services/storage_service.dart';
 
 void main() async {
+  // تأكد من إضافة هذين السطرين قبل runApp
   WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   await initStorage();
 
   runApp(const WoodAndMoreApp());
