@@ -74,6 +74,25 @@ class ApiStorageService {
     return UserModel.fromMap(m);
   }
 
+  /// التحقق من تسجيل الدخول (بريد + كلمة سر) عبر API
+  Future<UserModel?> validateLogin(String email, String password) async {
+    try {
+      final uri = Uri.parse(_path('auth/login'));
+      final r = await http.post(
+        uri,
+        body: jsonEncode({'email': email.trim(), 'password': password}),
+        headers: {'Content-Type': 'application/json'},
+      );
+      if (r.statusCode != 200) return null;
+      if (r.body.isEmpty) return null;
+      final decoded = jsonDecode(r.body);
+      if (decoded == null || decoded is! Map<String, dynamic>) return null;
+      return UserModel.fromMap(decoded);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<List<UserModel>> getSiteEngineers() async {
     final list = await _getList('users/site-engineers');
     return list.map((e) => UserModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
@@ -263,10 +282,22 @@ class ApiStorageService {
     await _postVoid('custody', {'userId': userId, 'amount': amount, 'note': note});
   }
 
+  /// تسجيل حركة إضافة رصيد أو سحب رصيد فقط (الخادم قد يدعم balance-movement)
+  Future<void> addBalanceMovement(int userId, double amount, String note, String movementType) async {
+    try {
+      await _postVoid('balance-movement', {'userId': userId, 'amount': amount, 'note': note, 'movementType': movementType});
+    } catch (_) {}
+  }
+
   Future<List<Map<String, dynamic>>> getCustodyRecords({int? userId}) async {
     final path = userId != null ? 'custody?userId=$userId' : 'custody';
     final list = await _getList(path);
-    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    return list.map((e) {
+      final m = Map<String, dynamic>.from(e as Map);
+      if (!m.containsKey('movement_type') && m.containsKey('movementType')) m['movement_type'] = m['movementType'];
+      m['movement_type'] ??= 'custody';
+      return m;
+    }).toList();
   }
 
   Future<List<SupervisorModel>> getSupervisors() async {

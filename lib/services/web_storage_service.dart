@@ -36,29 +36,44 @@ class WebStorageService {
 
   Future<SharedPreferences> get _prefs async => await SharedPreferences.getInstance();
 
+  static List<Map<String, dynamic>> _defaultUsers() {
+    const defaultPassword = '0000';
+    return [
+      {'id': 1, 'name': 'Hany', 'email': 'hany.samir1708@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+      {'id': 2, 'name': 'Emam', 'email': 'amirelazab46@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+      {'id': 3, 'name': 'Mansur', 'email': 'saedm0566@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+      {'id': 4, 'name': 'Mahmud', 'email': 'mahmoudsiko630@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+      {'id': 5, 'name': 'Abdhusseny', 'email': 'abdallaelhosseny1011@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+      {'id': 6, 'name': 'Hamza', 'email': 'hamzamhamad704@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+      {'id': 7, 'name': 'Gohary', 'email': 'mohamedelgohary371@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+      {'id': 8, 'name': 'Amr', 'email': 'amrelshabrawy55@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+      {'id': 9, 'name': 'Hassan', 'email': 'mouhammed.helal@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
+      {'id': 10, 'name': 'Helal', 'email': 'mouhamedhelal.cor@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
+      {'id': 11, 'name': 'Shams', 'email': 'islam.shams2050@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
+      {'id': 12, 'name': 'Abdrhman', 'email': 'AbdelrhmanEllaithy828@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
+      {'id': 13, 'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin', 'password': defaultPassword},
+        {'id': 14, 'name': 'Helal', 'email': 'h@h.com', 'role': 'app_admin', 'password': '123'},
+        {'id': 15, 'name': 'account manager', 'email': 'Account@gmail.com', 'role': 'accountant', 'password': '0000'},
+      ];
+  }
+
   Future<void> _initData() async {
     final prefs = await _prefs;
-    if (prefs.getString(_usersKey) == null) {
-      const defaultPassword = '0000';
-      final users = [
-        {'id': 1, 'name': 'Hany', 'email': 'hany.samir1708@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-        {'id': 2, 'name': 'Emam', 'email': 'amirelazab46@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-        {'id': 3, 'name': 'Mansur', 'email': 'saedm0566@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-        {'id': 4, 'name': 'Mahmud', 'email': 'mahmoudsiko630@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-        {'id': 5, 'name': 'Abdhusseny', 'email': 'abdallaelhosseny1011@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-        {'id': 6, 'name': 'Hamza', 'email': 'hamzamhamad704@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-        {'id': 7, 'name': 'Gohary', 'email': 'mohamedelgohary371@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-        {'id': 8, 'name': 'Amr', 'email': 'amrelshabrawy55@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-        {'id': 9, 'name': 'Hassan', 'email': 'mouhammed.helal@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-        {'id': 10, 'name': 'Helal', 'email': 'mouhamedhelal.cor@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
-        {'id': 11, 'name': 'Shams', 'email': 'islam.shams2050@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
-        {'id': 12, 'name': 'Abdrhman', 'email': 'AbdelrhmanEllaithy828@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
-        {'id': 13, 'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin', 'password': defaultPassword},
-        {'id': 14, 'name': 'Helal', 'email': 'h@h.com', 'role': 'app_admin', 'password': '123'},
-      ];
-      await prefs.setString(_usersKey, jsonEncode(users));
+    final raw = prefs.getString(_usersKey);
+    if (raw == null || raw.isEmpty) {
+      await prefs.setString(_usersKey, jsonEncode(_defaultUsers()));
     } else {
-      final list = jsonDecode(prefs.getString(_usersKey)!) as List;
+      List<dynamic> list;
+      try {
+        list = jsonDecode(raw) as List;
+      } catch (_) {
+        await prefs.setString(_usersKey, jsonEncode(_defaultUsers()));
+        return;
+      }
+      if (list.isEmpty) {
+        await prefs.setString(_usersKey, jsonEncode(_defaultUsers()));
+        return;
+      }
       final hasAdmin = list.any((e) => ((e as Map)['email'] as String).toLowerCase() == 'mouhammedhelal@gmail.com');
       if (!hasAdmin) {
         final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
@@ -69,6 +84,12 @@ class WebStorageService {
       if (!hasHelal) {
         final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
         list.add({'id': nextId, 'name': 'Helal', 'email': 'h@h.com', 'role': 'app_admin', 'password': '123'});
+        await prefs.setString(_usersKey, jsonEncode(list));
+      }
+      final hasAccountant = list.any((e) => ((e as Map)['email'] as String).toLowerCase() == 'account@gmail.com');
+      if (!hasAccountant) {
+        final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+        list.add({'id': nextId, 'name': 'account manager', 'email': 'Account@gmail.com', 'role': 'accountant', 'password': '0000'});
         await prefs.setString(_usersKey, jsonEncode(list));
       }
     }
@@ -223,10 +244,20 @@ class WebStorageService {
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_engineerCustodyKey)!) as List;
     final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'user_id': userId, 'amount': amount, 'created_at': DateTime.now().toIso8601String(), 'note': note, 'document_path': documentPath});
+    list.add({'id': nextId, 'user_id': userId, 'amount': amount, 'created_at': DateTime.now().toIso8601String(), 'note': note, 'document_path': documentPath, 'movement_type': 'custody'});
     await prefs.setString(_engineerCustodyKey, jsonEncode(list));
     final current = await getEngineerBalance(userId);
     await setEngineerBalance(userId, current - amount);
+  }
+
+  /// تسجيل حركة إضافة رصيد أو سحب رصيد فقط (بدون تغيير الرصيد)
+  Future<void> addBalanceMovement(int userId, double amount, String note, String movementType) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_engineerCustodyKey)!) as List;
+    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    list.add({'id': nextId, 'user_id': userId, 'amount': amount, 'created_at': DateTime.now().toIso8601String(), 'note': note, 'document_path': null, 'movement_type': movementType});
+    await prefs.setString(_engineerCustodyKey, jsonEncode(list));
   }
 
   Future<List<Map<String, dynamic>>> getCustodyRecords({int? userId}) async {
@@ -236,7 +267,7 @@ class WebStorageService {
     var result = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     if (userId != null) result = result.where((e) => e['user_id'] == userId).toList();
     result.sort((a, b) => (b['created_at'] as String).compareTo(a['created_at'] as String));
-    return result.map((e) => {'id': e['id'], 'user_id': e['user_id'], 'amount': (e['amount'] as num).toDouble(), 'created_at': e['created_at'], 'note': e['note'], 'document_path': e['document_path']}).toList();
+    return result.map((e) => {'id': e['id'], 'user_id': e['user_id'], 'amount': (e['amount'] as num).toDouble(), 'created_at': e['created_at'], 'note': e['note'], 'document_path': e['document_path'], 'movement_type': e['movement_type'] as String? ?? 'custody'}).toList();
   }
 
   Future<List<UserModel>> getSiteEngineers() async {
@@ -268,12 +299,29 @@ class WebStorageService {
   Future<UserModel?> validateLogin(String email, String password) async {
     await _initData();
     final prefs = await _prefs;
-    final list = jsonDecode(prefs.getString(_usersKey)!) as List;
+    var raw = prefs.getString(_usersKey);
+    if (raw == null || raw.isEmpty) {
+      await prefs.setString(_usersKey, jsonEncode(_defaultUsers()));
+      raw = prefs.getString(_usersKey);
+    }
+    if (raw == null || raw.isEmpty) return null;
+    List<dynamic> list;
+    try {
+      list = jsonDecode(raw) as List;
+    } catch (_) {
+      await prefs.setString(_usersKey, jsonEncode(_defaultUsers()));
+      list = _defaultUsers();
+    }
+    if (list.isEmpty) {
+      await prefs.setString(_usersKey, jsonEncode(_defaultUsers()));
+      list = _defaultUsers();
+    }
     final emailLower = email.trim().toLowerCase();
     final pwd = password.trim();
     for (final m in list) {
       final map = Map<String, dynamic>.from(m as Map);
-      if ((map['email'] as String).toLowerCase() != emailLower) continue;
+      final storedEmail = (map['email']?.toString() ?? '').trim().toLowerCase();
+      if (storedEmail != emailLower) continue;
       final stored = (map['password']?.toString() ?? '0000').trim();
       if (stored.isEmpty || pwd != stored) return null;
       return UserModel.fromMap(map);
@@ -368,7 +416,9 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_usersKey)!) as List;
-    return list.map((m) => UserModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()..sort((a, b) => a.name.compareTo(b.name));
+    final out = list.map<UserModel>((m) => UserModel.fromMap(Map<String, dynamic>.from(m as Map))).toList();
+    out.sort((UserModel a, UserModel b) => a.name.compareTo(b.name));
+    return out;
   }
 
   Future<int> addUser(String name, String email, String password, String role) async {

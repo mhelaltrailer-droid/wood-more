@@ -36,7 +36,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 13,
+      version: 15,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -160,6 +160,24 @@ class DatabaseService {
         });
       }
     }
+    if (oldVersion < 14) {
+      final existing = Sqflite.firstIntValue(await db.rawQuery(
+        "SELECT COUNT(*) FROM users WHERE LOWER(email) = 'account@gmail.com'",
+      ));
+      if (existing == 0) {
+        await db.insert('users', {
+          'name': 'account manager',
+          'email': 'Account@gmail.com',
+          'role': 'accountant',
+          'password': '0000',
+        });
+      }
+    }
+    if (oldVersion < 15) {
+      try {
+        await db.execute("ALTER TABLE engineer_custody ADD COLUMN movement_type TEXT DEFAULT 'custody'");
+      } catch (_) {}
+    }
     if (oldVersion < 11) {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS project_stock_ledger (
@@ -194,6 +212,7 @@ class DatabaseService {
         created_at TEXT NOT NULL,
         note TEXT,
         document_path TEXT,
+        movement_type TEXT DEFAULT 'custody',
         FOREIGN KEY (user_id) REFERENCES users (id)
       )
     ''');
@@ -310,6 +329,7 @@ class DatabaseService {
     await db.insert('users', {'name': 'Abdrhman', 'email': 'AbdelrhmanEllaithy828@gmail.com', 'role': 'site_engineer_manager'});
     await db.insert('users', {'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin'});
     await db.insert('users', {'name': 'Helal', 'email': 'h@h.com', 'role': 'app_admin', 'password': '123'});
+    await db.insert('users', {'name': 'account manager', 'email': 'Account@gmail.com', 'role': 'accountant', 'password': '0000'});
 
     await _seedProjects(db);
   }
@@ -391,16 +411,17 @@ class DatabaseService {
   /// التحقق من تسجيل الدخول (بريد + كلمة سر)، كلمة السر الافتراضية المؤقتة: 0000
   Future<UserModel?> validateLogin(String email, String password) async {
     final db = await database;
-    final maps = await db.query(
-      'users',
-      where: 'email = ?',
-      whereArgs: [email.trim().toLowerCase()],
+    final emailNorm = email.trim().toLowerCase();
+    final pwdNorm = password.trim();
+    final maps = await db.rawQuery(
+      'SELECT * FROM users WHERE LOWER(TRIM(email)) = ?',
+      [emailNorm],
     );
     if (maps.isEmpty) return null;
     final row = maps.first;
-    final stored = row['password']?.toString().trim() ?? '0000';
+    final stored = (row['password']?.toString() ?? '0000').trim();
     if (stored.isEmpty) return null;
-    if (password.trim() != stored) return null;
+    if (pwdNorm != stored) return null;
     return UserModel.fromMap(row);
   }
 
@@ -520,9 +541,23 @@ class DatabaseService {
       'created_at': DateTime.now().toIso8601String(),
       'note': note,
       'document_path': documentPath,
+      'movement_type': 'custody',
     });
     final current = await getEngineerBalance(userId);
     await setEngineerBalance(userId, current - amount);
+  }
+
+  /// تسجيل حركة إضافة رصيد أو سحب رصيد فقط (بدون تغيير الرصيد - يتم من واجهة الماليات)
+  Future<void> addBalanceMovement(int userId, double amount, String note, String movementType) async {
+    final db = await database;
+    await db.insert('engineer_custody', {
+      'user_id': userId,
+      'amount': amount,
+      'created_at': DateTime.now().toIso8601String(),
+      'note': note,
+      'document_path': null,
+      'movement_type': movementType,
+    });
   }
 
   Future<List<Map<String, dynamic>>> getCustodyRecords({int? userId}) async {
@@ -530,7 +565,15 @@ class DatabaseService {
     final where = userId != null ? 'user_id = ?' : null;
     final whereArgs = userId != null ? [userId] : null;
     final rows = await db.query('engineer_custody', where: where, whereArgs: whereArgs, orderBy: 'created_at DESC');
-    return rows.map((r) => {'id': r['id'], 'user_id': r['user_id'], 'amount': (r['amount'] as num).toDouble(), 'created_at': r['created_at'], 'note': r['note'], 'document_path': r['document_path']}).toList();
+    return rows.map((r) => {
+      'id': r['id'],
+      'user_id': r['user_id'],
+      'amount': (r['amount'] as num).toDouble(),
+      'created_at': r['created_at'],
+      'note': r['note'],
+      'document_path': r['document_path'],
+      'movement_type': r['movement_type'] as String? ?? 'custody',
+    }).toList();
   }
 
   /// الحصول على سجلات الحضور لمستخدم معين

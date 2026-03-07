@@ -38,7 +38,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final user = await _db.validateLogin(
         _emailController.text.trim(),
-        _passwordController.text,
+        _passwordController.text.trim(),
       );
       if (!mounted) return;
 

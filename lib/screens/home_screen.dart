@@ -9,6 +9,8 @@ import 'finance_screen.dart';
 import 'engineer_projects_screen.dart';
 import 'daily_report_step1_screen.dart';
 import 'manager_custody_screen.dart';
+import 'accountant_custody_screen.dart';
+import 'accountant_finance_screen.dart';
 import 'login_screen.dart';
 
 /// الصفحة الرئيسية - تختلف حسب دور المستخدم
@@ -50,7 +52,11 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: currentUser.isSiteEngineer ? _EngineerHome(user: currentUser) : _ManagerHome(user: currentUser),
+      body: currentUser.isSiteEngineer
+          ? _EngineerHome(user: currentUser)
+          : currentUser.isAccountant
+              ? _AccountantHome(user: currentUser)
+              : _ManagerHome(user: currentUser),
     );
   }
 }
@@ -217,6 +223,118 @@ class _EngineerHome extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+}
+
+/// واجهة الصفحة الرئيسية للمحاسب: العهدة + الماليات فقط
+class _AccountantHome extends StatelessWidget {
+  final UserModel user;
+
+  const _AccountantHome({required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 24),
+          Text(
+            'مرحباً، ${user.name}',
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 48),
+          InkWell(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AccountantCustodyScreen(currentUser: user),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.3)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  Icon(Icons.handshake, size: 64, color: const Color(0xFF1B5E20)),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'العهدة',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'تقرير العهدة حسب المستخدم والمدة وتصدير PDF',
+                    style: TextStyle(fontSize: 14, color: const Color(0xFF1B5E20).withOpacity(0.9)),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          InkWell(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AccountantFinanceScreen(currentUser: user),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.3)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  Icon(Icons.account_balance_wallet, size: 64, color: const Color(0xFF1B5E20)),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'الماليات',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'أرصدة المستخدمين، إضافة/سحب رصيد، وإنشاء تقرير',
+                    style: TextStyle(fontSize: 14, color: const Color(0xFF1B5E20).withOpacity(0.9)),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 32),
         ],
       ),
     );
