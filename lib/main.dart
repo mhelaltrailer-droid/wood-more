@@ -4,12 +4,12 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'core/app_theme.dart';
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
+import 'services/storage_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await initStorage();
+
   runApp(const WoodAndMoreApp());
 }
 

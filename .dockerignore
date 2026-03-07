@@ -1,0 +1,39 @@
+# Git and IDE
+.git
+.gitignore
+.idea
+.vscode
+*.iml
+
+# Build and tooling
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# Platform-specific (not needed for web build)
+android/
+ios/
+macos/
+windows/
+linux/
+
+# Tests and coverage
+test/
+coverage/
+*.test.dart
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Documentation (optional; include if you want in image)
+# README.md
+# *.md
+
+# Misc
+*.log
+.DS_Store
