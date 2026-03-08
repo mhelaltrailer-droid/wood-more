@@ -18,6 +18,17 @@ const pool = new Pool({
   password: process.env.PGPASSWORD || 'wood_more',
 });
 
+// One-time migration: add password column if missing (e.g. Docker volume created before it existed)
+async function ensurePasswordColumn() {
+  try {
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT NOT NULL DEFAULT '0000'
+    `);
+  } catch (e) {
+    console.warn('ensurePasswordColumn:', e.message);
+  }
+}
+
 // ——— Auth (email + password) ———
 app.post('/auth/login', async (req, res) => {
   try {
@@ -620,4 +631,11 @@ app.delete('/building-cutlists/:id', async (req, res) => {
 });
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
-app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));
+ensurePasswordColumn()
+  .then(() => {
+    app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));
+  })
+  .catch((e) => {
+    console.error('Startup failed:', e);
+    process.exit(1);
+  });

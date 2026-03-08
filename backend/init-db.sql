@@ -4,10 +4,11 @@
 -- or the default postgres database.
 --
 -- 1. First run: backend/01-create-database.sql (while connected to "postgres")
---    → This creates a dedicated database: wood_and_more
--- 2. In Beekeeper: create a NEW connection to database "wood_and_more"
+--    → This creates a dedicated database: wood_more
+-- 2. In Beekeeper: create a NEW connection to database "wood_more"
 -- 3. Then run THIS file (init-db.sql) in that connection.
---    → All tables and seed data will be created inside wood_and_more.
+--    → All tables and seed data will be created inside wood_more.
+-- (Docker Compose uses POSTGRES_DB=wood_more and runs this script automatically.)
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS users (

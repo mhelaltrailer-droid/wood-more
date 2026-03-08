@@ -199,6 +199,21 @@ class ApiStorageService {
     return list.map((e) => AttendanceRecordModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
   }
 
+  /// موعد الحضور والانصراف لمستخدم في تاريخ معين (نفس اليوم فقط)
+  Future<({DateTime? checkIn, DateTime? checkOut})> getAttendanceForUserOnDate(int userId, DateTime date) async {
+    final list = await getAttendanceRecordsByUser(userId);
+    final dayStart = DateTime(date.year, date.month, date.day);
+    final dayEnd = DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+    DateTime? checkIn;
+    DateTime? checkOut;
+    for (final r in list) {
+      if (r.dateTime.isBefore(dayStart) || r.dateTime.isAfter(dayEnd)) continue;
+      if (r.isCheckIn && (checkIn == null || r.dateTime.isBefore(checkIn))) checkIn = r.dateTime;
+      if (r.isCheckOut && (checkOut == null || r.dateTime.isAfter(checkOut))) checkOut = r.dateTime;
+    }
+    return (checkIn: checkIn, checkOut: checkOut);
+  }
+
   Future<List<String>> getMaterials() async {
     final list = await _getList('materials');
     return list.map((e) => e as String).toList();

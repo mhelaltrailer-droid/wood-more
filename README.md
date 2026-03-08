@@ -44,84 +44,7 @@ Open **Command Prompt** or **PowerShell** and run (adjust the path if your Postg
 
 (Use your PostgreSQL version number if different, e.g. `15` instead of `16`.)
 
-<<<<<<< Updated upstream
 In the `psql` prompt, run:
-=======
-### 2. Install dependencies
-
-```bash
-flutter pub get
-```
-
-### 3. Choose a device
-
-- **Android:** Start an emulator or connect a device with USB debugging.
-- **iOS:** Open Simulator or connect an iPhone (macOS only).
-- **macOS/Windows/Linux:** Use the host machine as the target.
-- **Web:** Use Chrome.
-
-List available devices:
-
-```bash
-flutter devices
-```
-
-### 4. Run the app
-
-**Mobile (Android / iOS):**
-
-```bash
-flutter run
-```
-
-Or specify a device, for example:
-
-```bash
-flutter run -d chrome          # Web
-flutter run -d macos          # macOS
-flutter run -d windows        # Windows
-flutter run -d linux          # Linux
-flutter run -d <device_id>    # Use ID from `flutter devices`
-```
-
-The app will build and launch. The first screen is the **login screen**.
-
-### 5. Log in (test users)
-
-Login is by **email and password**. Use one of the seeded emails (default password `0000`; `h@h.com` uses `123`):
-
-| Role                  | Example email                    |
-| --------------------- | -------------------------------- |
-| Site engineer         | `hany.samir1708@gmail.com`       |
-| Site engineer         | `mouhammed.helal@gmail.com`      |
-| Site engineer         | `test-site-engineer@example.com` |
-| Site engineer manager | `mouhamedhelal.cor@gmail.com`    |
-| App admin             | `mouhammedhelal@gmail.com`       |
-| App admin             | `cipherpath@proton.me`           |
-
-Any other seeded user from the database (see `lib/services/database_service.dart` or `lib/services/web_storage_service.dart`) will also work.
-
-### 6. Optional: Create assets (if missing)
-
-The app expects `assets/images/` and uses `assets/images/logo.png` in the app bar. If you removed them and see asset errors, ensure the folder exists and add a `logo.png`:
-
-```bash
-mkdir -p assets/images
-# Then add your logo.png into assets/images/
-```
-
-Then run `flutter pub get` again and restart the app.
-
----
-
-## Use local PostgreSQL with Flutter run (web)
-
-To run the app locally with **`flutter run -d chrome`** (or another browser) and have it use your **local PostgreSQL** instead of browser storage:
-
-### 1. Set up your local PostgreSQL
-
-Create the database and user (if you don't have them yet). For example, in `psql` or Beekeeper:
->>>>>>> Stashed changes
 
 ```sql
 CREATE USER wood_more WITH PASSWORD 'wood_more';
@@ -175,13 +98,18 @@ Leave this window open. The API will be available at **http://localhost:3000**.
 
 ## 3. Point the app to the API
 
-Edit **`web\config.json`** in the project root so the app uses your local backend:
+The app uses the backend when **`apiBaseUrl`** is set in config:
+
+- **Web** (`flutter run -d chrome`): **`web\config.json`**
+- **Windows desktop** (`flutter run -d windows`): **`assets\config.json`**
+
+Set the API URL in both so that web and desktop use PostgreSQL:
 
 ```json
 { "apiBaseUrl": "http://localhost:3000" }
 ```
 
-If you use another port for the API, change the URL (e.g. `http://localhost:3001`).
+If you use another port for the API, use that URL (e.g. `http://localhost:3001`). If `apiBaseUrl` is empty, the app uses browser storage (web) or local SQLite (desktop) and data is not stored in PostgreSQL.
 
 ---
 
@@ -201,14 +129,9 @@ Or to run the **Windows desktop** app:
 flutter run -d windows
 ```
 
-The app will load `web\config.json`, use the API, and store data in PostgreSQL.
+The app will use the API (and PostgreSQL) when `apiBaseUrl` is set in the relevant config file.
 
-### 5. Store everything in the database (mobile / desktop)
-
-By default, **mobile and desktop use local SQLite** on the device. Data is saved on that device only and is **not** in PostgreSQL. To have **all data (reports, attendance, users, etc.) stored in your PostgreSQL database** from the app:
-
-1. **Run the backend API** (see step 2 above) and ensure PostgreSQL has been set up and `init-db.sql` has been run.
-2. **Point the app at the API** using config:
+**Mobile / desktop with API:** Set `assets\config.json` to `{ "apiBaseUrl": "http://localhost:3000" }` (or your machine IP for a real device). To use config:
    - **Web:** set `web/config.json`: `{ "apiBaseUrl": "http://localhost:3000" }` (or your API URL).
    - **Mobile / desktop:** set `assets/config.json`: `{ "apiBaseUrl": "http://YOUR_API_URL" }`.
      - Android emulator: use `http://10.0.2.2:3000` (emulator’s host = your machine).
@@ -221,14 +144,15 @@ By default, **mobile and desktop use local SQLite** on the device. Data is saved
 
 ## 5. Log in
 
-Login is **email only** (no password). Use one of the seeded users, for example:
+Login is **email + password**. Use one of the seeded users from `backend\init-db.sql`:
 
-| Role           | Example email                    |
-|----------------|----------------------------------|
-| Site engineer  | `test-site-engineer@example.com` |
-| App admin      | `cipherpath@proton.me`           |
+| Role           | Example email                    | Password   |
+|----------------|----------------------------------|------------|
+| Site engineer  | `test-site-engineer@example.com` | `0000`     |
+| App admin      | `cipherpath@proton.me`           | `0000`     |
+| App admin      | `h@h.com`                        | `123`      |
 
-Other seeded users are defined in `backend\init-db.sql`.
+Default password for other seeded users is **`0000`** unless set otherwise in the database.
 
 ---
 
@@ -240,7 +164,18 @@ If you have **Docker Desktop** for Windows installed, you can run PostgreSQL, th
 docker compose up -d --build
 ```
 
-Then open **http://localhost:8080** in your browser. The app in the container is already configured to use the API and PostgreSQL. To stop:
+Then open **http://localhost:8080** in your browser. The app is configured to use the API (and PostgreSQL). Log in with email + password (e.g. `cipherpath@proton.me` / `0000`).
+
+**Backend:** On startup the API runs a small migration that adds the `password` column to `users` if it was missing (e.g. an existing Docker DB created before that column existed). No manual SQL or volume reset needed.
+
+**If you don't see your latest code changes** (e.g. new login screen, new features), Docker may be using a cached image. Rebuild the app image without cache:
+
+```cmd
+docker compose build --no-cache app
+docker compose up -d
+```
+
+To stop:
 
 ```cmd
 docker compose down
@@ -255,7 +190,10 @@ docker compose down
 | `psql` not found | Add PostgreSQL `bin` to PATH, e.g. `C:\Program Files\PostgreSQL\16\bin` |
 | Connection refused (port 5432) | PostgreSQL service is running (Services → postgresql-x64-16) |
 | Connection refused (port 3000) | Backend is running (step 2) and no firewall is blocking 3000 |
-| App uses browser storage instead of API | Ensure `web\config.json` has `"apiBaseUrl": "http://localhost:3000"` and you restarted the app after changing it |
+| **Reports/data missing after closing and reopening the app** | The app only uses PostgreSQL when `apiBaseUrl` is set. Set it in **`web\config.json`** (for web) and **`assets\config.json`** (for Windows desktop) to `"http://localhost:3000"`, and ensure the backend is running before starting the app. |
+| App uses browser/SQLite instead of API | Ensure `web\config.json` and `assets\config.json` have `"apiBaseUrl": "http://localhost:3000"` (not empty), then restart the app. |
+| **Built app (Docker) doesn't show latest features** | The container uses a built image. After code changes, rebuild without cache: `docker compose build --no-cache app` then `docker compose up -d`. |
+| **"column password does not exist" when logging in (Docker)** | The API adds the column automatically on startup. Rebuild and restart the API: `docker compose build api && docker compose up -d`. If it still fails, reset the DB (you lose data): `docker compose down -v` then `docker compose up -d`. |
 
 ---
 
@@ -263,8 +201,9 @@ docker compose down
 
 1. Install PostgreSQL, Node.js, and Flutter.
 2. Create user `wood_more` and database `wood_more`, then run `backend\init-db.sql`.
-3. In `backend`, run `npm install` and start the server with the env vars above.
-4. Set `web\config.json` to `{"apiBaseUrl": "http://localhost:3000"}`.
+3. In `backend`, run `npm install` and start the server with the env vars above (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, PORT).
+4. Set **`web\config.json`** and **`assets\config.json`** to `{"apiBaseUrl": "http://localhost:3000"}` so the app uses the API.
 5. From the project root, run `flutter run -d chrome` or `flutter run -d windows`.
+6. Log in with **email + password** (default `0000`; `h@h.com` uses `123`).
 
-Data is then stored in your local PostgreSQL instance.
+Data is stored in PostgreSQL. The backend adds the `users.password` column on startup if it was missing (e.g. existing Docker volume).
