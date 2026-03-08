@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
+import '../services/route_persistence.dart';
 import 'contractor_report_screen.dart';
 import 'workers_report_screen.dart';
 import 'user_custody_report_screen.dart';
@@ -47,7 +48,11 @@ class SubReportsScreen extends StatelessWidget {
         foregroundColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: admin))),
+          onPressed: () async {
+          await saveLastRoute('home');
+          if (!context.mounted) return;
+          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: admin)));
+        },
         ),
       ),
       body: ListView.builder(

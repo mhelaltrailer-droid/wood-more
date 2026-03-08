@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
+import '../services/route_persistence.dart';
 import 'admin_users_screen.dart';
 import 'admin_projects_screen.dart';
 import 'admin_zones_screen.dart';
@@ -45,7 +46,11 @@ class AdminDashboardScreen extends StatelessWidget {
         foregroundColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: currentUser))),
+          onPressed: () async {
+          await saveLastRoute('home');
+          if (!context.mounted) return;
+          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: currentUser)));
+        },
         ),
       ),
       body: ListView.builder(

@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../models/user_model.dart';
 import '../models/project_model.dart';
 import '../models/attendance_record_model.dart';
+import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import '../services/location_service.dart';
 import 'home_screen.dart';
@@ -111,6 +112,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ),
       );
 
+      await saveLastRoute('home');
+      if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => HomeScreen(currentUser: widget.currentUser)),
         (route) => false,
