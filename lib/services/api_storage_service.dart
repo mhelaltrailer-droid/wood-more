@@ -103,12 +103,16 @@ class ApiStorageService {
     return list.map((e) => UserModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
   }
 
-  Future<int> addUser(String name, String email, String role) async {
-    return _post('users', {'name': name, 'email': email, 'role': role});
+  Future<int> addUser(String name, String email, String password, String role) async {
+    final body = <String, dynamic>{'name': name, 'email': email, 'role': role};
+    if (password.trim().isNotEmpty) body['password'] = password.trim();
+    return _post('users', body);
   }
 
-  Future<void> updateUser(int id, String name, String email, String role) async {
-    await _put('users/$id', {'name': name, 'email': email, 'role': role});
+  Future<void> updateUser(int id, String name, String email, String role, [String? password]) async {
+    final body = <String, dynamic>{'name': name, 'email': email, 'role': role};
+    if (password != null && password.trim().isNotEmpty) body['password'] = password.trim();
+    await _put('users/$id', body);
   }
 
   Future<void> deleteUser(int id) async {
@@ -193,6 +197,21 @@ class ApiStorageService {
   Future<List<AttendanceRecordModel>> getAttendanceRecordsByUser(int userId) async {
     final list = await _getList('attendance/by-user/$userId');
     return list.map((e) => AttendanceRecordModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+  }
+
+  /// موعد الحضور والانصراف لمستخدم في تاريخ معين (نفس اليوم فقط)
+  Future<({DateTime? checkIn, DateTime? checkOut})> getAttendanceForUserOnDate(int userId, DateTime date) async {
+    final list = await getAttendanceRecordsByUser(userId);
+    final dayStart = DateTime(date.year, date.month, date.day);
+    final dayEnd = DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+    DateTime? checkIn;
+    DateTime? checkOut;
+    for (final r in list) {
+      if (r.dateTime.isBefore(dayStart) || r.dateTime.isAfter(dayEnd)) continue;
+      if (r.isCheckIn && (checkIn == null || r.dateTime.isBefore(checkIn))) checkIn = r.dateTime;
+      if (r.isCheckOut && (checkOut == null || r.dateTime.isAfter(checkOut))) checkOut = r.dateTime;
+    }
+    return (checkIn: checkIn, checkOut: checkOut);
   }
 
   Future<List<String>> getMaterials() async {

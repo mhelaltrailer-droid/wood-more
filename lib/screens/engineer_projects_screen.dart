@@ -123,10 +123,11 @@ class _EngineerProjectsScreenState extends State<EngineerProjectsScreen> {
           children: [
             DropdownButtonFormField<ProjectModel?>(
               value: _selectedProject,
+              isExpanded: true,
               decoration: const InputDecoration(labelText: 'المشروع', border: OutlineInputBorder()),
               items: [
                 const DropdownMenuItem(value: null, child: Text('— اختر المشروع —')),
-                ..._projects.map((p) => DropdownMenuItem(value: p, child: Text(p.name))),
+                ..._projects.map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis))),
               ],
               onChanged: (v) {
                 setState(() {
@@ -143,10 +144,11 @@ class _EngineerProjectsScreenState extends State<EngineerProjectsScreen> {
             const SizedBox(height: 12),
             DropdownButtonFormField<ZoneModel?>(
               value: _selectedZone,
+              isExpanded: true,
               decoration: const InputDecoration(labelText: 'المنطقة', border: OutlineInputBorder()),
               items: [
                 const DropdownMenuItem(value: null, child: Text('— اختر المنطقة —')),
-                ..._zones.map((z) => DropdownMenuItem(value: z, child: Text(z.name))),
+                ..._zones.map((z) => DropdownMenuItem(value: z, child: Text(z.name, overflow: TextOverflow.ellipsis))),
               ],
               onChanged: (v) {
                 setState(() {
@@ -161,10 +163,11 @@ class _EngineerProjectsScreenState extends State<EngineerProjectsScreen> {
             const SizedBox(height: 12),
             DropdownButtonFormField<BuildingModel?>(
               value: _selectedBuilding,
+              isExpanded: true,
               decoration: const InputDecoration(labelText: 'المبنى', border: OutlineInputBorder()),
               items: [
                 const DropdownMenuItem(value: null, child: Text('— اختر المبنى —')),
-                ..._buildings.map((b) => DropdownMenuItem(value: b, child: Text(b.name))),
+                ..._buildings.map((b) => DropdownMenuItem(value: b, child: Text(b.name, overflow: TextOverflow.ellipsis))),
               ],
               onChanged: (v) {
                 setState(() => _selectedBuilding = v);

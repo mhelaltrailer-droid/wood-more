@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/user_model.dart';
+import '../utils/pdf_share.dart';
 import '../models/project_model.dart';
 import '../models/daily_report_model.dart';
 import '../services/storage_service.dart';
@@ -233,10 +234,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final bytes = await doc.save();
     final dateFromStr = dateFormat.format(_dateFrom);
     final dateToStr = dateFormat.format(_dateTo);
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: 'تقارير_يومية_${dateFromStr}_${dateToStr}.pdf',
-    );
+    await sharePdfBytes(bytes, 'تقارير_يومية_${dateFromStr}_${dateToStr}.pdf');
   }
 
   pw.Widget _pdfSectionTitle(String text) {
@@ -316,13 +314,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
           // مهندس
           DropdownButtonFormField<UserModel?>(
             value: _selectedEngineer,
+            isExpanded: true,
             decoration: const InputDecoration(
               labelText: 'المهندس',
               border: OutlineInputBorder(),
             ),
             items: [
               const DropdownMenuItem(value: null, child: Text('جميع المهندسين')),
-              ..._engineers.map((e) => DropdownMenuItem(value: e, child: Text(e.name))),
+              ..._engineers.map((e) => DropdownMenuItem(value: e, child: Text(e.name, overflow: TextOverflow.ellipsis))),
             ],
             onChanged: (v) => setState(() => _selectedEngineer = v),
           ),
@@ -354,13 +353,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
           // المشروع (اختياري)
           DropdownButtonFormField<ProjectModel?>(
             value: _selectedProject,
+            isExpanded: true,
             decoration: const InputDecoration(
               labelText: 'المشروع (اختياري)',
               border: OutlineInputBorder(),
             ),
             items: [
               const DropdownMenuItem(value: null, child: Text('جميع المشاريع')),
-              ..._projects.map((p) => DropdownMenuItem(value: p, child: Text(p.name))),
+              ..._projects.map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis))),
             ],
             onChanged: (v) => setState(() => _selectedProject = v),
           ),

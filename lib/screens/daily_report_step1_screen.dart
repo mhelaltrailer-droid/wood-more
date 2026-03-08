@@ -198,11 +198,12 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
             const SizedBox(height: 16),
             DropdownButtonFormField<ProjectModel>(
               value: _selectedProject,
+              isExpanded: true,
               decoration: const InputDecoration(
                 labelText: 'اسم المشروع *',
                 border: OutlineInputBorder(),
               ),
-              items: _projects.map((p) => DropdownMenuItem(value: p, child: Text(p.name))).toList(),
+              items: _projects.map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis))).toList(),
               onChanged: (p) => setState(() => _selectedProject = p),
               validator: (v) => v == null ? 'اختر المشروع' : null,
             ),
