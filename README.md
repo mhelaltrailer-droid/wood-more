@@ -111,14 +111,7 @@ flutter run -d windows
 
 The app will use the API (and PostgreSQL) when `apiBaseUrl` is set in the relevant config file.
 
-**Mobile / desktop with API:** Set `assets\config.json` to `{ "apiBaseUrl": "http://localhost:3000" }` (or your machine IP for a real device). To use config:
-   - **Web:** set `web/config.json`: `{ "apiBaseUrl": "http://localhost:3000" }` (or your API URL).
-   - **Mobile / desktop:** set `assets/config.json`: `{ "apiBaseUrl": "http://YOUR_API_URL" }`.
-     - Android emulator: use `http://10.0.2.2:3000` (emulator’s host = your machine).
-     - Real device or other desktop: use your machine’s IP, e.g. `http://192.168.1.10:3000`, and ensure the device can reach that IP (same network, firewall allows port 3000).
-3. Run the app (`flutter run` or `flutter run -d chrome`). On startup the app loads config; if `apiBaseUrl` is set, it uses the backend and **all create/update/delete and reports go to PostgreSQL**. If `apiBaseUrl` is empty, web uses browser storage and mobile/desktop use local SQLite (data not in the central database).
-
-**Summary:** Nothing is removed from the old build. When `apiBaseUrl` is set (web: `web/config.json`, mobile/desktop: `assets/config.json`), the app uses the REST API and everything is stored in the database. When it is not set, the app keeps using local storage (SQLite or browser) so data does not persist to PostgreSQL.
+**Mobile / desktop with API:** Set `assets\config.json` to `{ "apiBaseUrl": "http://localhost:3000" }` (or your machine IP for a real device, e.g. `http://192.168.1.10:3000`). Android emulator can use `http://10.0.2.2:3000`.
 
 ---
 
