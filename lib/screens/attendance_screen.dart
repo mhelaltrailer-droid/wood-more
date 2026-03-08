@@ -176,13 +176,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             // المشروع (إلزامي) - يجب اختياره أولاً
             DropdownButtonFormField<ProjectModel>(
               value: _selectedProject,
+              isExpanded: true,
               decoration: const InputDecoration(
                 labelText: 'المشروع *',
                 prefixIcon: Icon(Icons.business),
                 border: OutlineInputBorder(),
               ),
               items: _projects
-                  .map((p) => DropdownMenuItem(value: p, child: Text(p.name)))
+                  .map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis)))
                   .toList(),
               onChanged: (p) => setState(() => _selectedProject = p),
             ),

@@ -103,12 +103,16 @@ class ApiStorageService {
     return list.map((e) => UserModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
   }
 
-  Future<int> addUser(String name, String email, String role) async {
-    return _post('users', {'name': name, 'email': email, 'role': role});
+  Future<int> addUser(String name, String email, String password, String role) async {
+    final body = <String, dynamic>{'name': name, 'email': email, 'role': role};
+    if (password.trim().isNotEmpty) body['password'] = password.trim();
+    return _post('users', body);
   }
 
-  Future<void> updateUser(int id, String name, String email, String role) async {
-    await _put('users/$id', {'name': name, 'email': email, 'role': role});
+  Future<void> updateUser(int id, String name, String email, String role, [String? password]) async {
+    final body = <String, dynamic>{'name': name, 'email': email, 'role': role};
+    if (password != null && password.trim().isNotEmpty) body['password'] = password.trim();
+    await _put('users/$id', body);
   }
 
   Future<void> deleteUser(int id) async {

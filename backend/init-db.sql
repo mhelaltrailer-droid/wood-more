@@ -1,12 +1,34 @@
 -- Wood & More - PostgreSQL schema and seed data
--- Run once when the DB is first created
+-- =============================================================================
+-- IMPORTANT: Run this script in the APPLICATION database only, not in "public"
+-- or the default postgres database.
+--
+-- 1. First run: backend/01-create-database.sql (while connected to "postgres")
+--    → This creates a dedicated database: wood_and_more
+-- 2. In Beekeeper: create a NEW connection to database "wood_and_more"
+-- 3. Then run THIS file (init-db.sql) in that connection.
+--    → All tables and seed data will be created inside wood_and_more.
+-- =============================================================================
 
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
-  role TEXT NOT NULL
+  role TEXT NOT NULL,
+  password TEXT NOT NULL DEFAULT '0000'
 );
+
+-- Add password column if upgrading from an older schema (safe to run multiple times)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'password'
+  ) THEN
+    ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT '0000';
+    UPDATE users SET password = '0000' WHERE password IS NULL;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS projects (
   id SERIAL PRIMARY KEY,
@@ -125,23 +147,25 @@ CREATE TABLE IF NOT EXISTS engineer_custody (
   note TEXT
 );
 
--- Seed users
-INSERT INTO users (name, email, role) VALUES
-  ('Hany', 'hany.samir1708@gmail.com', 'site_engineer'),
-  ('Emam', 'amirelazab46@gmail.com', 'site_engineer'),
-  ('Mansur', 'saedm0566@gmail.com', 'site_engineer'),
-  ('Mahmud', 'mahmoudsiko630@gmail.com', 'site_engineer'),
-  ('Abdhusseny', 'abdallaelhosseny1011@gmail.com', 'site_engineer'),
-  ('Hamza', 'hamzamhamad704@gmail.com', 'site_engineer'),
-  ('Gohary', 'mohamedelgohary371@gmail.com', 'site_engineer'),
-  ('Amr', 'amrelshabrawy55@gmail.com', 'site_engineer'),
-  ('Hassan', 'mouhammed.helal@gmail.com', 'site_engineer'),
-  ('Helal', 'mouhamedhelal.cor@gmail.com', 'site_engineer_manager'),
-  ('Shams', 'islam.shams2050@gmail.com', 'site_engineer_manager'),
-  ('Abdrhman', 'AbdelrhmanEllaithy828@gmail.com', 'site_engineer_manager'),
-  ('مسؤول التطبيق', 'mouhammedhelal@gmail.com', 'app_admin'),
-  ('Cipherpath', 'cipherpath@proton.me', 'app_admin'),
-  ('Test Site Engineer', 'test-site-engineer@example.com', 'site_engineer')
+-- Seed users (password: default 0000; app_admin h@h.com uses 123)
+INSERT INTO users (name, email, role, password) VALUES
+  ('Hany', 'hany.samir1708@gmail.com', 'site_engineer', '0000'),
+  ('Emam', 'amirelazab46@gmail.com', 'site_engineer', '0000'),
+  ('Mansur', 'saedm0566@gmail.com', 'site_engineer', '0000'),
+  ('Mahmud', 'mahmoudsiko630@gmail.com', 'site_engineer', '0000'),
+  ('Abdhusseny', 'abdallaelhosseny1011@gmail.com', 'site_engineer', '0000'),
+  ('Hamza', 'hamzamhamad704@gmail.com', 'site_engineer', '0000'),
+  ('Gohary', 'mohamedelgohary371@gmail.com', 'site_engineer', '0000'),
+  ('Amr', 'amrelshabrawy55@gmail.com', 'site_engineer', '0000'),
+  ('Hassan', 'mouhammed.helal@gmail.com', 'site_engineer', '0000'),
+  ('Helal', 'mouhamedhelal.cor@gmail.com', 'site_engineer_manager', '0000'),
+  ('Shams', 'islam.shams2050@gmail.com', 'site_engineer_manager', '0000'),
+  ('Abdrhman', 'AbdelrhmanEllaithy828@gmail.com', 'site_engineer_manager', '0000'),
+  ('مسؤول التطبيق', 'mouhammedhelal@gmail.com', 'app_admin', '0000'),
+  ('Helal', 'h@h.com', 'app_admin', '123'),
+  ('account manager', 'Account@gmail.com', 'accountant', '0000'),
+  ('Cipherpath', 'cipherpath@proton.me', 'app_admin', '0000'),
+  ('Test Site Engineer', 'test-site-engineer@example.com', 'site_engineer', '0000')
 ON CONFLICT (email) DO NOTHING;
 
 -- Seed projects

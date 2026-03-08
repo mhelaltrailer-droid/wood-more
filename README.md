@@ -44,7 +44,84 @@ Open **Command Prompt** or **PowerShell** and run (adjust the path if your Postg
 
 (Use your PostgreSQL version number if different, e.g. `15` instead of `16`.)
 
+<<<<<<< Updated upstream
 In the `psql` prompt, run:
+=======
+### 2. Install dependencies
+
+```bash
+flutter pub get
+```
+
+### 3. Choose a device
+
+- **Android:** Start an emulator or connect a device with USB debugging.
+- **iOS:** Open Simulator or connect an iPhone (macOS only).
+- **macOS/Windows/Linux:** Use the host machine as the target.
+- **Web:** Use Chrome.
+
+List available devices:
+
+```bash
+flutter devices
+```
+
+### 4. Run the app
+
+**Mobile (Android / iOS):**
+
+```bash
+flutter run
+```
+
+Or specify a device, for example:
+
+```bash
+flutter run -d chrome          # Web
+flutter run -d macos          # macOS
+flutter run -d windows        # Windows
+flutter run -d linux          # Linux
+flutter run -d <device_id>    # Use ID from `flutter devices`
+```
+
+The app will build and launch. The first screen is the **login screen**.
+
+### 5. Log in (test users)
+
+Login is by **email and password**. Use one of the seeded emails (default password `0000`; `h@h.com` uses `123`):
+
+| Role                  | Example email                    |
+| --------------------- | -------------------------------- |
+| Site engineer         | `hany.samir1708@gmail.com`       |
+| Site engineer         | `mouhammed.helal@gmail.com`      |
+| Site engineer         | `test-site-engineer@example.com` |
+| Site engineer manager | `mouhamedhelal.cor@gmail.com`    |
+| App admin             | `mouhammedhelal@gmail.com`       |
+| App admin             | `cipherpath@proton.me`           |
+
+Any other seeded user from the database (see `lib/services/database_service.dart` or `lib/services/web_storage_service.dart`) will also work.
+
+### 6. Optional: Create assets (if missing)
+
+The app expects `assets/images/` and uses `assets/images/logo.png` in the app bar. If you removed them and see asset errors, ensure the folder exists and add a `logo.png`:
+
+```bash
+mkdir -p assets/images
+# Then add your logo.png into assets/images/
+```
+
+Then run `flutter pub get` again and restart the app.
+
+---
+
+## Use local PostgreSQL with Flutter run (web)
+
+To run the app locally with **`flutter run -d chrome`** (or another browser) and have it use your **local PostgreSQL** instead of browser storage:
+
+### 1. Set up your local PostgreSQL
+
+Create the database and user (if you don't have them yet). For example, in `psql` or Beekeeper:
+>>>>>>> Stashed changes
 
 ```sql
 CREATE USER wood_more WITH PASSWORD 'wood_more';
@@ -125,6 +202,20 @@ flutter run -d windows
 ```
 
 The app will load `web\config.json`, use the API, and store data in PostgreSQL.
+
+### 5. Store everything in the database (mobile / desktop)
+
+By default, **mobile and desktop use local SQLite** on the device. Data is saved on that device only and is **not** in PostgreSQL. To have **all data (reports, attendance, users, etc.) stored in your PostgreSQL database** from the app:
+
+1. **Run the backend API** (see step 2 above) and ensure PostgreSQL has been set up and `init-db.sql` has been run.
+2. **Point the app at the API** using config:
+   - **Web:** set `web/config.json`: `{ "apiBaseUrl": "http://localhost:3000" }` (or your API URL).
+   - **Mobile / desktop:** set `assets/config.json`: `{ "apiBaseUrl": "http://YOUR_API_URL" }`.
+     - Android emulator: use `http://10.0.2.2:3000` (emulator’s host = your machine).
+     - Real device or other desktop: use your machine’s IP, e.g. `http://192.168.1.10:3000`, and ensure the device can reach that IP (same network, firewall allows port 3000).
+3. Run the app (`flutter run` or `flutter run -d chrome`). On startup the app loads config; if `apiBaseUrl` is set, it uses the backend and **all create/update/delete and reports go to PostgreSQL**. If `apiBaseUrl` is empty, web uses browser storage and mobile/desktop use local SQLite (data not in the central database).
+
+**Summary:** Nothing is removed from the old build. When `apiBaseUrl` is set (web: `web/config.json`, mobile/desktop: `assets/config.json`), the app uses the REST API and everything is stored in the database. When it is not set, the app keeps using local storage (SQLite or browser) so data does not persist to PostgreSQL.
 
 ---
 

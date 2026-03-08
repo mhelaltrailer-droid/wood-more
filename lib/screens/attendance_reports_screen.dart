@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/attendance_record_model.dart';
+import '../utils/pdf_share.dart';
 import '../services/storage_service.dart';
 
 /// شاشة تقارير الحضور والانصراف - لمدير المهندسين (عرض فقط)
@@ -119,7 +120,7 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
       ),
     );
     final bytes = await doc.save();
-    await Printing.sharePdf(bytes: bytes, filename: 'تقرير_الحضور_والانصراف_${dateFormat.format(DateTime.now())}.pdf');
+    await sharePdfBytes(bytes, 'تقرير_الحضور_والانصراف_${dateFormat.format(DateTime.now())}.pdf');
   }
 
   static pw.Widget _cell(String text, {bool isHeader = false}) {
@@ -306,8 +307,19 @@ class _LocationRow extends StatelessWidget {
                 ? InkWell(
                     onTap: () async {
                       final uri = Uri.parse(_mapUrl);
-                      if (await canLaunchUrl(uri)) {
-                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      try {
+                        final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        if (!launched && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('تعذر فتح الخريطة. جرّب فتح الرابط من المتصفح.'), backgroundColor: Colors.orange),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('تعذر فتح الخريطة: $e'), backgroundColor: Colors.red),
+                          );
+                        }
                       }
                     },
                     child: Row(

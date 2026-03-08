@@ -7,7 +7,7 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/', (req, res) => {
-  res.json({ ok: true, message: 'Wood & More API', docs: 'Use /users/by-email?email=... for login, /users, /projects, etc.' });
+  res.json({ ok: true, message: 'Wood & More API', docs: 'Use POST /auth/login for login, /users, /projects, etc.' });
 });
 
 const pool = new Pool({
@@ -18,7 +18,28 @@ const pool = new Pool({
   password: process.env.PGPASSWORD || 'wood_more',
 });
 
-// ——— Auth / Users ———
+// ——— Auth (email + password) ———
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    const emailNorm = (email || '').trim().toLowerCase();
+    const pwd = (password || '').trim();
+    if (!emailNorm || !pwd) return res.status(400).json({ error: 'email and password required' });
+    const r = await pool.query(
+      'SELECT id, name, email, role, COALESCE(password, \'0000\') AS password FROM users WHERE LOWER(TRIM(email)) = $1',
+      [emailNorm]
+    );
+    if (r.rows.length === 0) return res.status(401).json(null);
+    const row = r.rows[0];
+    const stored = (row.password || '0000').trim();
+    if (stored !== pwd) return res.status(401).json(null);
+    res.json({ id: parseInt(row.id), name: row.name, email: row.email, role: row.role });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+// ——— Users ———
 app.get('/users/by-email', async (req, res) => {
   try {
     const email = (req.query.email || '').trim().toLowerCase();
@@ -51,10 +72,11 @@ app.get('/users/site-engineers', async (req, res) => {
 
 app.post('/users', async (req, res) => {
   try {
-    const { name, email, role } = req.body;
+    const { name, email, role, password } = req.body;
+    const pwd = (password != null && String(password).trim() !== '') ? String(password).trim() : '0000';
     const r = await pool.query(
-      'INSERT INTO users (name, email, role) VALUES ($1, $2, $3) RETURNING id',
-      [name, (email || '').trim().toLowerCase(), role]
+      'INSERT INTO users (name, email, role, password) VALUES ($1, $2, $3, $4) RETURNING id',
+      [name, (email || '').trim().toLowerCase(), role, pwd]
     );
     res.json(parseInt(r.rows[0].id));
   } catch (e) {
@@ -64,8 +86,17 @@ app.post('/users', async (req, res) => {
 
 app.put('/users/:id', async (req, res) => {
   try {
-    const { name, email, role } = req.body;
-    await pool.query('UPDATE users SET name = $1, email = $2, role = $3 WHERE id = $4', [name, (email || '').trim().toLowerCase(), role, req.params.id]);
+    const { name, email, role, password } = req.body;
+    const updates = ['name = $1', 'email = $2', 'role = $3'];
+    const params = [name, (email || '').trim().toLowerCase(), role];
+    let i = 4;
+    if (password != null && String(password).trim() !== '') {
+      updates.push(`password = $${i}`);
+      params.push(String(password).trim());
+      i++;
+    }
+    params.push(req.params.id);
+    await pool.query(`UPDATE users SET ${updates.join(', ')} WHERE id = $${i}`, params);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -364,7 +395,8 @@ app.post('/custody', async (req, res) => {
     await pool.query('INSERT INTO engineer_custody (user_id, amount, created_at, note) VALUES ($1, $2, $3, $4)', [userId, amount, now, note || '']);
     const r = await pool.query('SELECT balance FROM engineer_balance WHERE user_id = $1', [userId]);
     const current = r.rows.length ? parseFloat(r.rows[0].balance) : 0;
-    await pool.query('INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2', [userId, current + parseFloat(amount)]);
+    // Custody = company gives cash to engineer → balance (what we owe) decreases
+    await pool.query('INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2', [userId, current - parseFloat(amount)]);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
