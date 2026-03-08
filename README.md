@@ -165,7 +165,7 @@ docker compose down
 | Connection refused (port 3000) | Backend is running (step 2) and no firewall is blocking 3000 |
 | **Reports/data missing after closing and reopening the app** | The app only uses PostgreSQL when `apiBaseUrl` is set. Set it in **`web\config.json`** (for web) and **`assets\config.json`** (for Windows desktop) to `"http://localhost:3000"`, and ensure the backend is running before starting the app. |
 | App uses browser/SQLite instead of API | Ensure `web\config.json` and `assets\config.json` have `"apiBaseUrl": "http://localhost:3000"` (not empty), then restart the app. |
-| **Built app (Docker) doesn't show latest features** | The container uses a built image. After code changes, rebuild without cache: `docker compose build --no-cache app` then `docker compose up -d`. |
+| **Built app (Docker) doesn't show latest features** | Rebuild the app image and force containers to use it: `docker compose build --no-cache app` then `docker compose up -d --force-recreate`. Then **hard refresh** the browser (Ctrl+Shift+R or Cmd+Shift+R) so the browser doesn't use cached old JS—or open http://localhost:8080 in an incognito/private window. |
 | **"column password does not exist" when logging in (Docker)** | The API adds the column automatically on startup. Rebuild and restart the API: `docker compose build api && docker compose up -d`. If it still fails, reset the DB (you lose data): `docker compose down -v` then `docker compose up -d`. |
 
 ---
