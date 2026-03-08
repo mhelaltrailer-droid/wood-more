@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -10,13 +11,16 @@ app.get('/', (req, res) => {
   res.json({ ok: true, message: 'Wood & More API', docs: 'Use POST /auth/login for login, /users, /projects, etc.' });
 });
 
-const pool = new Pool({
-  host: process.env.PGHOST || 'localhost',
-  port: parseInt(process.env.PGPORT || '5432', 10),
-  database: process.env.PGDATABASE || 'wood_more',
-  user: process.env.PGUSER || 'wood_more',
-  password: process.env.PGPASSWORD || 'wood_more',
-});
+// Prefer DATABASE_URL (e.g. from Neon or Supabase); otherwise use individual env vars.
+const pool = process.env.DATABASE_URL
+  ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
+  : new Pool({
+      host: process.env.PGHOST || 'localhost',
+      port: parseInt(process.env.PGPORT || '5432', 10),
+      database: process.env.PGDATABASE || 'wood_more',
+      user: process.env.PGUSER || 'wood_more',
+      password: process.env.PGPASSWORD || 'wood_more',
+    });
 
 // One-time migration: add password column if missing (e.g. Docker volume created before it existed)
 async function ensurePasswordColumn() {

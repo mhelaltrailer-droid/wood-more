@@ -1,37 +1,12 @@
-# Wood & More — PostgreSQL + API + Web app
-# Start order: postgres → api (waits for DB healthy) → app (waits for api).
-# Database name: wood_more (created by POSTGRES_DB). Backend and init-db.sql use the same.
+# Wood & More — API + Web app (Neon cloud PostgreSQL)
+# Database runs on Neon; credentials are in backend/.env
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_DB: wood_more
-      POSTGRES_USER: wood_more
-      POSTGRES_PASSWORD: wood_more
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./backend/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U wood_more -d wood_more"]
-      interval: 3s
-      timeout: 3s
-      retries: 5
-
   api:
     build: ./backend
-    environment:
-      PGHOST: postgres
-      PGPORT: "5432"
-      PGDATABASE: wood_more
-      PGUSER: wood_more
-      PGPASSWORD: wood_more
-      PORT: "3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
+    env_file: ./backend/.env
+    ports:
+      - "3000:3000"
 
   app:
     build: .
@@ -41,6 +16,3 @@ services:
       - ./config.api.json:/usr/share/nginx/html/config.json:ro
     depends_on:
       - api
-
-volumes:
-  postgres_data:
