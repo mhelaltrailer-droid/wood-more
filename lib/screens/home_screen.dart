@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../models/daily_report_model.dart';
 import '../services/auth_persistence.dart';
+import '../services/route_persistence.dart';
+import '../services/route_restore.dart';
+import '../core/route_observer.dart';
 import 'attendance_screen.dart';
 import 'attendance_reports_screen.dart';
 import 'reports_screen.dart';
@@ -15,13 +18,43 @@ import 'accountant_finance_screen.dart';
 import 'login_screen.dart';
 
 /// الصفحة الرئيسية - تختلف حسب دور المستخدم
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   final UserModel currentUser;
 
   const HomeScreen({super.key, required this.currentUser});
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> with RouteAware {
+  bool _subscribed = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_subscribed) return;
+    final route = ModalRoute.of(context);
+    if (route is ModalRoute<void>) {
+      RouteObserverProvider.routeObserver.subscribe(this, route);
+      _subscribed = true;
+    }
+  }
+
+  @override
+  void dispose() {
+    RouteObserverProvider.routeObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    saveLastRoute('home');
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final currentUser = widget.currentUser;
     return Scaffold(
       appBar: AppBar(
         title: FittedBox(
@@ -47,6 +80,7 @@ class HomeScreen extends StatelessWidget {
             icon: const Icon(Icons.logout),
             onPressed: () async {
               await clearCurrentUser();
+              await clearLastRoute();
               if (!context.mounted) return;
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -86,12 +120,8 @@ class _EngineerHome extends StatelessWidget {
           const SizedBox(height: 48),
           // أيقونة تسجيل الحضور والانصراف
           InkWell(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => AttendanceScreen(currentUser: user),
-                ),
-              );
+            onTap: () async {
+              await pushAndSaveRoute(context, 'attendance', AttendanceScreen(currentUser: user));
             },
             borderRadius: BorderRadius.circular(20),
             child: Container(
@@ -142,17 +172,13 @@ class _EngineerHome extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           InkWell(
-            onTap: () {
+            onTap: () async {
               final report = DailyReportData(
                 userName: user.name,
                 userId: user.id,
                 reportDate: DateTime.now(),
               );
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => DailyReportStep1Screen(user: user, report: report),
-                ),
-              );
+              await pushAndSaveRoute(context, 'daily-report', DailyReportStep1Screen(user: user, report: report));
             },
             borderRadius: BorderRadius.circular(20),
             child: Container(
@@ -182,12 +208,8 @@ class _EngineerHome extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           InkWell(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => EngineerProjectsScreen(user: user),
-                ),
-              );
+            onTap: () async {
+              await pushAndSaveRoute(context, 'engineer-projects', EngineerProjectsScreen(user: user));
             },
             borderRadius: BorderRadius.circular(20),
             child: Container(
@@ -253,12 +275,8 @@ class _AccountantHome extends StatelessWidget {
           ),
           const SizedBox(height: 48),
           InkWell(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => AccountantCustodyScreen(currentUser: user),
-                ),
-              );
+            onTap: () async {
+              await pushAndSaveRoute(context, 'accountant-custody', AccountantCustodyScreen(currentUser: user));
             },
             borderRadius: BorderRadius.circular(20),
             child: Container(
@@ -296,12 +314,8 @@ class _AccountantHome extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           InkWell(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => AccountantFinanceScreen(currentUser: user),
-                ),
-              );
+            onTap: () async {
+              await pushAndSaveRoute(context, 'accountant-finance', AccountantFinanceScreen(currentUser: user));
             },
             borderRadius: BorderRadius.circular(20),
             child: Container(
@@ -366,12 +380,8 @@ class _ManagerHome extends StatelessWidget {
           const SizedBox(height: 48),
           // بطاقة تقارير الحضور
           InkWell(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const AttendanceReportsScreen(),
-                ),
-              );
+            onTap: () async {
+              await pushAndSaveRoute(context, 'attendance-reports', const AttendanceReportsScreen());
             },
             borderRadius: BorderRadius.circular(20),
             child: Container(
@@ -420,12 +430,8 @@ class _ManagerHome extends StatelessWidget {
           const SizedBox(height: 20),
           // بطاقة التقارير (التقارير اليومية)
           InkWell(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ReportsScreen(currentUser: user),
-                ),
-              );
+            onTap: () async {
+              await pushAndSaveRoute(context, 'reports', ReportsScreen(currentUser: user));
             },
             borderRadius: BorderRadius.circular(20),
             child: Container(
@@ -474,12 +480,8 @@ class _ManagerHome extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           InkWell(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => FinanceScreen(currentUser: user),
-                ),
-              );
+            onTap: () async {
+              await pushAndSaveRoute(context, 'finance', FinanceScreen(currentUser: user));
             },
             borderRadius: BorderRadius.circular(20),
             child: Container(
@@ -510,12 +512,8 @@ class _ManagerHome extends StatelessWidget {
           if (user.role == 'site_engineer_manager') ...[
             const SizedBox(height: 20),
             InkWell(
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => ManagerCustodyScreen(currentUser: user),
-                  ),
-                );
+              onTap: () async {
+                await pushAndSaveRoute(context, 'manager-custody', ManagerCustodyScreen(currentUser: user));
               },
               borderRadius: BorderRadius.circular(20),
               child: Container(
@@ -547,12 +545,8 @@ class _ManagerHome extends StatelessWidget {
           if (user.isAdmin) ...[
             const SizedBox(height: 20),
             InkWell(
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => AdminDashboardScreen(currentUser: user),
-                  ),
-                );
+              onTap: () async {
+                await pushAndSaveRoute(context, 'admin-dashboard', AdminDashboardScreen(currentUser: user));
               },
               borderRadius: BorderRadius.circular(20),
               child: Container(

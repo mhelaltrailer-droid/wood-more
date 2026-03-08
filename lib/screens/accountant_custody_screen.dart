@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/user_model.dart';
 import '../models/daily_report_model.dart';
+import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
@@ -228,7 +229,11 @@ class _AccountantCustodyScreenState extends State<AccountantCustodyScreen> {
         foregroundColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: widget.currentUser))),
+          onPressed: () async {
+          await saveLastRoute('home');
+          if (!context.mounted) return;
+          Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomeScreen(currentUser: widget.currentUser)));
+        },
         ),
       ),
       body: ListView(

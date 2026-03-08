@@ -6,6 +6,7 @@ import '../models/building_model.dart';
 import '../models/building_material_model.dart';
 import '../models/building_cutlist_model.dart';
 import '../models/unit_model.dart';
+import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
@@ -111,9 +112,13 @@ class _EngineerProjectsScreenState extends State<EngineerProjectsScreen> {
         foregroundColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => HomeScreen(currentUser: widget.user)),
-          ),
+          onPressed: () async {
+            await saveLastRoute('home');
+            if (!context.mounted) return;
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => HomeScreen(currentUser: widget.user)),
+            );
+          },
         ),
       ),
       body: SingleChildScrollView(

@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../models/daily_report_model.dart';
+import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
@@ -29,6 +30,8 @@ class _DailyReportStep3ScreenState extends State<DailyReportStep3Screen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم حفظ التقرير اليومي بنجاح'), backgroundColor: Colors.green),
       );
+      await saveLastRoute('home');
+      if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => HomeScreen(currentUser: widget.user)),
         (route) => false,

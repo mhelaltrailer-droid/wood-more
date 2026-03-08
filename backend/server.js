@@ -13,9 +13,9 @@ app.get('/', (req, res) => {
 const pool = new Pool({
   host: process.env.PGHOST || 'localhost',
   port: parseInt(process.env.PGPORT || '5432', 10),
-  database: process.env.PGDATABASE || 'postgres',
-  user: process.env.PGUSER || 'postgres',
-  password: process.env.PGPASSWORD || 'password',
+  database: process.env.PGDATABASE || 'wood_more',
+  user: process.env.PGUSER || 'wood_more',
+  password: process.env.PGPASSWORD || 'wood_more',
 });
 
 // One-time migration: add password column if missing (e.g. Docker volume created before it existed)
