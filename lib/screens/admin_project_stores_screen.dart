@@ -104,20 +104,28 @@ class _AdminProjectStoresScreenState extends State<AdminProjectStoresScreen> {
                 }
                 Navigator.pop(ctx);
                 try {
-                final adminName = widget.admin.name;
-                if (item == null) {
-                  await _db.addProjectStock(ProjectStockModel(id: 0, projectId: _selectedProject!.id, materialName: name, quantity: qty, unit: unit));
-                  final delta = double.tryParse(qty.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
-                  if (delta != 0) await _db.addProjectStockLedgerEntry(projectId: _selectedProject!.id, materialName: name, unit: unit, quantityDelta: delta, type: 'add', userName: adminName);
-                } else {
-                  final oldQty = double.tryParse(item.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
-                  final newQty = double.tryParse(qty.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
-                  await _db.updateProjectStock(ProjectStockModel(id: item.id, projectId: item.projectId, materialName: name, quantity: qty, unit: unit));
-                  final delta = newQty - oldQty;
-                  if (delta != 0) await _db.addProjectStockLedgerEntry(projectId: item.projectId, materialName: name, unit: unit, quantityDelta: delta, type: 'edit', userName: adminName);
-                }
-                _loadStock();
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحفظ'), backgroundColor: Colors.green));
+                  final adminName = widget.admin.name;
+                  if (item == null) {
+                    await _db.addProjectStock(ProjectStockModel(id: 0, projectId: _selectedProject!.id, materialName: name, quantity: qty, unit: unit));
+                    final delta = double.tryParse(qty.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+                    if (delta != 0) {
+                      try {
+                        await _db.addProjectStockLedgerEntry(projectId: _selectedProject!.id, materialName: name, unit: unit, quantityDelta: delta, type: 'add', userName: adminName);
+                      } catch (_) { /* سجل الحركات قد لا يكون متاحاً في الخادم القديم */ }
+                    }
+                  } else {
+                    final oldQty = double.tryParse(item.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+                    final newQty = double.tryParse(qty.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+                    await _db.updateProjectStock(ProjectStockModel(id: item.id, projectId: item.projectId, materialName: name, quantity: qty, unit: unit));
+                    final delta = newQty - oldQty;
+                    if (delta != 0) {
+                      try {
+                        await _db.addProjectStockLedgerEntry(projectId: item.projectId, materialName: name, unit: unit, quantityDelta: delta, type: 'edit', userName: adminName);
+                      } catch (_) { /* سجل الحركات قد لا يكون متاحاً */ }
+                    }
+                  }
+                  _loadStock();
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحفظ'), backgroundColor: Colors.green));
                 } catch (e) {
                   if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
                 }
