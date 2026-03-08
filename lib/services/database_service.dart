@@ -797,11 +797,11 @@ class DatabaseService {
     return maps.map((m) => ProjectStockLedgerModel.fromMap(m)).toList();
   }
 
-  /// خصم كمية من رصيد خامة في مخزن المشروع (عند حفظ التقرير اليومي). يُرجع true إذا تم الخصم.
+  /// خصم كمية من رصيد خامة في مخزن المشروع (عند حفظ التقرير اليومي). المطابقة باسم الخامة فقط، والخصم على رقم الكمية فقط (الوحدة ثابتة: متر / عود / متر مربع).
   Future<bool> deductProjectStock(int projectId, String materialName, String unit, double quantity, String engineerName, DateTime reportDate) async {
     final list = await getProjectStock(projectId);
     final row = list.cast<ProjectStockModel?>().firstWhere(
-          (r) => r!.materialName == materialName && r.unit == unit,
+          (r) => r!.materialName == materialName,
           orElse: () => null,
         );
     if (row == null) return false;
@@ -817,7 +817,7 @@ class DatabaseService {
     await addProjectStockLedgerEntry(
       projectId: projectId,
       materialName: materialName,
-      unit: unit,
+      unit: row.unit,
       quantityDelta: -quantity,
       type: 'deduct_report',
       userName: engineerName,

@@ -9,6 +9,7 @@ import '../models/building_model.dart';
 import '../models/supervisor_model.dart';
 import '../models/contractor_model.dart';
 import '../models/project_stock_model.dart';
+import '../models/project_stock_ledger_model.dart';
 import '../models/unit_model.dart';
 import '../models/building_material_model.dart';
 import '../models/building_cutlist_model.dart';
@@ -368,6 +369,43 @@ class ApiStorageService {
 
   Future<void> deleteProjectStock(int id) async {
     await _delete('project-stock/$id');
+  }
+
+  Future<void> addProjectStockLedgerEntry({
+    required int projectId,
+    required String materialName,
+    required String unit,
+    required double quantityDelta,
+    required String type,
+    required String userName,
+    DateTime? createdAt,
+    int? userId,
+  }) async {
+    final body = <String, dynamic>{
+      'projectId': projectId,
+      'materialName': materialName,
+      'unit': unit,
+      'quantityDelta': quantityDelta,
+      'type': type,
+      'userName': userName,
+    };
+    if (userId != null) body['userId'] = userId;
+    if (createdAt != null) body['createdAt'] = createdAt.toIso8601String();
+    await _postVoid('project-stock-ledger', body);
+  }
+
+  Future<List<ProjectStockLedgerModel>> getStockLedger(int projectId, String materialName) async {
+    final list = await _getList('project-stock-ledger?projectId=$projectId&materialName=${Uri.encodeComponent(materialName)}');
+    return list.map((e) {
+      final m = Map<String, dynamic>.from(e as Map);
+      if (!m.containsKey('project_id') && m.containsKey('projectId')) m['project_id'] = m['projectId'];
+      if (!m.containsKey('material_name') && m.containsKey('materialName')) m['material_name'] = m['materialName'];
+      if (!m.containsKey('quantity_delta') && m.containsKey('quantityDelta')) m['quantity_delta'] = m['quantityDelta'];
+      if (!m.containsKey('created_at') && m.containsKey('createdAt')) m['created_at'] = m['createdAt'];
+      if (!m.containsKey('user_id') && m.containsKey('userId')) m['user_id'] = m['userId'];
+      if (!m.containsKey('user_name') && m.containsKey('userName')) m['user_name'] = m['userName'];
+      return ProjectStockLedgerModel.fromMap(m);
+    }).toList();
   }
 
   Future<List<UnitModel>> getUnits(int buildingId) async {

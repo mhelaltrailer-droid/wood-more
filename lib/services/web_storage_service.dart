@@ -658,11 +658,12 @@ class WebStorageService {
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
+  /// خصم رقم الكمية فقط؛ المطابقة بالمشروع + اسم الخامة (الوحدة ثابتة).
   Future<bool> deductProjectStock(int projectId, String materialName, String unit, double quantity, String engineerName, DateTime reportDate) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectStockKey)!) as List;
-    final idx = list.indexWhere((e) => (e as Map)['project_id'] == projectId && e['material_name'] == materialName && e['unit'] == unit);
+    final idx = list.indexWhere((e) => (e as Map)['project_id'] == projectId && e['material_name'] == materialName);
     if (idx < 0) return false;
     final row = Map<String, dynamic>.from(list[idx] as Map);
     final current = double.tryParse((row['quantity'] as String).replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
@@ -670,10 +671,11 @@ class WebStorageService {
     row['quantity'] = newQty.toStringAsFixed(2);
     list[idx] = row;
     await prefs.setString(_projectStockKey, jsonEncode(list));
+    final stockUnit = row['unit'] as String? ?? unit;
     await addProjectStockLedgerEntry(
       projectId: projectId,
       materialName: materialName,
-      unit: unit,
+      unit: stockUnit,
       quantityDelta: -quantity,
       type: 'deduct_report',
       userName: engineerName,

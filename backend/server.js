@@ -354,6 +354,27 @@ app.post('/daily-reports', async (req, res) => {
       const current = bal.rows.length ? parseFloat(bal.rows[0].balance) : 0;
       await pool.query('INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2', [b.userId, current - totalExpense]);
     }
+    // خصم المواد من مخزن المشروع: المطابقة بالمشروع + اسم الخامة فقط، والخصم يكون على رقم الكمية فقط (الوحدة ثابتة: متر / عود / متر مربع)
+    if (b.projectId) {
+      const materials = Array.isArray(b.materials) ? b.materials : (typeof b.materials === 'string' ? JSON.parse(b.materials || '[]') : []);
+      const reportDate = b.reportDate ? new Date(b.reportDate) : new Date();
+      for (const m of materials) {
+        const materialName = m.materialName || m.material_name || '';
+        const quantity = parseFloat(String((m.quantity || '').replace(/[^\d.]/g, ''))) || 0;
+        const unit = (m.unit || 'متر').trim() || 'متر';
+        if (!materialName || quantity <= 0) continue;
+        const stock = await pool.query('SELECT id, quantity, unit FROM project_stock WHERE project_id = $1 AND material_name = $2 LIMIT 1', [b.projectId, materialName]);
+        if (stock.rows.length === 0) continue;
+        const row = stock.rows[0];
+        const currentQty = parseFloat(String(row.quantity).replace(/[^\d.]/g, '')) || 0;
+        const newQty = Math.max(0, currentQty - quantity);
+        await pool.query('UPDATE project_stock SET quantity = $1 WHERE id = $2', [String(newQty), row.id]);
+        await pool.query(
+          'INSERT INTO project_stock_ledger (project_id, material_name, unit, quantity_delta, type, created_at, user_id, user_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+          [b.projectId, materialName, row.unit || unit, -quantity, 'deduct_report', reportDate.toISOString(), b.userId || null, b.userName || '']
+        );
+      }
+    }
     res.json(id);
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -524,6 +545,45 @@ app.delete('/project-stock/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM project_stock WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+// ——— Project stock ledger (سجل حركات الخامات) ———
+app.post('/project-stock-ledger', async (req, res) => {
+  try {
+    const { projectId, materialName, unit, quantityDelta, type, userName, userId, createdAt } = req.body;
+    const now = (createdAt ? new Date(createdAt) : new Date()).toISOString();
+    await pool.query(
+      'INSERT INTO project_stock_ledger (project_id, material_name, unit, quantity_delta, type, created_at, user_id, user_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [projectId, materialName, unit || '', quantityDelta, type || 'add', now, userId || null, userName || '']
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/project-stock-ledger', async (req, res) => {
+  try {
+    const { projectId, materialName } = req.query;
+    if (!projectId || !materialName) return res.status(400).json({ error: 'projectId and materialName required' });
+    const r = await pool.query(
+      'SELECT * FROM project_stock_ledger WHERE project_id = $1 AND material_name = $2 ORDER BY created_at DESC',
+      [projectId, materialName]
+    );
+    res.json(r.rows.map(row => ({
+      id: parseInt(row.id),
+      project_id: parseInt(row.project_id),
+      material_name: row.material_name,
+      unit: row.unit,
+      quantity_delta: parseFloat(row.quantity_delta),
+      type: row.type,
+      created_at: row.created_at,
+      user_id: row.user_id ? parseInt(row.user_id) : null,
+      user_name: row.user_name || ''
+    })));
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
