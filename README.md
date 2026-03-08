@@ -34,35 +34,19 @@ Fix any issues reported by `flutter doctor` (e.g. Chrome, Android SDK) before co
 - Run the installer. Remember the password you set for the `postgres` superuser.
 - Keep the default port **5432** unless you need another.
 
-### 1.2 Create database and user
+### 1.2 Default database (postgres)
 
-Open **Command Prompt** or **PowerShell** and run (adjust the path if your PostgreSQL `bin` is elsewhere):
-
-```cmd
-"C:\Program Files\PostgreSQL\16\bin\psql" -U postgres
-```
-
-(Use your PostgreSQL version number if different, e.g. `15` instead of `16`.)
-
-In the `psql` prompt, run:
-
-```sql
-CREATE USER wood_more WITH PASSWORD 'wood_more';
-CREATE DATABASE wood_more OWNER wood_more;
-\q
-```
-
-**Alternative:** Use **pgAdmin** (installed with PostgreSQL): create a new login/role `wood_more` with password `wood_more`, then create a database `wood_more` owned by `wood_more`.
+The API uses the **default PostgreSQL database**: database **`postgres`**, user **`postgres`**, password **`password`**. Ensure the `postgres` user has password `password` (e.g. in pgAdmin: Login/Group Roles → postgres → Definition → Password).
 
 ### 1.3 Load schema and seed data
 
-From the project root (the `wood-more` folder), run:
+Run the init script in the **postgres** database. From the project root:
 
 ```cmd
-"C:\Program Files\PostgreSQL\16\bin\psql" -U wood_more -d wood_more -f backend\init-db.sql
+"C:\Program Files\PostgreSQL\16\bin\psql" -U postgres -d postgres -f backend\init-db.sql
 ```
 
-Enter password `wood_more` when prompted. Or in pgAdmin: open a Query Tool, paste the contents of `backend\init-db.sql`, and execute.
+Enter password `password` when prompted. Or in pgAdmin: connect to database **postgres** as **postgres**, open Query Tool, paste the contents of `backend\init-db.sql`, and execute.
 
 ---
 
@@ -75,21 +59,17 @@ Open a terminal in the project root and install dependencies, then start the API
 ```cmd
 cd backend
 npm install
-set PGHOST=localhost
-set PGPORT=5432
-set PGDATABASE=wood_more
-set PGUSER=wood_more
-set PGPASSWORD=wood_more
-set PORT=3000
 node server.js
 ```
+
+(Defaults: database **postgres**, user **postgres**, password **password**. Override with `set PGDATABASE=...` etc. if needed.)
 
 **PowerShell:**
 
 ```powershell
 cd backend
 npm install
-$env:PGHOST="localhost"; $env:PGPORT="5432"; $env:PGDATABASE="wood_more"; $env:PGUSER="wood_more"; $env:PGPASSWORD="wood_more"; $env:PORT="3000"; node server.js
+node server.js
 ```
 
 Leave this window open. The API will be available at **http://localhost:3000**.
@@ -200,8 +180,8 @@ docker compose down
 ## Summary
 
 1. Install PostgreSQL, Node.js, and Flutter.
-2. Create user `wood_more` and database `wood_more`, then run `backend\init-db.sql`.
-3. In `backend`, run `npm install` and start the server with the env vars above (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, PORT).
+2. Ensure PostgreSQL user **postgres** has password **password**, then run **`backend\init-db.sql`** in the **postgres** database.
+3. In `backend`, run `npm install` and `node server.js` (API uses database postgres, user postgres, password password by default).
 4. Set **`web\config.json`** and **`assets\config.json`** to `{"apiBaseUrl": "http://localhost:3000"}` so the app uses the API.
 5. From the project root, run `flutter run -d chrome` or `flutter run -d windows`.
 6. Log in with **email + password** (default `0000`; `h@h.com` uses `123`).

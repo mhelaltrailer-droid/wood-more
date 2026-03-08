@@ -1,15 +1,15 @@
 -- =============================================================================
--- Step 1: Create a dedicated database for Wood & More (run this FIRST)
+-- Step 1: Create user and database for Wood & More (run this FIRST)
 -- =============================================================================
--- In Beekeeper: connect to the default database (e.g. "postgres"), then run
--- this script. After that, create a NEW connection to database "wood_more"
--- and run init-db.sql (tables and seed data).
--- (Docker Compose uses POSTGRES_DB=wood_more; this file is for manual setup.)
+-- Connect as superuser (e.g. "postgres") to the default database ("postgres"),
+-- then run this script. The API connects as user wood_more with password "password".
+-- After this, connect to database "wood_more" (user wood_more, password "password")
+-- and run init-db.sql.
 -- =============================================================================
+
+CREATE USER wood_more WITH PASSWORD 'password';
 
 CREATE DATABASE wood_more
   WITH
-  ENCODING = 'UTF8';
-
--- Optional: if your server has a specific owner or locale, you can use:
--- CREATE DATABASE wood_more WITH ENCODING = 'UTF8' OWNER = postgres;
+  ENCODING = 'UTF8'
+  OWNER = wood_more;
