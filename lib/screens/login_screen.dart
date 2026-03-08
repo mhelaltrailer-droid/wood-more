@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
+import '../services/auth_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
@@ -50,6 +51,8 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
+      await saveCurrentUser(user);
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => HomeScreen(currentUser: user),

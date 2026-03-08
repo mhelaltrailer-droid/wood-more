@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../models/daily_report_model.dart';
+import '../services/auth_persistence.dart';
 import 'attendance_screen.dart';
 import 'attendance_reports_screen.dart';
 import 'reports_screen.dart';
@@ -44,7 +45,9 @@ class HomeScreen extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () {
+            onPressed: () async {
+              await clearCurrentUser();
+              if (!context.mounted) return;
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute(builder: (_) => const LoginScreen()),
               );
