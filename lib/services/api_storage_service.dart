@@ -122,10 +122,16 @@ class ApiStorageService {
 
   Future<List<ProjectModel>> getProjects() async {
     final list = await _getList('projects');
-    return list.map((e) {
+    final projects = list.map((e) {
       final m = Map<String, dynamic>.from(e as Map);
       return ProjectModel.fromMap(m);
     }).toList();
+    return _deduplicateProjectsByName(projects);
+  }
+
+  static List<ProjectModel> _deduplicateProjectsByName(List<ProjectModel> list) {
+    final seen = <String>{};
+    return list.where((p) => seen.add(p.name)).toList()..sort((a, b) => a.name.compareTo(b.name));
   }
 
   Future<int> addProject(String name) async {
@@ -215,6 +221,10 @@ class ApiStorageService {
     return (checkIn: checkIn, checkOut: checkOut);
   }
 
+  Future<void> deleteAttendanceRecord(int id) async {
+    await _delete('attendance/$id');
+  }
+
   Future<List<String>> getMaterials() async {
     final list = await _getList('materials');
     return list.map((e) => e as String).toList();
@@ -250,6 +260,7 @@ class ApiStorageService {
       'supervisorName': report.supervisorName,
       'contractorName': report.contractorName,
       'workersCount': report.workersCount,
+      'contractors_json': report.contractors.map((c) => c.toJson()).toList(),
       'tomorrowPlan': report.tomorrowPlan,
       'documentPath': report.documentPath,
       'imagePaths': report.imagePaths,
@@ -284,6 +295,10 @@ class ApiStorageService {
       final m = Map<String, dynamic>.from(e as Map);
       return DailyReportData.fromDbMap(m);
     }).toList();
+  }
+
+  Future<void> deleteDailyReport(int id) async {
+    await _delete('daily-reports/$id');
   }
 
   Future<double> getEngineerBalance(int userId) async {

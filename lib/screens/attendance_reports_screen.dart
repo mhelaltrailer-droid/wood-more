@@ -1,16 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/attendance_record_model.dart';
+import '../models/user_model.dart';
 import '../utils/pdf_share.dart';
 import '../services/storage_service.dart';
 
-/// شاشة تقارير الحضور والانصراف - لمدير المهندسين (عرض فقط)
+/// صلاحية التعديل والحذف لسجلات الحضور والانصراف: مسؤول التطبيق (mouhammedhelal@gmail.com) فقط
+bool canEditDeleteAttendance(UserModel? user) =>
+    user != null && user.role == 'app_admin' && user.email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+
+/// شاشة تقارير الحضور والانصراف - لمدير المهندسين (عرض؛ تعديل/حذف لمسؤول التطبيق فقط)
 class AttendanceReportsScreen extends StatefulWidget {
-  const AttendanceReportsScreen({super.key});
+  final UserModel? currentUser;
+
+  const AttendanceReportsScreen({super.key, this.currentUser});
 
   @override
   State<AttendanceReportsScreen> createState() => _AttendanceReportsScreenState();
@@ -20,6 +28,8 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
   final _db = getStorage();
   List<AttendanceRecordModel> _records = [];
   bool _isLoading = true;
+  DateTime? _reportDateFrom;
+  DateTime? _reportDateTo;
 
   @override
   void initState() {
@@ -36,8 +46,116 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
     });
   }
 
+  List<AttendanceRecordModel> get _displayRecords {
+    if (_reportDateFrom == null || _reportDateTo == null) return _records;
+    final from = DateTime(_reportDateFrom!.year, _reportDateFrom!.month, _reportDateFrom!.day);
+    final to = DateTime(_reportDateTo!.year, _reportDateTo!.month, _reportDateTo!.day, 23, 59, 59, 999);
+    return _records.where((r) => !r.dateTime.isBefore(from) && !r.dateTime.isAfter(to)).toList();
+  }
+
+  void _showCreateReportDialog() {
+    DateTime from = _reportDateFrom ?? DateTime.now().subtract(const Duration(days: 7));
+    DateTime to = _reportDateTo ?? DateTime.now();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          title: const Text('إنشاء تقرير - تحديد المدة'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('من تاريخ', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                ListTile(
+                  title: Text(DateFormat('yyyy/MM/dd', 'ar').format(from)),
+                  trailing: const Icon(Icons.calendar_today),
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: from,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) setDialog(() => from = picked);
+                  },
+                ),
+                const SizedBox(height: 16),
+                const Text('إلى تاريخ', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                ListTile(
+                  title: Text(DateFormat('yyyy/MM/dd', 'ar').format(to)),
+                  trailing: const Icon(Icons.calendar_today),
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: to,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) setDialog(() => to = picked);
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            FilledButton(
+              onPressed: () {
+                if (from.isAfter(to)) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('من تاريخ يجب أن يكون قبل إلى تاريخ')),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx);
+                setState(() {
+                  _reportDateFrom = from;
+                  _reportDateTo = to;
+                });
+              },
+              child: const Text('عرض التقرير'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _clearReportRange() {
+    setState(() {
+      _reportDateFrom = null;
+      _reportDateTo = null;
+    });
+  }
+
+  Future<void> _deleteRecord(AttendanceRecordModel record) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تأكيد الحذف'),
+        content: Text('حذف سجل ${record.isCheckIn ? "حضور" : "انصراف"} لـ ${record.userName}؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('حذف')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _db.deleteAttendanceRecord(record.id);
+      _loadRecords();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حذف السجل'), backgroundColor: Colors.green));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
+    }
+  }
+
   Future<void> _exportPdf() async {
-    if (_records.isEmpty) {
+    final toExport = _displayRecords;
+    if (toExport.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('لا توجد سجلات لتصديرها')),
       );
@@ -48,31 +166,55 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
     final fontBase = await PdfGoogleFonts.tajawalRegular();
     final fontBold = await PdfGoogleFonts.tajawalBold();
     final theme = pw.ThemeData.withFont(base: fontBase, bold: fontBold);
+    pw.ImageProvider? logoImage;
+    try {
+      final logoBytes = await rootBundle.load('assets/images/logo.png');
+      logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
+    } catch (_) {}
     final doc = pw.Document();
+    final dateFromStr = _reportDateFrom != null ? dateFormat.format(_reportDateFrom!) : dateFormat.format(DateTime.now());
+    final dateToStr = _reportDateTo != null ? dateFormat.format(_reportDateTo!) : dateFormat.format(DateTime.now());
     doc.addPage(
       pw.MultiPage(
         theme: theme,
         pageFormat: PdfPageFormat.a4.landscape,
-        margin: const pw.EdgeInsets.all(24),
+        margin: const pw.EdgeInsets.symmetric(horizontal: 32, vertical: 24),
         header: (context) => pw.Directionality(
           textDirection: pw.TextDirection.rtl,
-          child: pw.Padding(
-            padding: const pw.EdgeInsets.only(bottom: 12),
-            child: pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text(
-                  'تقرير الحضور والانصراف - Wood & More',
-                  textDirection: pw.TextDirection.rtl,
-                  style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              if (logoImage != null)
+                pw.Center(
+                  child: pw.Container(
+                    height: 48,
+                    margin: const pw.EdgeInsets.only(bottom: 8),
+                    child: pw.Image(logoImage!, fit: pw.BoxFit.contain),
+                  ),
                 ),
-                pw.Text(
-                  'تاريخ التقرير: ${dateFormat.format(DateTime.now())}',
-                  textDirection: pw.TextDirection.rtl,
-                  style: const pw.TextStyle(fontSize: 10),
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(vertical: 10),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.green50,
+                  borderRadius: pw.BorderRadius.circular(8),
+                  border: pw.Border.all(color: PdfColors.green800),
                 ),
-              ],
-            ),
+                child: pw.Center(
+                  child: pw.Text(
+                    'تقرير الحضور والانصراف | Attendance Report',
+                    textDirection: pw.TextDirection.rtl,
+                    style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.green900),
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Text(
+                'من $dateFromStr إلى $dateToStr',
+                textDirection: pw.TextDirection.rtl,
+                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.green800),
+              ),
+              pw.SizedBox(height: 10),
+            ],
           ),
         ),
         build: (context) => [
@@ -102,7 +244,7 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
                     _cell('ملاحظات', isHeader: true),
                   ],
                 ),
-                ..._records.map((r) => pw.TableRow(
+                ...toExport.map((r) => pw.TableRow(
                       children: [
                         _cell(r.userName),
                         _cell(r.isCheckIn ? 'حضور' : 'انصراف'),
@@ -120,16 +262,20 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
       ),
     );
     final bytes = await doc.save();
-    await sharePdfBytes(bytes, 'تقرير_الحضور_والانصراف_${dateFormat.format(DateTime.now())}.pdf');
+    await sharePdfBytes(bytes, 'تقرير_الحضور_والانصراف_${dateFromStr}_${dateToStr}.pdf');
   }
 
   static pw.Widget _cell(String text, {bool isHeader = false}) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: pw.Text(
         text,
         textDirection: pw.TextDirection.rtl,
-        style: pw.TextStyle(fontSize: isHeader ? 10 : 9, fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal),
+        style: pw.TextStyle(
+          fontSize: 10,
+          fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal,
+          color: isHeader ? PdfColors.green900 : PdfColors.black,
+        ),
         maxLines: 2,
         overflow: pw.TextOverflow.clip,
       ),
@@ -146,7 +292,7 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.picture_as_pdf),
-            onPressed: _isLoading || _records.isEmpty ? null : _exportPdf,
+            onPressed: _isLoading || _displayRecords.isEmpty ? null : _exportPdf,
             tooltip: 'إخراج تقرير PDF',
           ),
           IconButton(
@@ -173,13 +319,86 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
                 )
               : RefreshIndicator(
                   onRefresh: _loadRecords,
-                  child: ListView.builder(
+                  child: ListView(
                     padding: const EdgeInsets.all(16),
-                    itemCount: _records.length,
-                    itemBuilder: (context, index) {
-                      final r = _records[index];
-                      return _RecordCard(record: r);
-                    },
+                    children: [
+                      if (_reportDateFrom != null && _reportDateTo != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Card(
+                            color: const Color(0xFF1B5E20).withOpacity(0.08),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.date_range, color: const Color(0xFF1B5E20)),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'تقرير من ${DateFormat('yyyy/MM/dd', 'ar').format(_reportDateFrom!)} إلى ${DateFormat('yyyy/MM/dd', 'ar').format(_reportDateTo!)}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_displayRecords.isEmpty && _reportDateFrom != null)
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 24),
+                            child: Text(
+                              'لا توجد سجلات في المدة المحددة',
+                              style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                            ),
+                          ),
+                        )
+                      else
+                        ...List.generate(_displayRecords.length, (index) {
+                          final r = _displayRecords[index];
+                          return _RecordCard(
+                            record: r,
+                            canDelete: canEditDeleteAttendance(widget.currentUser),
+                            onDelete: () => _deleteRecord(r),
+                          );
+                        }),
+                      const SizedBox(height: 16),
+                      if (_reportDateFrom == null || _reportDateTo == null)
+                        Center(
+                          child: FilledButton.icon(
+                            onPressed: _showCreateReportDialog,
+                            icon: const Icon(Icons.summarize),
+                            label: const Text('إنشاء تقرير'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF1B5E20),
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                            ),
+                          ),
+                        )
+                      else
+                        Center(
+                          child: Column(
+                            children: [
+                              FilledButton.icon(
+                                onPressed: _displayRecords.isEmpty ? null : _exportPdf,
+                                icon: const Icon(Icons.picture_as_pdf),
+                                label: const Text('تصدير PDF'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF1B5E20),
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextButton(
+                                onPressed: _clearReportRange,
+                                child: const Text('عرض الكل'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      const SizedBox(height: 32),
+                    ],
                   ),
                 ),
     );
@@ -188,8 +407,10 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
 
 class _RecordCard extends StatelessWidget {
   final AttendanceRecordModel record;
+  final bool canDelete;
+  final VoidCallback? onDelete;
 
-  const _RecordCard({required this.record});
+  const _RecordCard({required this.record, this.canDelete = false, this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -225,6 +446,12 @@ class _RecordCard extends StatelessWidget {
                   dateStr,
                   style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
                 ),
+                if (canDelete && onDelete != null)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    onPressed: onDelete,
+                    tooltip: 'حذف السجل',
+                  ),
               ],
             ),
             const SizedBox(height: 12),

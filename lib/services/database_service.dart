@@ -36,7 +36,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 15,
+      version: 16,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -178,6 +178,11 @@ class DatabaseService {
         await db.execute("ALTER TABLE engineer_custody ADD COLUMN movement_type TEXT DEFAULT 'custody'");
       } catch (_) {}
     }
+    if (oldVersion < 16) {
+      try {
+        await db.execute('ALTER TABLE daily_reports ADD COLUMN contractors_json TEXT');
+      } catch (_) {}
+    }
     if (oldVersion < 11) {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS project_stock_ledger (
@@ -294,6 +299,7 @@ class DatabaseService {
         supervisor_name TEXT,
         contractor_name TEXT,
         workers_count TEXT,
+        contractors_json TEXT,
         tomorrow_plan TEXT NOT NULL,
         document_path TEXT,
         images_json TEXT,
@@ -425,11 +431,17 @@ class DatabaseService {
     return UserModel.fromMap(row);
   }
 
-  /// الحصول على جميع المشاريع
+  /// الحصول على جميع المشاريع (بدون تكرار الاسم)
   Future<List<ProjectModel>> getProjects() async {
     final db = await database;
     final maps = await db.query('projects', orderBy: 'name');
-    return maps.map((m) => ProjectModel.fromMap(m)).toList();
+    final list = maps.map((m) => ProjectModel.fromMap(m)).toList();
+    return _deduplicateProjectsByName(list);
+  }
+
+  static List<ProjectModel> _deduplicateProjectsByName(List<ProjectModel> list) {
+    final seen = <String>{};
+    return list.where((p) => seen.add(p.name)).toList();
   }
 
   /// إضافة سجل حضور
@@ -457,6 +469,12 @@ class DatabaseService {
     return maps.map((m) => AttendanceRecordModel.fromMap(m)).toList();
   }
 
+  /// حذف سجل حضور/انصراف (صلاحية مسؤول التطبيق فقط)
+  Future<void> deleteAttendanceRecord(int id) async {
+    final db = await database;
+    await db.delete('attendance_records', where: 'id = ?', whereArgs: [id]);
+  }
+
   /// الحصول على قائمة الخامات
   Future<List<String>> getMaterials() async {
     final db = await database;
@@ -479,6 +497,7 @@ class DatabaseService {
       'supervisor_name': report.supervisorName,
       'contractor_name': report.contractorName,
       'workers_count': report.workersCount,
+      'contractors_json': report.contractors.isEmpty ? null : jsonEncode(report.contractors.map((c) => c.toJson()).toList()),
       'tomorrow_plan': report.tomorrowPlan,
       'document_path': report.documentPath,
       'images_json': jsonEncode(report.imagePaths),
@@ -514,6 +533,12 @@ class DatabaseService {
       }
     }
     return rowId;
+  }
+
+  /// حذف تقرير يومي (صلاحية مسؤول التطبيق فقط)
+  Future<void> deleteDailyReport(int id) async {
+    final db = await database;
+    await db.delete('daily_reports', where: 'id = ?', whereArgs: [id]);
   }
 
   /// رصيد مهندس الموقع

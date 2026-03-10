@@ -381,7 +381,7 @@ class _ManagerHome extends StatelessWidget {
           // بطاقة تقارير الحضور
           InkWell(
             onTap: () async {
-              await pushAndSaveRoute(context, 'attendance-reports', const AttendanceReportsScreen());
+              await pushAndSaveRoute(context, 'attendance-reports', AttendanceReportsScreen(currentUser: user));
             },
             borderRadius: BorderRadius.circular(20),
             child: Container(
@@ -422,6 +422,46 @@ class _ManagerHome extends StatelessWidget {
                       fontSize: 14,
                       color: const Color(0xFF1B5E20).withOpacity(0.9),
                     ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          // بطاقة المشروعات (نفس أيقونة مهندس الموقع: التشوينات والنماذج والقطعيات)
+          InkWell(
+            onTap: () async {
+              await pushAndSaveRoute(context, 'engineer-projects', EngineerProjectsScreen(user: user));
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.3)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  Icon(Icons.business, size: 56, color: const Color(0xFF1B5E20)),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'المشروعات',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'عرض التشوينات والنماذج والقطعيات حسب المبنى',
+                    style: TextStyle(fontSize: 14, color: const Color(0xFF1B5E20).withOpacity(0.9)),
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ),
@@ -478,42 +518,12 @@ class _ManagerHome extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 20),
-          InkWell(
-            onTap: () async {
-              await pushAndSaveRoute(context, 'finance', FinanceScreen(currentUser: user));
-            },
-            borderRadius: BorderRadius.circular(20),
-            child: Container(
-              padding: const EdgeInsets.all(32),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE8F5E9),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.3)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  Icon(Icons.account_balance_wallet, size: 64, color: const Color(0xFF1B5E20)),
-                  const SizedBox(height: 16),
-                  const Text('الماليات', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)), textAlign: TextAlign.center),
-                  const SizedBox(height: 8),
-                  Text('أرصدة المهندسين، عهدة، وتقارير مصروفات', style: TextStyle(fontSize: 14, color: const Color(0xFF1B5E20).withOpacity(0.9)), textAlign: TextAlign.center),
-                ],
-              ),
-            ),
-          ),
-          if (user.role == 'site_engineer_manager') ...[
+          // الماليات و العهدة: لمسؤول التطبيق فقط (لا تظهر لمدير المهندسين site_engineer_manager)
+          if (user.isAdmin) ...[
             const SizedBox(height: 20),
             InkWell(
               onTap: () async {
-                await pushAndSaveRoute(context, 'manager-custody', ManagerCustodyScreen(currentUser: user));
+                await pushAndSaveRoute(context, 'finance', FinanceScreen(currentUser: user));
               },
               borderRadius: BorderRadius.circular(20),
               child: Container(
@@ -532,11 +542,11 @@ class _ManagerHome extends StatelessWidget {
                 ),
                 child: Column(
                   children: [
-                    Icon(Icons.handshake, size: 64, color: const Color(0xFF1B5E20)),
+                    Icon(Icons.account_balance_wallet, size: 64, color: const Color(0xFF1B5E20)),
                     const SizedBox(height: 16),
-                    const Text('العهدة', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)), textAlign: TextAlign.center),
+                    const Text('الماليات', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)), textAlign: TextAlign.center),
                     const SizedBox(height: 8),
-                    Text('إدخال عهدة وتقرير العهدة', style: TextStyle(fontSize: 14, color: const Color(0xFF1B5E20).withOpacity(0.9)), textAlign: TextAlign.center),
+                    Text('أرصدة المهندسين، عهدة، وتقارير مصروفات', style: TextStyle(fontSize: 14, color: const Color(0xFF1B5E20).withOpacity(0.9)), textAlign: TextAlign.center),
                   ],
                 ),
               ),
