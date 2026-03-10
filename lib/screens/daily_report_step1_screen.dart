@@ -26,12 +26,10 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
   ProjectModel? _selectedProject;
   final _workPlaceController = TextEditingController();
   final _workReportController = TextEditingController();
-  final _executedTodayController = TextEditingController();
-  final _workersController = TextEditingController();
   static const List<String> _supervisorOptions = ['Emam', 'Mansour', 'لايوجد مشرف', 'Ahmed'];
   static const List<String> _contractorOptions = ['حسام حسن', 'ابراهيم النجار', 'لايوجد مقاول', 'ابراهيم حسن'];
   String? _selectedSupervisor;
-  String? _selectedContractor;
+  final List<ContractorWorkers> _contractors = [];
   final _tomorrowPlanController = TextEditingController();
   final _notesController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -47,10 +45,13 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
     _documentPath = widget.report.documentPath;
     _workPlaceController.text = widget.report.workPlace;
     _workReportController.text = widget.report.workReport;
-    _executedTodayController.text = widget.report.executedToday;
     _selectedSupervisor = widget.report.supervisorName.isEmpty ? null : (_supervisorOptions.contains(widget.report.supervisorName) ? widget.report.supervisorName : null);
-    _selectedContractor = widget.report.contractorName.isEmpty ? null : (_contractorOptions.contains(widget.report.contractorName) ? widget.report.contractorName : null);
-    _workersController.text = widget.report.workersCount;
+    if (widget.report.contractors.isNotEmpty) {
+      _contractors.addAll(widget.report.contractors.map((c) => ContractorWorkers(contractorName: c.contractorName, workersCount: c.workersCount)));
+    } else if (widget.report.contractorName.isNotEmpty || widget.report.workersCount.isNotEmpty) {
+      _contractors.add(ContractorWorkers(contractorName: widget.report.contractorName, workersCount: widget.report.workersCount));
+    }
+    if (_contractors.isEmpty) _contractors.add(ContractorWorkers());
     _tomorrowPlanController.text = widget.report.tomorrowPlan;
     _notesController.text = widget.report.notes;
   }
@@ -59,8 +60,6 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
   void dispose() {
     _workPlaceController.dispose();
     _workReportController.dispose();
-    _executedTodayController.dispose();
-    _workersController.dispose();
     _tomorrowPlanController.dispose();
     _notesController.dispose();
     super.dispose();
@@ -152,6 +151,11 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اختر المشروع')));
       return;
     }
+    final contractorsList = _contractors
+        .where((c) => c.contractorName.trim().isNotEmpty || c.workersCount.trim().isNotEmpty)
+        .map((c) => ContractorWorkers(contractorName: c.contractorName.trim(), workersCount: c.workersCount.trim()))
+        .toList();
+    final firstContractor = contractorsList.isNotEmpty ? contractorsList.first : ContractorWorkers();
     final report = DailyReportData(
       userName: widget.report.userName,
       userId: widget.report.userId,
@@ -160,10 +164,11 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
       reportDate: widget.report.reportDate,
       workPlace: _workPlaceController.text.trim(),
       workReport: _workReportController.text.trim(),
-      executedToday: _executedTodayController.text.trim(),
+      executedToday: '',
       supervisorName: _selectedSupervisor ?? '',
-      contractorName: _selectedContractor ?? '',
-      workersCount: _workersController.text.trim(),
+      contractorName: firstContractor.contractorName,
+      workersCount: firstContractor.workersCount,
+      contractors: contractorsList,
       tomorrowPlan: _tomorrowPlanController.text.trim(),
       documentPath: _documentPath,
       imagePaths: List.from(_imagePaths),
@@ -224,18 +229,7 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
               controller: _workReportController,
               maxLines: 5,
               decoration: const InputDecoration(
-                labelText: 'تقرير الأعمال *',
-                alignLabelWithHint: true,
-                border: OutlineInputBorder(),
-              ),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _executedTodayController,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                labelText: 'ما تم تنفيذه اليوم *',
+                labelText: 'تفاصيل تقرير اعمال اليوم *',
                 alignLabelWithHint: true,
                 border: OutlineInputBorder(),
               ),
@@ -251,24 +245,59 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
               items: _supervisorOptions.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
               onChanged: (v) => setState(() => _selectedSupervisor = v),
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _selectedContractor,
-              decoration: const InputDecoration(
-                labelText: 'المقاول',
-                border: OutlineInputBorder(),
-              ),
-              items: _contractorOptions.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-              onChanged: (v) => setState(() => _selectedContractor = v),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _workersController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'عدد العمال',
-                border: OutlineInputBorder(),
-              ),
+            const SizedBox(height: 16),
+            const Text('المقاولون وعدد العمال (يمكن إضافة أكثر من مقاول)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            const SizedBox(height: 8),
+            ..._contractors.asMap().entries.map((entry) {
+              final i = entry.key;
+              final c = entry.value;
+              final options = List<String>.from(_contractorOptions);
+              if (c.contractorName.isNotEmpty && !options.contains(c.contractorName)) options.add(c.contractorName);
+              return Padding(
+                key: ValueKey('contractor_row_$i'),
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<String>(
+                        value: c.contractorName.isEmpty ? null : (options.contains(c.contractorName) ? c.contractorName : null),
+                        decoration: const InputDecoration(
+                          labelText: 'المقاول',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: options.map((opt) => DropdownMenuItem(value: opt, child: Text(opt, overflow: TextOverflow.ellipsis))).toList(),
+                        onChanged: (v) => setState(() => _contractors[i] = ContractorWorkers(contractorName: v ?? '', workersCount: _contractors[i].workersCount)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextFormField(
+                        key: ValueKey('workers_$i'),
+                        initialValue: c.workersCount,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'عدد العمال',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        onChanged: (v) => setState(() => _contractors[i] = ContractorWorkers(contractorName: _contractors[i].contractorName, workersCount: v)),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                      onPressed: _contractors.length > 1 ? () => setState(() => _contractors.removeAt(i)) : null,
+                    ),
+                  ],
+                ),
+              );
+            }),
+            OutlinedButton.icon(
+              onPressed: () => setState(() => _contractors.add(ContractorWorkers())),
+              icon: const Icon(Icons.add, size: 20),
+              label: const Text('إضافة مقاول آخر'),
             ),
             const SizedBox(height: 16),
             TextFormField(
@@ -282,6 +311,18 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
               validator: (v) => (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
             ),
             const SizedBox(height: 16),
+            TextFormField(
+              controller: _notesController,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'الملاحظات',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Divider(),
+            const Text('المرفقات', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: _pickDocument,
               icon: const Icon(Icons.attach_file),
@@ -320,15 +361,6 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
                     ),
                   )),
             ],
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _notesController,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'الملاحظات',
-                border: OutlineInputBorder(),
-              ),
-            ),
             const SizedBox(height: 32),
             FilledButton(
               onPressed: _goNext,

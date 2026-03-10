@@ -5,10 +5,14 @@
 --
 -- 1. First run: backend/01-create-database.sql (while connected to "postgres")
 --    → This creates a dedicated database: wood_more
--- 2. In Beekeeper: create a NEW connection to database "wood_more"
+-- 2. In Beekeeper (أو Neon SQL Editor): اتصل بقاعدة wood_more
 -- 3. Then run THIS file (init-db.sql) in that connection.
 --    → All tables and seed data will be created inside wood_more.
 -- (Docker Compose uses POSTGRES_DB=wood_more and runs this script automatically.)
+--
+-- إذا كانت قاعدة Neon موجودة مسبقاً وبدون أعمدة movement_type/document_path
+-- في engineer_custody، شغّل مرة واحدة: migrations/001_add_engineer_custody_movement_type.sql
+-- من Neon Console → SQL Editor (انظر التعليمات داخل الملف).
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS users (
@@ -66,6 +70,7 @@ CREATE TABLE IF NOT EXISTS daily_reports (
   supervisor_name TEXT,
   contractor_name TEXT,
   workers_count TEXT,
+  contractors_json TEXT,
   tomorrow_plan TEXT NOT NULL,
   document_path TEXT,
   images_json TEXT,
@@ -74,6 +79,13 @@ CREATE TABLE IF NOT EXISTS daily_reports (
   expenses_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'daily_reports' AND column_name = 'contractors_json') THEN
+    ALTER TABLE daily_reports ADD COLUMN contractors_json TEXT;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS zones (
   id SERIAL PRIMARY KEY,
@@ -159,6 +171,17 @@ CREATE TABLE IF NOT EXISTS engineer_custody (
   created_at TEXT NOT NULL,
   note TEXT
 );
+
+-- Add movement_type and document_path for custody vs add_balance/withdraw_balance (safe to run multiple times)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'engineer_custody' AND column_name = 'movement_type') THEN
+    ALTER TABLE engineer_custody ADD COLUMN movement_type TEXT DEFAULT 'custody';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'engineer_custody' AND column_name = 'document_path') THEN
+    ALTER TABLE engineer_custody ADD COLUMN document_path TEXT;
+  END IF;
+END $$;
 
 -- Seed users (password: default 0000; app_admin h@h.com uses 123)
 INSERT INTO users (name, email, role, password) VALUES

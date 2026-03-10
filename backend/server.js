@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -10,13 +11,23 @@ app.get('/', (req, res) => {
   res.json({ ok: true, message: 'Wood & More API', docs: 'Use POST /auth/login for login, /users, /projects, etc.' });
 });
 
-const pool = new Pool({
-  host: process.env.PGHOST || 'localhost',
-  port: parseInt(process.env.PGPORT || '5432', 10),
-  database: process.env.PGDATABASE || 'wood_more',
-  user: process.env.PGUSER || 'wood_more',
-  password: process.env.PGPASSWORD || 'wood_more',
-});
+// Support Neon / any cloud PostgreSQL: set DATABASE_URL (with ?sslmode=require).
+// Or use PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD for local/other.
+const databaseUrl = process.env.DATABASE_URL;
+const pool = databaseUrl
+  ? new Pool({
+      connectionString: databaseUrl,
+      ssl: databaseUrl.includes('sslmode=require') || databaseUrl.includes('neon.tech')
+        ? { rejectUnauthorized: false }
+        : false,
+    })
+  : new Pool({
+      host: process.env.PGHOST || 'localhost',
+      port: parseInt(process.env.PGPORT || '5432', 10),
+      database: process.env.PGDATABASE || 'wood_more',
+      user: process.env.PGUSER || 'wood_more',
+      password: process.env.PGPASSWORD || 'wood_more',
+    });
 
 // One-time migration: add password column if missing (e.g. Docker volume created before it existed)
 async function ensurePasswordColumn() {
@@ -286,6 +297,15 @@ app.get('/attendance/by-user/:userId', async (req, res) => {
   }
 });
 
+app.delete('/attendance/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM attendance_records WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 // ——— Materials ———
 app.get('/materials', async (req, res) => {
   try {
@@ -337,10 +357,11 @@ app.post('/daily-reports', async (req, res) => {
   try {
     const b = req.body;
     const now = new Date().toISOString();
+    const contractorsJson = (b.contractors_json != null) ? (typeof b.contractors_json === 'string' ? b.contractors_json : JSON.stringify(b.contractors_json || [])) : null;
     const r = await pool.query(
-      `INSERT INTO daily_reports (user_id, user_name, project_id, project_name, report_datetime, work_place, work_report, executed_today, supervisor_name, contractor_name, workers_count, tomorrow_plan, document_path, images_json, notes, materials_json, expenses_json, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id`,
-      [b.userId, b.userName, b.projectId || null, b.projectName || null, b.reportDate, b.workPlace || '', b.workReport || '', b.executedToday || '', b.supervisorName || null, b.contractorName || null, b.workersCount || null, b.tomorrowPlan || '', b.documentPath || null, typeof b.imagePaths === 'string' ? b.imagePaths : JSON.stringify(b.imagePaths || []), b.notes || null, typeof b.materials === 'string' ? b.materials : JSON.stringify(b.materials || []), typeof b.expenses === 'string' ? b.expenses : JSON.stringify(b.expenses || []), now]
+      `INSERT INTO daily_reports (user_id, user_name, project_id, project_name, report_datetime, work_place, work_report, executed_today, supervisor_name, contractor_name, workers_count, contractors_json, tomorrow_plan, document_path, images_json, notes, materials_json, expenses_json, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
+      [b.userId, b.userName, b.projectId || null, b.projectName || null, b.reportDate, b.workPlace || '', b.workReport || '', b.executedToday || '', b.supervisorName || null, b.contractorName || null, b.workersCount || null, contractorsJson, b.tomorrowPlan || '', b.documentPath || null, typeof b.imagePaths === 'string' ? b.imagePaths : JSON.stringify(b.imagePaths || []), b.notes || null, typeof b.materials === 'string' ? b.materials : JSON.stringify(b.materials || []), typeof b.expenses === 'string' ? b.expenses : JSON.stringify(b.expenses || []), now]
     );
     const id = parseInt(r.rows[0].id);
     const expenses = Array.isArray(b.expenses) ? b.expenses : (typeof b.expenses === 'string' ? JSON.parse(b.expenses || '[]') : []);
@@ -354,12 +375,13 @@ app.post('/daily-reports', async (req, res) => {
       const current = bal.rows.length ? parseFloat(bal.rows[0].balance) : 0;
       await pool.query('INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2', [b.userId, current - totalExpense]);
     }
-    // خصم المواد من مخزن المشروع: المطابقة بالمشروع + اسم الخامة فقط، والخصم يكون على رقم الكمية فقط (الوحدة ثابتة: متر / عود / متر مربع)
+    // خصم المواد من مخزن المشروع: المطابقة بالمشروع + اسم الخامة فقط، والخصم يكون على رقم الكمية فقط
+    // التطبيق يرسل اسم الخامة في الحقل "material" (وقد يرسلها أيضاً materialName / material_name)
     if (b.projectId) {
       const materials = Array.isArray(b.materials) ? b.materials : (typeof b.materials === 'string' ? JSON.parse(b.materials || '[]') : []);
       const reportDate = b.reportDate ? new Date(b.reportDate) : new Date();
       for (const m of materials) {
-        const materialName = m.materialName || m.material_name || '';
+        const materialName = (m.materialName || m.material_name || m.material || '').trim();
         const quantity = parseFloat(String((m.quantity || '').replace(/[^\d.]/g, ''))) || 0;
         const unit = (m.unit || 'متر').trim() || 'متر';
         if (!materialName || quantity <= 0) continue;
@@ -393,8 +415,17 @@ app.get('/daily-reports', async (req, res) => {
     const r = await pool.query(q, params);
     res.json(r.rows.map(row => ({
       id: parseInt(row.id), user_id: parseInt(row.user_id), user_name: row.user_name, project_id: row.project_id ? parseInt(row.project_id) : null, project_name: row.project_name,
-      report_datetime: row.report_datetime, work_place: row.work_place, work_report: row.work_report, executed_today: row.executed_today, supervisor_name: row.supervisor_name, contractor_name: row.contractor_name, workers_count: row.workers_count, tomorrow_plan: row.tomorrow_plan, document_path: row.document_path, images_json: row.images_json, notes: row.notes, materials_json: row.materials_json, expenses_json: row.expenses_json, created_at: row.created_at
+      report_datetime: row.report_datetime, work_place: row.work_place, work_report: row.work_report, executed_today: row.executed_today, supervisor_name: row.supervisor_name, contractor_name: row.contractor_name, workers_count: row.workers_count, contractors_json: row.contractors_json, tomorrow_plan: row.tomorrow_plan, document_path: row.document_path, images_json: row.images_json, notes: row.notes, materials_json: row.materials_json, expenses_json: row.expenses_json, created_at: row.created_at
     })));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.delete('/daily-reports/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM daily_reports WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -424,11 +455,30 @@ app.post('/custody', async (req, res) => {
   try {
     const { userId, amount, note } = req.body;
     const now = new Date().toISOString();
-    await pool.query('INSERT INTO engineer_custody (user_id, amount, created_at, note) VALUES ($1, $2, $3, $4)', [userId, amount, now, note || '']);
+    await pool.query(
+      'INSERT INTO engineer_custody (user_id, amount, created_at, note, movement_type) VALUES ($1, $2, $3, $4, $5)',
+      [userId, amount, now, note || '', 'custody']
+    );
     const r = await pool.query('SELECT balance FROM engineer_balance WHERE user_id = $1', [userId]);
     const current = r.rows.length ? parseFloat(r.rows[0].balance) : 0;
     // Custody = company gives cash to engineer → balance (what we owe) decreases
     await pool.query('INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2', [userId, current - parseFloat(amount)]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+// حركة إضافة رصيد أو سحب رصيد (من واجهة المحاسب) — تسجيل فقط في engineer_custody؛ تعديل الأرصدة يتم من التطبيق
+app.post('/balance-movement', async (req, res) => {
+  try {
+    const { userId, amount, note, movementType } = req.body;
+    const now = new Date().toISOString();
+    const type = movementType === 'add_balance' || movementType === 'withdraw_balance' ? movementType : 'add_balance';
+    await pool.query(
+      'INSERT INTO engineer_custody (user_id, amount, created_at, note, movement_type) VALUES ($1, $2, $3, $4, $5)',
+      [userId, amount, now, note || '', type]
+    );
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -441,7 +491,13 @@ app.get('/custody', async (req, res) => {
     const q = userId ? 'SELECT * FROM engineer_custody WHERE user_id = $1 ORDER BY created_at DESC' : 'SELECT * FROM engineer_custody ORDER BY created_at DESC';
     const params = userId ? [userId] : [];
     const r = await pool.query(q, params);
-    res.json(r.rows.map(row => ({ id: parseInt(row.id), user_id: parseInt(row.user_id), amount: parseFloat(row.amount), created_at: row.created_at, note: row.note })));
+    const mapRow = (row) => {
+      const out = { id: parseInt(row.id), user_id: parseInt(row.user_id), amount: parseFloat(row.amount), created_at: row.created_at, note: row.note || '' };
+      if (row.movement_type != null) out.movement_type = row.movement_type;
+      if (row.document_path != null) out.document_path = row.document_path;
+      return out;
+    };
+    res.json(r.rows.map(mapRow));
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }

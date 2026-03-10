@@ -1,7 +1,23 @@
 import 'dart:convert';
 
+/// مقاول مع عدد العمال (يمكن وجود أكثر من مقاول في التقرير)
+class ContractorWorkers {
+  final String contractorName;
+  final String workersCount;
+
+  ContractorWorkers({this.contractorName = '', this.workersCount = ''});
+
+  Map<String, dynamic> toJson() => {'name': contractorName, 'workers': workersCount};
+
+  factory ContractorWorkers.fromJson(Map<String, dynamic> map) => ContractorWorkers(
+        contractorName: map['name'] as String? ?? '',
+        workersCount: map['workers'] as String? ?? '',
+      );
+}
+
 /// بيانات التقرير اليومي (يمر بين الخطوات الثلاث)
 class DailyReportData {
+  final int? id;
   final String userName;
   final int userId;
   int? projectId;
@@ -13,6 +29,7 @@ class DailyReportData {
   String supervisorName;
   String contractorName;
   String workersCount;
+  List<ContractorWorkers> contractors;
   String tomorrowPlan;
   String? documentPath;
   List<String> imagePaths;
@@ -21,6 +38,7 @@ class DailyReportData {
   List<ExpenseItem> expenses;
 
   DailyReportData({
+    this.id,
     required this.userName,
     required this.userId,
     this.projectId,
@@ -32,13 +50,15 @@ class DailyReportData {
     this.supervisorName = '',
     this.contractorName = '',
     this.workersCount = '',
+    List<ContractorWorkers>? contractors,
     this.tomorrowPlan = '',
     this.documentPath,
     List<String>? imagePaths,
     this.notes = '',
     List<MaterialItem>? materials,
     List<ExpenseItem>? expenses,
-  })  : imagePaths = imagePaths ?? [],
+  })  : contractors = contractors ?? [],
+        imagePaths = imagePaths ?? [],
         materials = materials ?? List.generate(5, (_) => MaterialItem()),
         expenses = expenses ?? List.generate(4, (_) => ExpenseItem());
 
@@ -54,6 +74,7 @@ class DailyReportData {
         'supervisor_name': supervisorName,
         'contractor_name': contractorName,
         'workers_count': workersCount,
+        'contractors_json': contractors.map((c) => c.toJson()).toList(),
         'tomorrow_plan': tomorrowPlan,
         'document_path': documentPath,
         'image_paths': imagePaths,
@@ -63,7 +84,14 @@ class DailyReportData {
       };
 
   factory DailyReportData.fromJson(Map<String, dynamic> map) {
+    final contractorsList = map['contractors_json'] as List?;
+    final contractors = contractorsList != null && contractorsList.isNotEmpty
+        ? contractorsList.map((c) => ContractorWorkers.fromJson(Map<String, dynamic>.from(c as Map))).toList()
+        : <ContractorWorkers>[];
+    final idVal = map['id'];
+    final id = idVal != null ? (idVal is int ? idVal : int.tryParse(idVal.toString())) : null;
     return DailyReportData(
+      id: id,
       userName: map['user_name'] as String,
       userId: map['user_id'] as int,
       projectId: map['project_id'] as int?,
@@ -75,6 +103,7 @@ class DailyReportData {
       supervisorName: map['supervisor_name'] as String? ?? '',
       contractorName: map['contractor_name'] as String? ?? '',
       workersCount: map['workers_count'] as String? ?? '',
+      contractors: contractors,
       tomorrowPlan: map['tomorrow_plan'] as String? ?? '',
       documentPath: map['document_path'] as String?,
       imagePaths: List<String>.from(map['image_paths'] as List? ?? []),
@@ -94,7 +123,22 @@ class DailyReportData {
   factory DailyReportData.fromDbMap(Map<String, dynamic> row) {
     final materialsJson = row['materials_json'] as String? ?? '[]';
     final expensesJson = row['expenses_json'] as String? ?? '[]';
+    final contractorsJson = row['contractors_json'] as String?;
+    List<ContractorWorkers> contractors = [];
+    if (contractorsJson != null && contractorsJson.toString().trim().isNotEmpty) {
+      try {
+        final list = jsonDecode(contractorsJson) as List?;
+        if (list != null) {
+          contractors = list.map((c) => ContractorWorkers.fromJson(Map<String, dynamic>.from(c as Map))).toList();
+        }
+      } catch (_) {}
+    }
+    if (contractors.isEmpty && (row['contractor_name'] != null && row['contractor_name'].toString().isNotEmpty || row['workers_count'] != null && row['workers_count'].toString().isNotEmpty)) {
+      contractors = [ContractorWorkers(contractorName: row['contractor_name'] as String? ?? '', workersCount: row['workers_count'] as String? ?? '')];
+    }
+    final rowId = row['id'];
     return DailyReportData(
+      id: rowId != null ? (rowId is int ? rowId : int.tryParse(rowId.toString())) : null,
       userName: row['user_name'] as String,
       userId: row['user_id'] as int,
       projectId: row['project_id'] as int?,
@@ -106,6 +150,7 @@ class DailyReportData {
       supervisorName: row['supervisor_name'] as String? ?? '',
       contractorName: row['contractor_name'] as String? ?? '',
       workersCount: row['workers_count'] as String? ?? '',
+      contractors: contractors,
       tomorrowPlan: row['tomorrow_plan'] as String? ?? '',
       documentPath: row['document_path'] as String?,
       imagePaths: List<String>.from(jsonDecode(row['images_json'] as String? ?? '[]') as List),

@@ -333,8 +333,11 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectsKey)!) as List;
-    return list.map((m) => ProjectModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+    final projects = list.map((m) => ProjectModel.fromMap(Map<String, dynamic>.from(m as Map))).toList();
+    final seen = <String>{};
+    final unique = projects.where((p) => seen.add(p.name)).toList();
+    unique.sort((a, b) => a.name.compareTo(b.name));
+    return unique;
   }
 
   Future<void> addAttendanceRecord(AttendanceRecordModel record) async {
@@ -386,6 +389,14 @@ class WebStorageService {
     return (checkIn: checkIn, checkOut: checkOut);
   }
 
+  Future<void> deleteAttendanceRecord(int id) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_attendanceKey)!) as List;
+    final newList = list.where((e) => (e as Map)['id'] != id).toList();
+    await prefs.setString(_attendanceKey, jsonEncode(newList));
+  }
+
   Future<List<DailyReportData>> getDailyReports({
     required DateTime dateFrom,
     required DateTime dateTo,
@@ -409,6 +420,14 @@ class WebStorageService {
     }
     reports.sort((a, b) => b.reportDate.compareTo(a.reportDate));
     return reports;
+  }
+
+  Future<void> deleteDailyReport(int id) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_dailyReportsKey)!) as List;
+    final newList = list.where((e) => (e as Map)['id'] != id).toList();
+    await prefs.setString(_dailyReportsKey, jsonEncode(newList));
   }
 
   // ——— لوح التحكم ———

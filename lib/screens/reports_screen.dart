@@ -12,6 +12,10 @@ import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
+/// صلاحية التعديل والحذف للتقارير اليومية: مسؤول التطبيق (mouhammedhelal@gmail.com) فقط
+bool canEditDeleteDailyReport(UserModel? user) =>
+    user != null && user.role == 'app_admin' && user.email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+
 /// شاشة التقارير لمدير المهندسين: فلتر (مهندس، من تاريخ، إلى تاريخ، مشروع اختياري) وعرض التقارير اليومية + تصدير PDF
 class ReportsScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -97,6 +101,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
     });
   }
 
+  Future<void> _deleteReport(DailyReportData report) async {
+    if (report.id == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تأكيد الحذف'),
+        content: Text('حذف التقرير اليومي لـ ${report.userName} بتاريخ ${DateFormat('yyyy/MM/dd', 'ar').format(report.reportDate)}؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('حذف')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _db.deleteDailyReport(report.id!);
+      _runReport();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حذف التقرير'), backgroundColor: Colors.green));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
+    }
+  }
+
   String _attendanceKey(DailyReportData r) =>
       '${r.userId}_${r.reportDate.year}_${r.reportDate.month}_${r.reportDate.day}';
 
@@ -167,11 +194,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 pw.SizedBox(height: 14),
                 _pdfSectionTitle('تفاصيل الأعمال | Work Details'),
                 pw.SizedBox(height: 6),
-                _pdfRow('تقرير الأعمال | Work Report', r.workReport),
-                _pdfRow('ما تم تنفيذه اليوم | Executed Today', r.executedToday),
+                _pdfRow('تفاصيل تقرير اعمال اليوم | Work Report', r.workReport),
                 _pdfRow('المشرف | Supervisor', r.supervisorName),
-                _pdfRow('المقاول | Contractor', r.contractorName),
-                _pdfRow('عدد العمال | Workers Count', r.workersCount),
+                if (r.contractors.isNotEmpty)
+                  ...r.contractors.map((c) => _pdfRow('المقاول / عدد العمال | Contractor / Workers', '${c.contractorName} (${c.workersCount})')),
+                if (r.contractors.isEmpty) _pdfRow('المقاول | Contractor', r.contractorName),
+                if (r.contractors.isEmpty) _pdfRow('عدد العمال | Workers Count', r.workersCount),
                 _pdfRow('خطة الغد | Tomorrow Plan', r.tomorrowPlan),
                 if (r.notes.isNotEmpty) _pdfRow('ملاحظات | Notes', r.notes),
                 pw.SizedBox(height: 14),
@@ -404,6 +432,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     report: r,
                     checkIn: _attendanceMap[_attendanceKey(r)]?.checkIn,
                     checkOut: _attendanceMap[_attendanceKey(r)]?.checkOut,
+                    canDelete: canEditDeleteDailyReport(widget.currentUser),
+                    onDelete: r.id != null ? () => _deleteReport(r) : null,
                   )),
             const SizedBox(height: 32),
             LayoutBuilder(
@@ -471,8 +501,10 @@ class _ReportCard extends StatelessWidget {
   final DailyReportData report;
   final DateTime? checkIn;
   final DateTime? checkOut;
+  final bool canDelete;
+  final VoidCallback? onDelete;
 
-  const _ReportCard({required this.report, this.checkIn, this.checkOut});
+  const _ReportCard({required this.report, this.checkIn, this.checkOut, this.canDelete = false, this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -490,6 +522,12 @@ class _ReportCard extends StatelessWidget {
             Expanded(child: Text(report.userName, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
             const SizedBox(width: 8),
             Text(dateFormat.format(report.reportDate), style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
+            if (canDelete && onDelete != null)
+              IconButton(
+                icon: const Icon(Icons.delete_outline, color: Colors.red, size: 22),
+                onPressed: onDelete,
+                tooltip: 'حذف التقرير',
+              ),
           ],
         ),
         subtitle: Column(
@@ -508,11 +546,14 @@ class _ReportCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _InfoRow(label: 'مكان العمل', value: report.workPlace),
-                _InfoRow(label: 'تقرير الأعمال', value: report.workReport),
-                _InfoRow(label: 'ما تم تنفيذه اليوم', value: report.executedToday),
+                _InfoRow(label: 'تفاصيل تقرير اعمال اليوم', value: report.workReport),
                 _InfoRow(label: 'المشرف', value: report.supervisorName),
-                _InfoRow(label: 'المقاول', value: report.contractorName),
-                _InfoRow(label: 'عدد العمال', value: report.workersCount),
+                if (report.contractors.isNotEmpty)
+                  ...report.contractors.map((c) => _InfoRow(label: 'المقاول / عدد العمال', value: '${c.contractorName} (${c.workersCount})')),
+                if (report.contractors.isEmpty) ...[
+                  _InfoRow(label: 'المقاول', value: report.contractorName),
+                  _InfoRow(label: 'عدد العمال', value: report.workersCount),
+                ],
                 _InfoRow(label: 'خطة الغد', value: report.tomorrowPlan),
                 if (report.notes.isNotEmpty) _InfoRow(label: 'ملاحظات', value: report.notes),
                 const SizedBox(height: 8),

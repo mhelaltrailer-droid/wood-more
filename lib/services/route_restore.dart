@@ -32,7 +32,7 @@ Widget? getScreenForRoute(String name, UserModel user) {
     case 'accountant-finance':
       return AccountantFinanceScreen(currentUser: user);
     case 'attendance-reports':
-      return const AttendanceReportsScreen();
+      return AttendanceReportsScreen(currentUser: user);
     case 'reports':
       return ReportsScreen(currentUser: user);
     case 'finance':

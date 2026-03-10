@@ -64,12 +64,13 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
     }
   }
 
+  /// إضافة رصيد لمستخدم. إذا كان المستخدم هو المحاسب نفسه: زيادة رصيده فقط (إضافة ذاتية). وإلا: خصم من رصيد المحاسب وإضافة للمستخدم.
   Future<void> _addBalance(UserModel user) async {
     final amountC = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('إضافة رصيد - ${user.name}'),
+        title: Text(user.id == widget.currentUser.id ? 'إضافة رصيد ذاتي (للمحاسب)' : 'إضافة رصيد - ${user.name}'),
         content: TextField(
           controller: amountC,
           decoration: const InputDecoration(labelText: 'المبلغ'),
@@ -92,9 +93,27 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       return;
     }
     try {
-      final current = await _db.getEngineerBalance(user.id);
-      await _db.setEngineerBalance(user.id, current + amount);
-      await _db.addBalanceMovement(user.id, amount, 'إضافة رصيد', 'add_balance');
+      final isSelf = user.id == widget.currentUser.id;
+      if (isSelf) {
+        // إضافة رصيد ذاتي: زيادة رصيد المحاسب فقط (بدون خصم من أي أحد)
+        final current = await _db.getEngineerBalance(user.id);
+        await _db.setEngineerBalance(user.id, current + amount);
+        await _db.addBalanceMovement(user.id, amount, 'إضافة رصيد ذاتي', 'add_balance');
+      } else {
+        final accountantBalance = await _db.getEngineerBalance(widget.currentUser.id);
+        if (accountantBalance < amount) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('رصيدك الحالي ${accountantBalance.toStringAsFixed(2)} أقل من المبلغ المطلوب'), backgroundColor: Colors.orange),
+            );
+          }
+          return;
+        }
+        final currentUser = await _db.getEngineerBalance(user.id);
+        await _db.setEngineerBalance(user.id, currentUser + amount);
+        await _db.setEngineerBalance(widget.currentUser.id, accountantBalance - amount);
+        await _db.addBalanceMovement(user.id, amount, 'إضافة رصيد', 'add_balance');
+      }
       _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت إضافة الرصيد'), backgroundColor: Colors.green));
     } catch (e) {
@@ -102,6 +121,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
     }
   }
 
+  /// سحب رصيد من مستخدم: يُضاف المبلغ إلى رصيد المحاسب ويُخصم من رصيد المستخدم.
   Future<void> _withdrawBalance(UserModel user) async {
     final amountC = TextEditingController();
     final ok = await showDialog<bool>(
@@ -130,8 +150,18 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       return;
     }
     try {
-      final current = await _db.getEngineerBalance(user.id);
-      await _db.setEngineerBalance(user.id, current - amount);
+      final currentUser = await _db.getEngineerBalance(user.id);
+      if (currentUser < amount) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('رصيد ${user.name} غير كافٍ (${currentUser.toStringAsFixed(2)})'), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
+      final accountantBalance = await _db.getEngineerBalance(widget.currentUser.id);
+      await _db.setEngineerBalance(user.id, currentUser - amount);
+      await _db.setEngineerBalance(widget.currentUser.id, accountantBalance + amount);
       await _db.addBalanceMovement(user.id, amount, 'سحب رصيد', 'withdraw_balance');
       _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم سحب الرصيد'), backgroundColor: Colors.green));
@@ -141,35 +171,41 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
   }
 
   Future<void> _showCreateReport() async {
-    DateTime dateFrom = DateTime.now();
+    DateTime dateFrom = DateTime.now().subtract(const Duration(days: 30));
     DateTime dateTo = DateTime.now();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialog) => AlertDialog(
-          title: const Text('إنشاء تقرير - تحديد المدة'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: const Text('من تاريخ'),
-                subtitle: Text(DateFormat('yyyy/MM/dd', 'ar').format(dateFrom)),
-                trailing: const Icon(Icons.calendar_today),
-                onTap: () async {
-                  final d = await showDatePicker(context: ctx, initialDate: dateFrom, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
-                  if (d != null) setDialog(() => dateFrom = d);
-                },
-              ),
-              ListTile(
-                title: const Text('إلى تاريخ'),
-                subtitle: Text(DateFormat('yyyy/MM/dd', 'ar').format(dateTo)),
-                trailing: const Icon(Icons.calendar_today),
-                onTap: () async {
-                  final d = await showDatePicker(context: ctx, initialDate: dateTo, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
-                  if (d != null) setDialog(() => dateTo = d);
-                },
-              ),
-            ],
+          title: const Text('تقرير الحركات المالية - تحديد المدة'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('من تاريخ', style: TextStyle(fontWeight: FontWeight.bold)),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(DateFormat('yyyy/MM/dd', 'ar').format(dateFrom)),
+                  trailing: const Icon(Icons.calendar_today),
+                  onTap: () async {
+                    final d = await showDatePicker(context: ctx, initialDate: dateFrom, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
+                    if (d != null) setDialog(() => dateFrom = d);
+                  },
+                ),
+                const SizedBox(height: 16),
+                const Text('إلى تاريخ', style: TextStyle(fontWeight: FontWeight.bold)),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(DateFormat('yyyy/MM/dd', 'ar').format(dateTo)),
+                  trailing: const Icon(Icons.calendar_today),
+                  onTap: () async {
+                    final d = await showDatePicker(context: ctx, initialDate: dateTo, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
+                    if (d != null) setDialog(() => dateTo = d);
+                  },
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
@@ -262,9 +298,15 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 const Text('أرصدة المستخدمين', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Text(
+                  'المحاسب يمكنه إضافة رصيد لنفسه، أو إضافة/سحب رصيد من باقي المستخدمين (الإضافة تخصم من رصيده، والسحب يضاف لرصيده). لا يسمح له بسحب رصيد من نفسه.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                ),
                 const SizedBox(height: 12),
                 ..._users.map((u) {
                   final balance = _balances[u.id] ?? 0;
+                  final isAccountant = u.id == widget.currentUser.id;
                   return Card(
                     margin: const EdgeInsets.only(bottom: 12),
                     child: Padding(
@@ -278,7 +320,22 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(u.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                    Row(
+                                      children: [
+                                        Text(u.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                        if (isAccountant) ...[
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF1B5E20).withOpacity(0.15),
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: const Text('المحاسب', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
                                     Text('الرصيد الحالي: ${balance.toStringAsFixed(2)}',  style: TextStyle(color: Colors.grey.shade700)),
                                   ],
                                 ),
@@ -291,12 +348,14 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                                     label: const Text('إضافة رصيد'),
                                     onPressed: () => _addBalance(u),
                                   ),
-                                  const SizedBox(width: 8),
-                                  TextButton.icon(
-                                    icon: const Icon(Icons.remove, size: 20),
-                                    label: const Text('سحب رصيد'),
-                                    onPressed: () => _withdrawBalance(u),
-                                  ),
+                                  if (!isAccountant) ...[
+                                    const SizedBox(width: 8),
+                                    TextButton.icon(
+                                      icon: const Icon(Icons.remove, size: 20),
+                                      label: const Text('سحب رصيد'),
+                                      onPressed: () => _withdrawBalance(u),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ],
