@@ -1,10 +1,16 @@
-# Wood & More — PostgreSQL + API + Web app
-# Start order: postgres → api (waits for DB healthy) → app (waits for api).
-# Database name: wood_more (created by POSTGRES_DB). Backend and init-db.sql use the same.
+# Wood & More — API + Web app
+#
+# Database: put DATABASE_URL in backend/.env (e.g. Neon: ...?sslmode=require). The API uses it
+# when set; see backend/server.js. Do not commit real credentials.
+#
+# Optional local PostgreSQL (no Neon): comment out DATABASE_URL in backend/.env and run:
+#   docker compose --profile local-db up --build
 
 services:
   postgres:
     image: postgres:16-alpine
+    profiles:
+      - local-db
     ports:
       - "5432:5432"
     environment:
@@ -22,16 +28,20 @@ services:
 
   api:
     build: ./backend
+    env_file:
+      - ./backend/.env
     environment:
-      PGHOST: postgres
-      PGPORT: "5432"
-      PGDATABASE: wood_more
-      PGUSER: wood_more
-      PGPASSWORD: wood_more
+      # Explicit fallbacks only when DATABASE_URL is not in backend/.env (local-db profile).
+      PGHOST: ${PGHOST:-postgres}
+      PGPORT: ${PGPORT:-5432}
+      PGDATABASE: ${PGDATABASE:-wood_more}
+      PGUSER: ${PGUSER:-wood_more}
+      PGPASSWORD: ${PGPASSWORD:-wood_more}
       PORT: "3000"
     depends_on:
       postgres:
         condition: service_healthy
+        required: false
 
   app:
     build: .
