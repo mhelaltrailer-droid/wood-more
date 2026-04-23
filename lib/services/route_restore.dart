@@ -5,12 +5,24 @@ import '../screens/attendance_screen.dart';
 import '../screens/attendance_reports_screen.dart';
 import '../screens/reports_screen.dart';
 import '../screens/admin_dashboard_screen.dart';
+import '../screens/aggregated_detailed_daily_report_screen.dart';
 import '../screens/finance_screen.dart';
 import '../screens/engineer_projects_screen.dart';
+import '../screens/engineer_withdraw_materials_screen.dart';
 import '../screens/daily_report_step1_screen.dart';
+import '../screens/detailed_report_screen.dart';
+import '../screens/site_engineer_finances_entry_screen.dart';
+import '../screens/tomorrow_work_plan_screen.dart';
+import '../screens/today_work_plan_screen.dart';
+import '../screens/site_engineer_reports_screen.dart';
 import '../screens/manager_custody_screen.dart';
 import '../screens/accountant_custody_screen.dart';
 import '../screens/accountant_finance_screen.dart';
+import '../screens/activity_logs_screen.dart';
+import '../screens/daily_movement_screen.dart';
+import '../screens/new_icon_screen.dart';
+import '../screens/operation_reports_screen.dart';
+import '../screens/operation_reports_tracking_screen.dart';
 import 'route_persistence.dart';
 
 /// Build the screen for a given route name (for restore after refresh). Returns null if unknown.
@@ -25,8 +37,20 @@ Widget? getScreenForRoute(String name, UserModel user) {
         reportDate: DateTime.now(),
       );
       return DailyReportStep1Screen(user: user, report: report);
+    case 'detailed-report':
+      return DetailedReportScreen(user: user, continueToFinancesOnNext: false);
+    case 'engineer-finances':
+      return SiteEngineerFinancesEntryScreen(user: user);
+    case 'tomorrow-work-plan':
+      return TomorrowWorkPlanScreen(user: user);
+    case 'today-work-plan':
+      return TodayWorkPlanScreen(user: user);
+    case 'site-engineer-reports':
+      return SiteEngineerReportsScreen(user: user);
     case 'engineer-projects':
       return EngineerProjectsScreen(user: user);
+    case 'engineer-withdraw-materials':
+      return EngineerWithdrawMaterialsScreen(user: user);
     case 'accountant-custody':
       return AccountantCustodyScreen(currentUser: user);
     case 'accountant-finance':
@@ -35,12 +59,24 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return AttendanceReportsScreen(currentUser: user);
     case 'reports':
       return ReportsScreen(currentUser: user);
+    case 'aggregated-detailed-daily':
+      return AggregatedDetailedDailyReportScreen(currentUser: user);
     case 'finance':
       return FinanceScreen(currentUser: user);
     case 'manager-custody':
       return ManagerCustodyScreen(currentUser: user);
     case 'admin-dashboard':
       return AdminDashboardScreen(currentUser: user);
+    case 'activity-logs':
+      return ActivityLogsScreen(currentUser: user);
+    case 'daily-movement':
+      return DailyMovementScreen(currentUser: user);
+    case 'new-icon':
+      return NewIconScreen(currentUser: user);
+    case 'operation-reports':
+      return OperationReportsScreen(user: user);
+    case 'operation-reports-tracking':
+      return OperationReportsTrackingScreen(currentUser: user);
     default:
       return null;
   }

@@ -2,33 +2,74 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
+import '../models/detailed_report_model.dart';
 import '../models/daily_report_model.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
-/// الخطوة 3: الماليات (4 صفوف) + زر الحفظ
-class DailyReportStep3Screen extends StatefulWidget {
+/// التقرير المفصل - الماليات: نسخة طبق الأصل من الخطوة الثالثة للتقرير اليومي.
+/// إدخال بنود الصرف (4) وخصم المبالغ من رصيد مهندس الموقع (مستخدم كاتب التقرير)، ثم حفظ التقرير.
+class DetailedReportFinancesScreen extends StatefulWidget {
   final UserModel user;
-  final DailyReportData report;
+  final DetailedReportModel report;
 
-  const DailyReportStep3Screen({super.key, required this.user, required this.report});
+  const DetailedReportFinancesScreen({super.key, required this.user, required this.report});
 
   @override
-  State<DailyReportStep3Screen> createState() => _DailyReportStep3ScreenState();
+  State<DetailedReportFinancesScreen> createState() => _DetailedReportFinancesScreenState();
 }
 
-class _DailyReportStep3ScreenState extends State<DailyReportStep3Screen> {
+class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScreen> {
   final _db = getStorage();
   bool _saving = false;
+  late List<ExpenseItem> _expenses;
 
-  void _save() async {
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.report.expenses;
+    _expenses = List.generate(4, (i) {
+      if (i < existing.length) {
+        final e = existing[i];
+        return ExpenseItem(description: e.description, amount: e.amount, imagePath: e.imagePath);
+      }
+      return ExpenseItem();
+    });
+  }
+
+  Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      await _db.addDailyReport(widget.report);
+      final existingId = widget.report.id;
+      if (existingId != null) {
+        await _db.patchDetailedReportExpenses(
+          reportId: existingId,
+          userId: widget.report.userId,
+          expenses: _expenses,
+        );
+      } else {
+        final reportWithExpenses = DetailedReportModel(
+          userId: widget.report.userId,
+          userName: widget.report.userName,
+          reportDatetime: widget.report.reportDatetime,
+          projectId: widget.report.projectId,
+          projectName: widget.report.projectName,
+          supervisorId: widget.report.supervisorId,
+          createdAt: widget.report.createdAt,
+          summary: widget.report.summary,
+          lines: widget.report.lines,
+          expenses: _expenses,
+          attachments: widget.report.attachments,
+        );
+        await _db.addDetailedReport(reportWithExpenses);
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم حفظ التقرير اليومي بنجاح'), backgroundColor: Colors.green),
+        SnackBar(
+          content: Text(existingId != null ? 'تم حفظ بنود الصرف بنجاح' : 'تم حفظ التقرير المفصل بنجاح'),
+          backgroundColor: Colors.green,
+        ),
       );
       await saveLastRoute('home');
       if (!mounted) return;
@@ -50,7 +91,7 @@ class _DailyReportStep3ScreenState extends State<DailyReportStep3Screen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('التقرير اليومي - الماليات'),
+        title: const Text('التقرير المفصل - الماليات'),
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
       ),
@@ -64,7 +105,7 @@ class _DailyReportStep3ScreenState extends State<DailyReportStep3Screen> {
           const SizedBox(height: 16),
           ...List.generate(4, (i) => _ExpenseRow(
                 index: i + 1,
-                item: widget.report.expenses[i],
+                item: _expenses[i],
                 onChanged: () => setState(() {}),
               )),
           const SizedBox(height: 32),

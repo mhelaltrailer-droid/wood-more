@@ -126,7 +126,7 @@ class _AdminUnitsScreenState extends State<AdminUnitsScreen> {
                   icon: const Icon(Icons.photo_library),
                   label: const Text('اختيار صورة من الجهاز'),
                   onPressed: () async {
-                    final result = await FilePicker.platform.pickFiles(type: FileType.image, withData: true, allowMultiple: false);
+                    final result = await FilePicker.pickFiles(type: FileType.image, withData: true, allowMultiple: false);
                     if (result == null || result.files.isEmpty) return;
                     final file = result.files.single;
                     final bytes = file.bytes;

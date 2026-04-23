@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS users (
   password TEXT NOT NULL DEFAULT '0000'
 );
 
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+INSERT INTO app_settings (key, value) VALUES ('system_locked', '0')
+ON CONFLICT (key) DO NOTHING;
+
 -- Add password column if upgrading from an older schema (safe to run multiple times)
 DO $$
 BEGIN
@@ -86,6 +94,16 @@ BEGIN
     ALTER TABLE daily_reports ADD COLUMN contractors_json TEXT;
   END IF;
 END $$;
+
+-- هيكل مواقع المشروع (شجري): موقع فرعي folder أو موقع عمل work_site
+CREATE TABLE IF NOT EXISTS project_locations (
+  id SERIAL PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  parent_id INTEGER REFERENCES project_locations(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'folder' CHECK (type IN ('folder', 'work_site')),
+  display_order INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS zones (
   id SERIAL PRIMARY KEY,
@@ -395,3 +413,113 @@ SELECT t.name FROM unnest(ARRAY[
   'STEEL BOX 40*40 MM LENGTH 6M'
 ]) AS t(name)
 WHERE NOT EXISTS (SELECT 1 FROM materials m WHERE m.name = t.name);
+
+-- ========== التقرير المفصل (مهندس الموقع) ==========
+CREATE TABLE IF NOT EXISTS work_phases (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS detailed_reports (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  user_name TEXT NOT NULL,
+  report_datetime TEXT NOT NULL,
+  project_id INTEGER REFERENCES projects(id),
+  project_name TEXT,
+  supervisor_id INTEGER REFERENCES supervisors(id),
+  created_at TEXT NOT NULL,
+  summary TEXT
+);
+
+CREATE TABLE IF NOT EXISTS detailed_report_lines (
+  id SERIAL PRIMARY KEY,
+  detailed_report_id INTEGER NOT NULL REFERENCES detailed_reports(id) ON DELETE CASCADE,
+  contractor_id INTEGER REFERENCES contractors(id),
+  contractor_workers_count INTEGER NOT NULL DEFAULT 0 CHECK (contractor_workers_count >= 0),
+  self_workers_count INTEGER NOT NULL DEFAULT 0 CHECK (self_workers_count >= 0 AND self_workers_count <= 10),
+  zone_id INTEGER REFERENCES zones(id),
+  building_id INTEGER REFERENCES buildings(id),
+  location_id INTEGER REFERENCES project_locations(id),
+  phase_id INTEGER NOT NULL REFERENCES work_phases(id),
+  workers_count INTEGER NOT NULL CHECK (workers_count >= 1)
+);
+
+DO $$
+BEGIN
+  IF (SELECT COUNT(*) FROM work_phases) = 0 THEN
+    INSERT INTO work_phases (name) VALUES ('تركيب اكسسوارات'), ('تقطيع WPC'), ('تركيب WPC'), ('معالجة'), ('دهان');
+  END IF;
+END $$;
+
+-- هيكلة المخازن: خامات لكل موقع فرعي + سجل السحب (مرة واحدة لكل موقع)
+CREATE TABLE IF NOT EXISTS location_materials (
+  id SERIAL PRIMARY KEY,
+  location_id INTEGER NOT NULL REFERENCES project_locations(id) ON DELETE CASCADE,
+  material_name TEXT NOT NULL,
+  quantity TEXT NOT NULL,
+  unit TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS location_withdrawal (
+  id SERIAL PRIMARY KEY,
+  location_id INTEGER NOT NULL UNIQUE REFERENCES project_locations(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  user_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  disbursement_permit_images_json TEXT,
+  delivery_permit_images_json TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_location_materials_location_id ON location_materials(location_id);
+CREATE INDEX IF NOT EXISTS idx_location_withdrawal_location_id ON location_withdrawal(location_id);
+
+-- تنفيذ خطة اليوم (تأكيد/تعديل/تأجيل)
+CREATE TABLE IF NOT EXISTS executed_plans (
+  id SERIAL PRIMARY KEY,
+  source_plan_id INTEGER REFERENCES detailed_reports(id) ON DELETE SET NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  user_name TEXT NOT NULL,
+  project_id INTEGER REFERENCES projects(id),
+  project_name TEXT,
+  plan_date TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('confirmed', 'confirmed_edited', 'postponed')),
+  modification_summary TEXT,
+  postpone_reason_key TEXT,
+  postpone_reason_label TEXT,
+  postpone_custom_reason TEXT,
+  postpone_notes TEXT,
+  postpone_reopen_date TEXT,
+  plan_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'executed_plans' AND column_name = 'postpone_reopen_date'
+  ) THEN
+    ALTER TABLE executed_plans ADD COLUMN postpone_reopen_date TEXT;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_executed_plans_plan_date ON executed_plans(plan_date);
+CREATE INDEX IF NOT EXISTS idx_executed_plans_user_id ON executed_plans(user_id);
+
+-- بيانات تجريبية للتقرير المفصل: فيلات D1–D5 وبرجولات shed01, shed02 لمشروع Cairo gate_ACC_W
+DO $$
+DECLARE
+  pid INT;
+  zid INT;
+  zname TEXT;
+BEGIN
+  SELECT id INTO pid FROM projects WHERE name = 'Cairo gate_ACC_W' LIMIT 1;
+  IF pid IS NULL THEN RETURN; END IF;
+  IF EXISTS (SELECT 1 FROM zones WHERE project_id = pid LIMIT 1) THEN RETURN; END IF;
+  FOR zname IN SELECT unnest(ARRAY['D1','D2','D3','D4','D5'])
+  LOOP
+    INSERT INTO zones (project_id, name) VALUES (pid, zname) RETURNING id INTO zid;
+    INSERT INTO buildings (zone_id, name) VALUES (zid, 'shed01'), (zid, 'shed02');
+  END LOOP;
+END $$;

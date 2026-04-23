@@ -13,6 +13,12 @@ import '../models/project_stock_ledger_model.dart';
 import '../models/unit_model.dart';
 import '../models/building_material_model.dart';
 import '../models/building_cutlist_model.dart';
+import '../models/work_phase_model.dart';
+import '../models/detailed_report_model.dart';
+import '../models/project_location_model.dart';
+import '../models/location_material_model.dart';
+import '../models/location_withdrawal_model.dart';
+import '../models/location_withdrawal_for_period_model.dart';
 import '../data/default_materials.dart';
 
 /// تخزين للويب باستخدام SharedPreferences
@@ -23,16 +29,20 @@ class WebStorageService {
   static const _materialsKey = 'wood_materials_v3';
   static const _dailyReportsKey = 'wood_daily_reports';
   static const _zonesKey = 'wood_zones';
+  static const _projectLocationsKey = 'wood_project_locations';
   static const _buildingsKey = 'wood_buildings';
   static const _supervisorsKey = 'wood_supervisors';
   static const _contractorsKey = 'wood_contractors';
   static const _projectStockKey = 'wood_project_stock';
   static const _projectStockLedgerKey = 'wood_project_stock_ledger';
+  static const _locationMaterialsKey = 'wood_location_materials';
+  static const _locationWithdrawalKey = 'wood_location_withdrawal';
   static const _unitsKey = 'wood_units';
   static const _buildingMaterialsKey = 'wood_building_materials';
   static const _buildingCutlistKey = 'wood_building_cutlist';
   static const _engineerBalanceKey = 'wood_engineer_balance';
   static const _engineerCustodyKey = 'wood_engineer_custody';
+  static const _systemLockedKey = 'wood_system_locked';
 
   Future<SharedPreferences> get _prefs async => await SharedPreferences.getInstance();
 
@@ -118,16 +128,32 @@ class WebStorageService {
       await prefs.setString(_dailyReportsKey, jsonEncode([]));
     }
     if (prefs.getString(_zonesKey) == null) await prefs.setString(_zonesKey, jsonEncode([]));
+    if (prefs.getString(_projectLocationsKey) == null) await prefs.setString(_projectLocationsKey, jsonEncode([]));
     if (prefs.getString(_buildingsKey) == null) await prefs.setString(_buildingsKey, jsonEncode([]));
     if (prefs.getString(_supervisorsKey) == null) await prefs.setString(_supervisorsKey, jsonEncode([]));
     if (prefs.getString(_contractorsKey) == null) await prefs.setString(_contractorsKey, jsonEncode([]));
     if (prefs.getString(_projectStockKey) == null) await prefs.setString(_projectStockKey, jsonEncode([]));
     if (prefs.getString(_projectStockLedgerKey) == null) await prefs.setString(_projectStockLedgerKey, jsonEncode([]));
+    if (prefs.getString(_locationMaterialsKey) == null) await prefs.setString(_locationMaterialsKey, jsonEncode([]));
+    if (prefs.getString(_locationWithdrawalKey) == null) await prefs.setString(_locationWithdrawalKey, jsonEncode([]));
     if (prefs.getString(_unitsKey) == null) await prefs.setString(_unitsKey, jsonEncode([]));
     if (prefs.getString(_buildingMaterialsKey) == null) await prefs.setString(_buildingMaterialsKey, jsonEncode([]));
     if (prefs.getString(_buildingCutlistKey) == null) await prefs.setString(_buildingCutlistKey, jsonEncode([]));
     if (prefs.getString(_engineerBalanceKey) == null) await prefs.setString(_engineerBalanceKey, jsonEncode([]));
     if (prefs.getString(_engineerCustodyKey) == null) await prefs.setString(_engineerCustodyKey, jsonEncode([]));
+    if (!prefs.containsKey(_systemLockedKey)) await prefs.setBool(_systemLockedKey, false);
+  }
+
+  Future<bool> isSystemLocked() async {
+    await _initData();
+    final prefs = await _prefs;
+    return prefs.getBool(_systemLockedKey) ?? false;
+  }
+
+  Future<void> setSystemLocked(bool locked) async {
+    await _initData();
+    final prefs = await _prefs;
+    await prefs.setBool(_systemLockedKey, locked);
   }
 
   Future<List<String>> getMaterials() async {
@@ -340,6 +366,21 @@ class WebStorageService {
     return unique;
   }
 
+  Future<List<ProjectModel>> getProjectsRaw() async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_projectsKey)!) as List;
+    final projects = list
+        .map((m) => ProjectModel.fromMap(Map<String, dynamic>.from(m as Map)))
+        .toList();
+    projects.sort((a, b) {
+      final byName = a.name.compareTo(b.name);
+      if (byName != 0) return byName;
+      return a.id.compareTo(b.id);
+    });
+    return projects;
+  }
+
   Future<void> addAttendanceRecord(AttendanceRecordModel record) async {
     await _initData();
     final prefs = await _prefs;
@@ -515,9 +556,11 @@ class WebStorageService {
     final prefs = await _prefs;
     final list = (jsonDecode(prefs.getString(_projectsKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
     final zones = (jsonDecode(prefs.getString(_zonesKey)!) as List).where((e) => (e as Map)['project_id'] != id).toList();
+    final plocs = (jsonDecode(prefs.getString(_projectLocationsKey)!) as List).where((e) => (e as Map)['project_id'] != id).toList();
     final stock = (jsonDecode(prefs.getString(_projectStockKey)!) as List).where((e) => (e as Map)['project_id'] != id).toList();
     await prefs.setString(_projectsKey, jsonEncode(list));
     await prefs.setString(_zonesKey, jsonEncode(zones));
+    await prefs.setString(_projectLocationsKey, jsonEncode(plocs));
     await prefs.setString(_projectStockKey, jsonEncode(stock));
   }
 
@@ -558,6 +601,71 @@ class WebStorageService {
     final buildings = (jsonDecode(prefs.getString(_buildingsKey)!) as List).where((e) => (e as Map)['zone_id'] != id).toList();
     await prefs.setString(_zonesKey, jsonEncode(list));
     await prefs.setString(_buildingsKey, jsonEncode(buildings));
+  }
+
+  Future<List<ProjectLocationModel>> getProjectLocations(int projectId) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = (jsonDecode(prefs.getString(_projectLocationsKey)!) as List)
+        .where((e) => (e as Map)['project_id'] == projectId)
+        .toList();
+    return list.map((m) => ProjectLocationModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()
+      ..sort((a, b) => a.displayOrder != b.displayOrder ? a.displayOrder.compareTo(b.displayOrder) : a.id.compareTo(b.id));
+  }
+
+  Future<int> addProjectLocation({required int projectId, int? parentId, required String name, required String type, int displayOrder = 0}) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_projectLocationsKey)!) as List;
+    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    list.add({
+      'id': nextId,
+      'project_id': projectId,
+      'parent_id': parentId,
+      'name': name,
+      'type': type,
+      'display_order': displayOrder,
+    });
+    await prefs.setString(_projectLocationsKey, jsonEncode(list));
+    return nextId;
+  }
+
+  Future<void> updateProjectLocation(int id, {String? name, int? displayOrder}) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_projectLocationsKey)!) as List;
+    for (var i = 0; i < list.length; i++) {
+      final m = list[i] as Map;
+      if (m['id'] == id) {
+        if (name != null) m['name'] = name;
+        if (displayOrder != null) m['display_order'] = displayOrder;
+        list[i] = m;
+        break;
+      }
+    }
+    await prefs.setString(_projectLocationsKey, jsonEncode(list));
+  }
+
+  Future<void> deleteProjectLocation(int id) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_projectLocationsKey)!) as List;
+    final toRemove = <int>{id};
+    var changed = true;
+    while (changed) {
+      changed = false;
+      for (final e in list) {
+        final m = e as Map;
+        final pid = m['parent_id'];
+        final eid = m['id'] is int ? m['id'] as int : int.parse(m['id'].toString());
+        if (pid != null && toRemove.contains(pid is int ? pid : int.parse(pid.toString())) && !toRemove.contains(eid)) {
+          toRemove.add(eid);
+          changed = true;
+        }
+      }
+    }
+    final filtered = list.where((e) => !toRemove.contains((e as Map)['id'] is int ? (e as Map)['id'] as int : int.parse((e as Map)['id'].toString()))).toList();
+    await prefs.setString(_projectLocationsKey, jsonEncode(filtered));
   }
 
   Future<List<BuildingModel>> getBuildings(int zoneId) async {
@@ -701,6 +809,173 @@ class WebStorageService {
       createdAt: reportDate,
     );
     return true;
+  }
+
+  Future<List<LocationMaterialModel>> getLocationMaterials(int locationId) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = (jsonDecode(prefs.getString(_locationMaterialsKey)!) as List).where((e) => (e as Map)['location_id'] == locationId).toList();
+    return list.map((m) => LocationMaterialModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()
+      ..sort((a, b) => a.materialName.compareTo(b.materialName));
+  }
+
+  Future<int> addLocationMaterial(LocationMaterialModel m) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_locationMaterialsKey)!) as List;
+    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    list.add({'id': nextId, 'location_id': m.locationId, 'material_name': m.materialName, 'quantity': m.quantity, 'unit': m.unit});
+    await prefs.setString(_locationMaterialsKey, jsonEncode(list));
+    return nextId;
+  }
+
+  Future<void> updateLocationMaterial(LocationMaterialModel m) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_locationMaterialsKey)!) as List;
+    for (var i = 0; i < list.length; i++) {
+      if ((list[i] as Map)['id'] == m.id) {
+        list[i] = {'id': m.id, 'location_id': m.locationId, 'material_name': m.materialName, 'quantity': m.quantity, 'unit': m.unit};
+        break;
+      }
+    }
+    await prefs.setString(_locationMaterialsKey, jsonEncode(list));
+  }
+
+  Future<void> deleteLocationMaterial(int id) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = (jsonDecode(prefs.getString(_locationMaterialsKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
+    await prefs.setString(_locationMaterialsKey, jsonEncode(list));
+  }
+
+  Future<LocationWithdrawalModel?> getLocationWithdrawal(int locationId) async {
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
+    final found = list.where((e) => (e as Map)['location_id'] == locationId).toList();
+    if (found.isEmpty) return null;
+    return LocationWithdrawalModel.fromMap(Map<String, dynamic>.from(found.first as Map));
+  }
+
+  Future<void> createLocationWithdrawal({
+    required int locationId,
+    required int userId,
+    required String userName,
+    String? disbursementPermitImagesJson,
+    String? deliveryPermitImagesJson,
+  }) async {
+    await _initData();
+    final prefs = await _prefs;
+    final plocs = jsonDecode(prefs.getString(_projectLocationsKey)!) as List;
+    final locMap = plocs.cast<Map?>().firstWhere((e) => e != null && (e as Map)['id'] == locationId, orElse: () => null);
+    if (locMap == null) throw Exception('الموقع غير موجود');
+    final projectId = (locMap as Map)['project_id'] as int;
+    final materials = await getLocationMaterials(locationId);
+    final now = DateTime.now();
+    final nowStr = now.toIso8601String();
+    final stockList = jsonDecode(prefs.getString(_projectStockKey)!) as List;
+    for (final m in materials) {
+      final qty = double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+      if (qty <= 0) continue;
+      final unit = m.unit.isEmpty ? 'وحدة' : m.unit;
+      final idx = stockList.indexWhere((e) => (e as Map)['project_id'] == projectId && e['material_name'] == m.materialName);
+      if (idx >= 0) {
+        final row = Map<String, dynamic>.from(stockList[idx] as Map);
+        final current = double.tryParse((row['quantity'] as String).replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+        row['quantity'] = (current - qty).toStringAsFixed(2);
+        stockList[idx] = row;
+        await addProjectStockLedgerEntry(
+          projectId: projectId,
+          materialName: m.materialName,
+          unit: row['unit'] as String? ?? unit,
+          quantityDelta: -qty,
+          type: 'withdraw_location',
+          userName: userName,
+          createdAt: now,
+          userId: userId,
+        );
+      }
+    }
+    await prefs.setString(_projectStockKey, jsonEncode(stockList));
+    final withdrawals = jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
+    if (withdrawals.any((e) => (e as Map)['location_id'] == locationId)) throw Exception('تم سحب الخامات من هذا المكان مسبقاً');
+    final nextId = withdrawals.isEmpty ? 1 : (withdrawals.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    withdrawals.add({
+      'id': nextId,
+      'location_id': locationId,
+      'user_id': userId,
+      'user_name': userName,
+      'created_at': nowStr,
+      'disbursement_permit_images_json': disbursementPermitImagesJson,
+      'delivery_permit_images_json': deliveryPermitImagesJson,
+    });
+    await prefs.setString(_locationWithdrawalKey, jsonEncode(withdrawals));
+  }
+
+  /// إلغاء سحب الخامات واسترجاع رصيد المشروع (مسؤول التطبيق).
+  Future<void> deleteLocationWithdrawal(int locationId) async {
+    await _initData();
+    final prefs = await _prefs;
+    final withdrawalList = jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
+    final found = withdrawalList.cast<Map?>().where((e) => e != null && (e as Map)['location_id'] == locationId).toList();
+    if (found.isEmpty) return;
+    final w = Map<String, dynamic>.from(found.first as Map);
+    final withdrawal = LocationWithdrawalModel.fromMap(w);
+
+    final plocs = jsonDecode(prefs.getString(_projectLocationsKey)!) as List;
+    final locMap = plocs.cast<Map?>().firstWhere((e) => e != null && (e as Map)['id'] == locationId, orElse: () => null);
+    if (locMap == null) throw Exception('الموقع غير موجود');
+    final projectId = (locMap as Map)['project_id'] as int;
+
+    final ledgerRaw = jsonDecode(prefs.getString(_projectStockLedgerKey)!) as List;
+    bool ledgerMatches(Map<String, dynamic> row) {
+      if (row['project_id'] != projectId) return false;
+      if (row['type'] != 'withdraw_location') return false;
+      final uid = row['user_id'];
+      final uidInt = uid is int ? uid : int.tryParse(uid?.toString() ?? '');
+      if (uidInt != withdrawal.userId) return false;
+      final entryTime = DateTime.tryParse(row['created_at'].toString());
+      if (entryTime == null) return false;
+      return entryTime.difference(withdrawal.createdAt).inMilliseconds.abs() <= 2000;
+    }
+
+    final toRemoveIds = <int>{};
+    final stockList = jsonDecode(prefs.getString(_projectStockKey)!) as List;
+
+    for (final e in ledgerRaw) {
+      final row = Map<String, dynamic>.from(e as Map);
+      if (!ledgerMatches(row)) continue;
+      toRemoveIds.add(row['id'] as int);
+      final delta = (row['quantity_delta'] as num?)?.toDouble() ?? 0;
+      if (delta >= 0) continue;
+      final addBack = -delta;
+      final materialName = row['material_name'] as String;
+      final idx = stockList.indexWhere((s) => (s as Map)['project_id'] == projectId && s['material_name'] == materialName);
+      if (idx >= 0) {
+        final stockRow = Map<String, dynamic>.from(stockList[idx] as Map);
+        final current = double.tryParse((stockRow['quantity'] as String).replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+        stockRow['quantity'] = (current + addBack).toStringAsFixed(2);
+        stockList[idx] = stockRow;
+      } else {
+        final unit = (row['unit'] as String?)?.isNotEmpty == true ? row['unit'] as String : 'وحدة';
+        final nextStockId = stockList.isEmpty ? 1 : (stockList.map((x) => (x as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+        stockList.add({
+          'id': nextStockId,
+          'project_id': projectId,
+          'material_name': materialName,
+          'quantity': addBack.toStringAsFixed(2),
+          'unit': unit,
+        });
+      }
+    }
+
+    final newLedger = ledgerRaw.where((e) => !toRemoveIds.contains((e as Map)['id'] as int)).toList();
+    final newWithdrawals = withdrawalList.where((e) => (e as Map)['location_id'] != locationId).toList();
+
+    await prefs.setString(_projectStockKey, jsonEncode(stockList));
+    await prefs.setString(_projectStockLedgerKey, jsonEncode(newLedger));
+    await prefs.setString(_locationWithdrawalKey, jsonEncode(newWithdrawals));
   }
 
   Future<List<UnitModel>> getUnits(int buildingId) async {
@@ -910,5 +1185,48 @@ class WebStorageService {
       final newList = (list).where((e) => (e as Map)['id'] != id).toList();
       await prefs.setString(_materialsKey, jsonEncode(newList));
     }
+  }
+
+  Future<List<WorkPhaseModel>> getWorkPhases() async {
+    return const [
+      WorkPhaseModel(id: 1, name: 'تركيب اكسسوارات'),
+      WorkPhaseModel(id: 2, name: 'تقطيع WPC'),
+      WorkPhaseModel(id: 3, name: 'تركيب WPC'),
+      WorkPhaseModel(id: 4, name: 'معالجة'),
+      WorkPhaseModel(id: 5, name: 'دهان'),
+    ];
+  }
+
+  Future<int> addDetailedReport(DetailedReportModel report) async {
+    throw UnimplementedError('التقرير المفصل يتطلب الاتصال بالخادم. يرجى ضبط config.json.');
+  }
+
+  Future<void> patchDetailedReportExpenses({
+    required int reportId,
+    required int userId,
+    required List<ExpenseItem> expenses,
+  }) async {
+    throw UnimplementedError('تعديل الماليات يتطلب الاتصال بالخادم. يرجى ضبط config.json.');
+  }
+
+  Future<List<DetailedReportModel>> getDetailedReports({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    int? userId,
+    int? projectId,
+  }) async {
+    return [];
+  }
+
+  Future<void> deleteDetailedReport(int id) async {
+    throw UnimplementedError('حذف التقرير المفصل يتطلب الاتصال بالخادم.');
+  }
+
+  Future<List<LocationWithdrawalForPeriodModel>> getLocationWithdrawalsForPeriod({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    int? projectId,
+  }) async {
+    return [];
   }
 }

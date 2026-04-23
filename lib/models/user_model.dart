@@ -17,6 +17,14 @@ class UserModel {
   bool get isAdmin => role == 'app_admin';
   bool get isAccountant => role == 'accountant';
 
+  /// إدارة إلغاء سحب الخامات من المخزن (لوحة التحكم): مسؤول التطبيق بهذا البريد فقط.
+  bool get canManageWarehouseWithdrawalReset =>
+      isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+
+  /// عرض سجل حركة النظام لمسؤول التطبيق المحدد فقط.
+  bool get canViewActivityLogs =>
+      isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,

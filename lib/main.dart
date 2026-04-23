@@ -8,6 +8,7 @@ import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'services/api_storage_service.dart';
 import 'services/auth_persistence.dart';
+import 'services/local_cache_service.dart';
 import 'services/route_persistence.dart';
 import 'core/route_observer.dart';
 import 'services/route_restore.dart';
@@ -21,6 +22,7 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  await LocalCacheService.init();
   await initStorage();
 
   runApp(const WoodAndMoreApp());

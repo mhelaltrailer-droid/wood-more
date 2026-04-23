@@ -9,6 +9,7 @@ import '../models/daily_report_model.dart';
 import '../services/storage_service.dart';
 
 /// تقرير المقاول: اسم المقاول + مدة → المشاريع وعدد العمال في كل تقرير
+/// قائمة المقاولين من التخزين (نفس مصدر التقرير اليومي والتقرير المفصل)
 class ContractorReportScreen extends StatefulWidget {
   final UserModel admin;
 
@@ -20,12 +21,35 @@ class ContractorReportScreen extends StatefulWidget {
 
 class _ContractorReportScreenState extends State<ContractorReportScreen> {
   final _db = getStorage();
-  static const List<String> _contractors = ['حسام حسن', 'ابراهيم النجار', 'لايوجد مقاول', 'ابراهيم حسن'];
+  List<String> _contractorNames = ['لايوجد مقاول'];
   String? _selectedContractor;
   DateTime _dateFrom = DateTime.now();
   DateTime _dateTo = DateTime.now();
   List<DailyReportData> _reports = [];
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadContractors();
+  }
+
+  Future<void> _loadContractors() async {
+    try {
+      final list = await _db.getContractors();
+      if (mounted) {
+        setState(() {
+          _contractorNames = ['لايوجد مقاول', ...list.map((c) => c.name)];
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _contractorNames = ['لايوجد مقاول', 'حسام حسن', 'ابراهيم النجار', 'ابراهيم حسن'];
+        });
+      }
+    }
+  }
 
   Future<void> _run() async {
     if (_selectedContractor == null) {
@@ -119,8 +143,12 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
         children: [
           DropdownButtonFormField<String>(
             value: _selectedContractor,
+            isExpanded: true,
             decoration: const InputDecoration(labelText: 'المقاول', border: OutlineInputBorder()),
-            items: _contractors.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+            items: [
+              const DropdownMenuItem<String>(value: null, child: Text('— اختر المقاول —')),
+              ..._contractorNames.map((c) => DropdownMenuItem(value: c, child: Text(c))),
+            ],
             onChanged: (v) => setState(() => _selectedContractor = v),
           ),
           const SizedBox(height: 12),

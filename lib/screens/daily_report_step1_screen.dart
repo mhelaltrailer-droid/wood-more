@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/user_model.dart';
 import '../models/project_model.dart';
+import '../models/supervisor_model.dart';
+import '../models/contractor_model.dart';
 import '../models/daily_report_model.dart';
 import '../services/storage_service.dart';
 import 'daily_report_step2_screen.dart';
@@ -20,14 +22,20 @@ class DailyReportStep1Screen extends StatefulWidget {
   State<DailyReportStep1Screen> createState() => _DailyReportStep1ScreenState();
 }
 
+/// قيمة ثابتة لخيار "أخرى" في قائمة المشروعات (id = 0 لا يوجد في قاعدة المشروعات)
+const ProjectModel _otherProject = ProjectModel(id: 0, name: 'أخرى');
+
 class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
   final _db = getStorage();
   List<ProjectModel> _projects = [];
   ProjectModel? _selectedProject;
+  final _otherProjectNameController = TextEditingController();
   final _workPlaceController = TextEditingController();
   final _workReportController = TextEditingController();
-  static const List<String> _supervisorOptions = ['Emam', 'Mansour', 'لايوجد مشرف', 'Ahmed'];
-  static const List<String> _contractorOptions = ['حسام حسن', 'ابراهيم النجار', 'لايوجد مقاول', 'ابراهيم حسن'];
+  /// أسماء المشرفين من التخزين (نفس مصدر التقرير المفصل) + خيار لايوجد مشرف
+  List<String> _supervisorOptions = ['لايوجد مشرف'];
+  /// أسماء المقاولين من التخزين (نفس مصدر التقرير المفصل) + خيار لايوجد مقاول
+  List<String> _contractorOptions = ['لايوجد مقاول'];
   String? _selectedSupervisor;
   final List<ContractorWorkers> _contractors = [];
   final _tomorrowPlanController = TextEditingController();
@@ -37,15 +45,25 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
   String? _documentPath;
   String? _documentFileName;
 
+  bool get _isOtherProject => _selectedProject?.id == _otherProject.id;
+
   @override
   void initState() {
     super.initState();
     _loadProjects();
+    _loadSupervisorsAndContractors();
+    if (widget.report.projectName != null &&
+        widget.report.projectName!.trim().startsWith('أخرى')) {
+      final n = widget.report.projectName!.trim();
+      if (n.startsWith('أخرى (') && n.endsWith(')')) {
+        _otherProjectNameController.text = n.substring(6, n.length - 1).trim();
+      }
+    }
     _imagePaths = List.from(widget.report.imagePaths);
     _documentPath = widget.report.documentPath;
     _workPlaceController.text = widget.report.workPlace;
     _workReportController.text = widget.report.workReport;
-    _selectedSupervisor = widget.report.supervisorName.isEmpty ? null : (_supervisorOptions.contains(widget.report.supervisorName) ? widget.report.supervisorName : null);
+    if (widget.report.supervisorName.isNotEmpty) _selectedSupervisor = widget.report.supervisorName;
     if (widget.report.contractors.isNotEmpty) {
       _contractors.addAll(widget.report.contractors.map((c) => ContractorWorkers(contractorName: c.contractorName, workersCount: c.workersCount)));
     } else if (widget.report.contractorName.isNotEmpty || widget.report.workersCount.isNotEmpty) {
@@ -58,6 +76,7 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
 
   @override
   void dispose() {
+    _otherProjectNameController.dispose();
     _workPlaceController.dispose();
     _workReportController.dispose();
     _tomorrowPlanController.dispose();
@@ -67,14 +86,48 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
 
   Future<void> _loadProjects() async {
     final list = await _db.getProjects();
-    final current = list.cast<ProjectModel?>().firstWhere(
-          (p) => p?.id == widget.report.projectId,
-          orElse: () => null,
-        );
+    final isOther = widget.report.projectName != null &&
+        widget.report.projectName!.trim().startsWith('أخرى');
+    ProjectModel? current;
+    if (isOther) {
+      current = _otherProject;
+    } else {
+      current = list.cast<ProjectModel?>().firstWhere(
+            (p) => p?.id == widget.report.projectId,
+            orElse: () => null,
+          );
+      if (current != null && current.name == 'أخرى') current = _otherProject;
+    }
     setState(() {
       _projects = list;
       _selectedProject = current;
     });
+  }
+
+  Future<void> _loadSupervisorsAndContractors() async {
+    try {
+      final supervisors = await _db.getSupervisors();
+      final contractors = await _db.getContractors();
+      if (mounted) {
+        setState(() {
+          _supervisorOptions = ['لايوجد مشرف', ...supervisors.map((s) => s.name)];
+          _contractorOptions = ['لايوجد مقاول', ...contractors.map((c) => c.name)];
+          if (_selectedSupervisor != null && _selectedSupervisor!.isNotEmpty && !_supervisorOptions.contains(_selectedSupervisor)) {
+            _supervisorOptions = List.from(_supervisorOptions)..add(_selectedSupervisor!);
+          }
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _supervisorOptions = ['لايوجد مشرف'];
+          _contractorOptions = ['لايوجد مقاول'];
+          if (_selectedSupervisor != null && _selectedSupervisor!.isNotEmpty && !_supervisorOptions.contains(_selectedSupervisor)) {
+            _supervisorOptions = List.from(_supervisorOptions)..add(_selectedSupervisor!);
+          }
+        });
+      }
+    }
   }
 
   static String _mimeFromExtension(String? path) {
@@ -92,7 +145,7 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
 
   Future<void> _pickDocument() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx'],
         withData: true,
@@ -123,7 +176,7 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
       return;
     }
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.image,
         withData: true,
         allowMultiple: true,
@@ -151,16 +204,29 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اختر المشروع')));
       return;
     }
+    if (_isOtherProject) {
+      final otherName = _otherProjectNameController.text.trim();
+      if (otherName.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('عند اختيار "أخرى" يرجى كتابة اسم المشروع في الخانة أدناه')),
+        );
+        return;
+      }
+    }
     final contractorsList = _contractors
         .where((c) => c.contractorName.trim().isNotEmpty || c.workersCount.trim().isNotEmpty)
         .map((c) => ContractorWorkers(contractorName: c.contractorName.trim(), workersCount: c.workersCount.trim()))
         .toList();
     final firstContractor = contractorsList.isNotEmpty ? contractorsList.first : ContractorWorkers();
+    final int? reportProjectId = _isOtherProject ? null : _selectedProject!.id;
+    final String reportProjectName = _isOtherProject
+        ? 'أخرى (${_otherProjectNameController.text.trim()})'
+        : _selectedProject!.name;
     final report = DailyReportData(
       userName: widget.report.userName,
       userId: widget.report.userId,
-      projectId: _selectedProject!.id,
-      projectName: _selectedProject!.name,
+      projectId: reportProjectId,
+      projectName: reportProjectName,
       reportDate: widget.report.reportDate,
       workPlace: _workPlaceController.text.trim(),
       workReport: _workReportController.text.trim(),
@@ -208,10 +274,31 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
                 labelText: 'اسم المشروع *',
                 border: OutlineInputBorder(),
               ),
-              items: _projects.map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis))).toList(),
+              items: [
+                ..._projects
+                    .where((p) => p.name != 'أخرى')
+                    .map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis))),
+                const DropdownMenuItem(value: _otherProject, child: Text('أخرى')),
+              ],
               onChanged: (p) => setState(() => _selectedProject = p),
               validator: (v) => v == null ? 'اختر المشروع' : null,
             ),
+            if (_isOtherProject) ...[
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _otherProjectNameController,
+                decoration: const InputDecoration(
+                  labelText: 'حدد المشروع (إلزامي عند اختيار أخرى) *',
+                  hintText: 'اكتب اسم المشروع أو وصفاً قصيراً',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (v) {
+                  if (_isOtherProject && (v == null || v.trim().isEmpty)) return 'مطلوب عند اختيار أخرى';
+                  return null;
+                },
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
             const SizedBox(height: 12),
             _readOnlyRow('التاريخ', dateStr),
             _readOnlyRow('الوقت', timeStr),
@@ -242,7 +329,10 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
                 labelText: 'المشرف',
                 border: OutlineInputBorder(),
               ),
-              items: _supervisorOptions.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+              items: [
+                const DropdownMenuItem<String>(value: null, child: Text('— اختر المشرف —')),
+                ..._supervisorOptions.map((s) => DropdownMenuItem(value: s, child: Text(s))),
+              ],
               onChanged: (v) => setState(() => _selectedSupervisor = v),
             ),
             const SizedBox(height: 16),
@@ -274,16 +364,18 @@ class _DailyReportStep1ScreenState extends State<DailyReportStep1Screen> {
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: TextFormField(
-                        key: ValueKey('workers_$i'),
-                        initialValue: c.workersCount,
-                        keyboardType: TextInputType.number,
+                      child: DropdownButtonFormField<String>(
+                        value: () {
+                          final n = int.tryParse(c.workersCount.trim());
+                          return (n != null && n >= 1 && n <= 12) ? n.toString() : null;
+                        }(),
                         decoration: const InputDecoration(
-                          labelText: 'عدد العمال',
+                          labelText: 'عدد العمال (1–12)',
                           border: OutlineInputBorder(),
                           isDense: true,
                         ),
-                        onChanged: (v) => setState(() => _contractors[i] = ContractorWorkers(contractorName: _contractors[i].contractorName, workersCount: v)),
+                        items: List.generate(12, (n) => (n + 1).toString()).map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                        onChanged: (v) => setState(() => _contractors[i] = ContractorWorkers(contractorName: _contractors[i].contractorName, workersCount: v ?? '')),
                       ),
                     ),
                     IconButton(

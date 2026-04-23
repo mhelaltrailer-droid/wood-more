@@ -46,7 +46,7 @@ class _ManagerCustodyScreenState extends State<ManagerCustodyScreen> {
 
   Future<void> _pickDocument() async {
     try {
-      final result = await FilePicker.platform.pickFiles(withData: true, allowMultiple: false);
+      final result = await FilePicker.pickFiles(withData: true, allowMultiple: false);
       if (result == null || result.files.isEmpty) return;
       final file = result.files.single;
       final bytes = file.bytes;

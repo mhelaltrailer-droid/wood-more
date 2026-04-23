@@ -20,6 +20,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   String? _errorMessage;
+  static const String _lockAdminEmail = 'mouhammedhelal@gmail.com';
 
   @override
   void dispose() {
@@ -37,8 +38,19 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
+      final email = _emailController.text.trim().toLowerCase();
+      final isAllowedAdmin = email == _lockAdminEmail;
+      final locked = await _db.isSystemLocked();
+      if (locked && !isAllowedAdmin) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const _SystemLockedScreen()),
+        );
+        return;
+      }
       final user = await _db.validateLogin(
-        _emailController.text.trim(),
+        email,
         _passwordController.text.trim(),
       );
       if (!mounted) return;
@@ -225,6 +237,43 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SystemLockedScreen extends StatelessWidget {
+  const _SystemLockedScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.build_circle_outlined, size: 90, color: Colors.orange.shade700),
+              const SizedBox(height: 16),
+              const Text(
+                'System Locked for maintainance please try again later',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('رجوع'),
+              ),
+            ],
           ),
         ),
       ),

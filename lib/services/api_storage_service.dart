@@ -13,6 +13,13 @@ import '../models/project_stock_ledger_model.dart';
 import '../models/unit_model.dart';
 import '../models/building_material_model.dart';
 import '../models/building_cutlist_model.dart';
+import '../models/work_phase_model.dart';
+import '../models/detailed_report_model.dart';
+import '../models/project_location_model.dart';
+import '../models/location_material_model.dart';
+import '../models/location_withdrawal_model.dart';
+import '../models/location_withdrawal_for_period_model.dart';
+import '../models/activity_log_model.dart';
 
 /// Storage implementation that uses the REST API (PostgreSQL backend).
 class ApiStorageService {
@@ -94,6 +101,19 @@ class ApiStorageService {
     }
   }
 
+  Future<bool> isSystemLocked() async {
+    try {
+      final data = await _get('system-lock');
+      return data['locked'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> setSystemLocked(bool locked) async {
+    await _put('system-lock', {'locked': locked});
+  }
+
   Future<List<UserModel>> getSiteEngineers() async {
     final list = await _getList('users/site-engineers');
     return list.map((e) => UserModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
@@ -129,6 +149,20 @@ class ApiStorageService {
     return _deduplicateProjectsByName(projects);
   }
 
+  /// الحصول على جميع المشاريع كما هي من الخادم (يشمل الأسماء المكررة).
+  Future<List<ProjectModel>> getProjectsRaw() async {
+    final list = await _getList('projects');
+    return list.map((e) {
+      final m = Map<String, dynamic>.from(e as Map);
+      return ProjectModel.fromMap(m);
+    }).toList()
+      ..sort((a, b) {
+        final byName = a.name.compareTo(b.name);
+        if (byName != 0) return byName;
+        return a.id.compareTo(b.id);
+      });
+  }
+
   static List<ProjectModel> _deduplicateProjectsByName(List<ProjectModel> list) {
     final seen = <String>{};
     return list.where((p) => seen.add(p.name)).toList()..sort((a, b) => a.name.compareTo(b.name));
@@ -161,6 +195,34 @@ class ApiStorageService {
 
   Future<void> deleteZone(int id) async {
     await _delete('zones/$id');
+  }
+
+  // ——— هيكل مواقع المشروع (project_locations) ———
+  Future<List<ProjectLocationModel>> getProjectLocations(int projectId) async {
+    final list = await _getList('project-locations?projectId=$projectId');
+    return list.map((e) => ProjectLocationModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+  }
+
+  Future<int> addProjectLocation({required int projectId, int? parentId, required String name, required String type, int displayOrder = 0}) async {
+    return _post('project-locations', {
+      'projectId': projectId,
+      'parentId': parentId,
+      'name': name,
+      'type': type,
+      'display_order': displayOrder,
+    });
+  }
+
+  Future<void> updateProjectLocation(int id, {String? name, int? displayOrder}) async {
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (displayOrder != null) body['display_order'] = displayOrder;
+    if (body.isEmpty) return;
+    await _put('project-locations/$id', body);
+  }
+
+  Future<void> deleteProjectLocation(int id) async {
+    await _delete('project-locations/$id');
   }
 
   Future<List<BuildingModel>> getBuildings(int zoneId) async {
@@ -486,4 +548,249 @@ class ApiStorageService {
   Future<void> deleteBuildingCutlist(int id) async {
     await _delete('building-cutlists/$id');
   }
+
+  Future<List<WorkPhaseModel>> getWorkPhases() async {
+    final list = await _getList('work-phases');
+    return list.map((e) => WorkPhaseModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+  }
+
+  Future<int> addDetailedReport(DetailedReportModel report) async {
+    final body = report.toJson();
+    body['lines'] = report.lines.map((e) => e.toJson()).toList();
+    return _post('detailed-reports', body);
+  }
+
+  Future<void> patchDetailedReportExpenses({
+    required int reportId,
+    required int userId,
+    required List<ExpenseItem> expenses,
+  }) async {
+    await _put('detailed-reports/$reportId/expenses', {
+      'userId': userId,
+      'expenses': expenses.map((e) => e.toJson()).toList(),
+    });
+  }
+
+  Future<List<DetailedReportModel>> getDetailedReports({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    int? userId,
+    int? projectId,
+  }) async {
+    final params = <String, String>{
+      'dateFrom': DateTime(dateFrom.year, dateFrom.month, dateFrom.day).toIso8601String(),
+      'dateTo': DateTime(dateTo.year, dateTo.month, dateTo.day, 23, 59, 59, 999).toIso8601String(),
+    };
+    if (userId != null) params['userId'] = userId.toString();
+    if (projectId != null) params['projectId'] = projectId.toString();
+    final uri = Uri.parse(_path('detailed-reports')).replace(queryParameters: params);
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list.map((e) => DetailedReportModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+  }
+
+  /// حذف تقرير مفصّل (صلاحية المسؤول المحدد في الواجهة فقط)
+  Future<void> deleteDetailedReport(int id) async {
+    await _delete('detailed-reports/$id');
+  }
+
+  // ——— هيكلة المخازن: خامات لكل موقع فرعي ———
+  Future<List<LocationMaterialModel>> getLocationMaterials(int locationId) async {
+    final list = await _getList('location-materials?locationId=$locationId');
+    return list.map((e) => LocationMaterialModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+  }
+
+  Future<int> addLocationMaterial(LocationMaterialModel m) async {
+    return _post('location-materials', {
+      'locationId': m.locationId,
+      'materialName': m.materialName,
+      'quantity': m.quantity,
+      'unit': m.unit,
+    });
+  }
+
+  Future<void> updateLocationMaterial(LocationMaterialModel m) async {
+    await _put('location-materials/${m.id}', {
+      'materialName': m.materialName,
+      'quantity': m.quantity,
+      'unit': m.unit,
+    });
+  }
+
+  Future<void> deleteLocationMaterial(int id) async {
+    await _delete('location-materials/$id');
+  }
+
+  Future<int> addExecutedPlan({
+    required DetailedReportModel plan,
+    required int userId,
+    required String userName,
+    required DateTime planDate,
+    required String status,
+    int? sourcePlanId,
+    String? modificationSummary,
+    String? postponeReasonKey,
+    String? postponeReasonLabel,
+    String? postponeCustomReason,
+    String? postponeNotes,
+    DateTime? postponeReopenDate,
+  }) async {
+    return _post('executed-plans', {
+      'sourcePlanId': sourcePlanId,
+      'userId': userId,
+      'userName': userName,
+      'projectId': plan.projectId,
+      'projectName': plan.projectName,
+      'planDate': DateTime(planDate.year, planDate.month, planDate.day).toIso8601String(),
+      'status': status,
+      'modificationSummary': modificationSummary,
+      'postponeReasonKey': postponeReasonKey,
+      'postponeReasonLabel': postponeReasonLabel,
+      'postponeCustomReason': postponeCustomReason,
+      'postponeNotes': postponeNotes,
+      'postponeReopenDate': postponeReopenDate != null
+          ? DateTime(postponeReopenDate.year, postponeReopenDate.month, postponeReopenDate.day).toIso8601String()
+          : null,
+      'plan': plan.toJson(),
+    });
+  }
+
+  Future<Map<String, dynamic>?> getLatestExecutedPlanStatus({
+    required int sourcePlanId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('executed-plans/latest')).replace(queryParameters: {
+      'sourcePlanId': sourcePlanId.toString(),
+      'userId': userId.toString(),
+    });
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    if (r.body.isEmpty) return null;
+    final decoded = jsonDecode(r.body);
+    if (decoded == null) return null;
+    return Map<String, dynamic>.from(decoded as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> getPostponeReasons() async {
+    final uri = Uri.parse(_path('postpone-reasons'));
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final decoded = jsonDecode(r.body);
+    if (decoded == null || decoded is! List) return [];
+    return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getPostponedReopenedPlans({
+    required DateTime reopenDate,
+    required int userId,
+  }) async {
+    final d = DateTime(reopenDate.year, reopenDate.month, reopenDate.day);
+    final uri = Uri.parse(_path('executed-plans/postponed-reopens')).replace(queryParameters: {
+      'reopenDate': d.toIso8601String(),
+      'userId': userId.toString(),
+    });
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final decoded = jsonDecode(r.body);
+    if (decoded == null || decoded is! List) return [];
+    return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<Map<String, dynamic>> getDailyPlanMovementSummary({
+    required DateTime date,
+    required String requesterEmail,
+  }) async {
+    final uri = Uri.parse(_path('executed-plans/daily-summary')).replace(queryParameters: {
+      'date': DateTime(date.year, date.month, date.day).toIso8601String(),
+      'requesterEmail': requesterEmail.trim().toLowerCase(),
+    });
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final decoded = jsonDecode(r.body);
+    return Map<String, dynamic>.from(decoded as Map);
+  }
+
+  Future<List<ActivityLogModel>> getActivityLogs({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    required String requesterEmail,
+    int? userId,
+    String? actionType,
+  }) async {
+    final params = <String, String>{
+      'dateFrom': DateTime(dateFrom.year, dateFrom.month, dateFrom.day).toIso8601String(),
+      'dateTo': DateTime(dateTo.year, dateTo.month, dateTo.day, 23, 59, 59, 999).toIso8601String(),
+      'requesterEmail': requesterEmail.trim().toLowerCase(),
+    };
+    if (userId != null) params['userId'] = userId.toString();
+    if (actionType != null && actionType.trim().isNotEmpty) params['actionType'] = actionType.trim();
+    final uri = Uri.parse(_path('activity-logs')).replace(queryParameters: params);
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list.map((e) => ActivityLogModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+  }
+
+  Future<LocationWithdrawalModel?> getLocationWithdrawal(int locationId) async {
+    final uri = Uri.parse(_path('location-withdrawal')).replace(queryParameters: {'locationId': locationId.toString()});
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final decoded = jsonDecode(r.body);
+    if (decoded == null) return null;
+    return LocationWithdrawalModel.fromMap(Map<String, dynamic>.from(decoded as Map));
+  }
+
+  Future<void> createLocationWithdrawal({
+    required int locationId,
+    required int userId,
+    required String userName,
+    String? disbursementPermitImagesJson,
+    String? deliveryPermitImagesJson,
+  }) async {
+    final uri = Uri.parse(_path('location-withdrawal'));
+    final body = {
+      'locationId': locationId,
+      'userId': userId,
+      'userName': userName,
+      if (disbursementPermitImagesJson != null) 'disbursementPermitImagesJson': disbursementPermitImagesJson,
+      if (deliveryPermitImagesJson != null) 'deliveryPermitImagesJson': deliveryPermitImagesJson,
+    };
+    final r = await http.post(uri, body: jsonEncode(body), headers: {'Content-Type': 'application/json'});
+    if (r.statusCode >= 400) {
+      final err = r.body;
+      if (err.contains('already_withdrawn')) throw Exception('تم سحب الخامات من هذا المكان مسبقاً');
+      throw Exception(err);
+    }
+  }
+
+  /// إلغاء سحب الخامات لموقع فرعي واسترجاع رصيد المخزن (مسؤول التطبيق).
+  Future<void> deleteLocationWithdrawal(int locationId) async {
+    final uri = Uri.parse(_path('location-withdrawal')).replace(queryParameters: {'locationId': locationId.toString()});
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  /// سحوبات خامات في الفترة (نفس تاريخ التقرير + مهندس + موقع فرعي للمطابقة في التقرير المجمع)
+  Future<List<LocationWithdrawalForPeriodModel>> getLocationWithdrawalsForPeriod({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    int? projectId,
+  }) async {
+    final fromD = DateTime(dateFrom.year, dateFrom.month, dateFrom.day);
+    final toD = DateTime(dateTo.year, dateTo.month, dateTo.day);
+    final params = <String, String>{
+      'dateFrom': '${fromD.year.toString().padLeft(4, '0')}-${fromD.month.toString().padLeft(2, '0')}-${fromD.day.toString().padLeft(2, '0')}',
+      'dateTo': '${toD.year.toString().padLeft(4, '0')}-${toD.month.toString().padLeft(2, '0')}-${toD.day.toString().padLeft(2, '0')}',
+    };
+    if (projectId != null) params['projectId'] = projectId.toString();
+    final uri = Uri.parse(_path('location-withdrawals-for-period')).replace(queryParameters: params);
+    final r = await http.get(uri);
+    // خادم قديم بدون هذا المسار: نكمل التقرير المجمع مع عمود خامات = ---------
+    if (r.statusCode == 404) return [];
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list.map((e) => LocationWithdrawalForPeriodModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+  }
+
 }
