@@ -16,7 +16,8 @@ class TodayWorkPlanScreen extends StatefulWidget {
 }
 
 class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
-  String _fmtDate(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  String _fmtDate(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   String _fmtDateFromString(String? raw) {
     if (raw == null || raw.trim().isEmpty) return 'غير محدد';
@@ -28,6 +29,13 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
   final _db = getStorage();
   late DateTime _selectedDate;
   bool _loading = false;
+  List<UserModel> _siteEngineers = [];
+  UserModel? _selectedPlanOwner;
+
+  int get _planOwnerUserId =>
+      widget.user.canManageAnySiteWorkPlan && _selectedPlanOwner != null
+      ? _selectedPlanOwner!.id
+      : widget.user.id;
 
   static DateTime _todayOnly() {
     final n = DateTime.now();
@@ -38,8 +46,21 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
   void initState() {
     super.initState();
     _selectedDate = _todayOnly();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadPlan(silentIfEmpty: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (widget.user.canManageAnySiteWorkPlan) {
+        try {
+          final list = await _db.getSiteEngineers();
+          if (mounted) {
+            setState(() {
+              _siteEngineers = list;
+              if (_selectedPlanOwner == null && list.isNotEmpty) {
+                _selectedPlanOwner = list.first;
+              }
+            });
+          }
+        } catch (_) {}
+      }
+      if (mounted) await _loadPlan(silentIfEmpty: true);
     });
   }
 
@@ -69,7 +90,9 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
     }
   }
 
-  Future<Map<int, Map<String, String?>>> _loadPlanStatuses(List<DetailedReportModel> reports) async {
+  Future<Map<int, Map<String, String?>>> _loadPlanStatuses(
+    List<DetailedReportModel> reports,
+  ) async {
     final out = <int, Map<String, String?>>{};
     if (_db is! ApiStorageService) return out;
     final api = _db;
@@ -78,7 +101,7 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
       try {
         final latest = await api.getLatestExecutedPlanStatus(
           sourcePlanId: r.id!,
-          userId: widget.user.id,
+          userId: r.userId,
         );
         final status = latest?['status']?.toString();
         String? postponeText;
@@ -87,11 +110,13 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
           final reasonCustom = latest?['postpone_custom_reason']?.toString();
           final reasonNotes = latest?['postpone_notes']?.toString();
           final reopenDate = latest?['postpone_reopen_date']?.toString();
-          postponeText = (reasonCustom != null && reasonCustom.trim().isNotEmpty)
+          postponeText =
+              (reasonCustom != null && reasonCustom.trim().isNotEmpty)
               ? 'تم التأجيل: ${reasonCustom.trim()}'
               : 'تم التأجيل: ${reasonLabel ?? 'سبب غير محدد'}';
           if (reopenDate != null && reopenDate.trim().isNotEmpty) {
-            postponeText = '$postponeText\nتاريخ إعادة الفتح: ${_fmtDateFromString(reopenDate)}';
+            postponeText =
+                '$postponeText\nتاريخ إعادة الفتح: ${_fmtDateFromString(reopenDate)}';
           }
           if (reasonNotes != null && reasonNotes.trim().isNotEmpty) {
             postponeText = '$postponeText\nملاحظات: ${reasonNotes.trim()}';
@@ -124,9 +149,19 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
             child: Column(
               children: [
                 const SizedBox(height: 12),
-                Container(width: 44, height: 4, decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(10))),
+                Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
                 const SizedBox(height: 10),
-                const Text('اختر الخطة المراد عرضها', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const Text(
+                  'اختر الخطة المراد عرضها',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
                 const SizedBox(height: 4),
                 Text('عدد الخطط: ${reports.length}'),
                 const Divider(height: 20),
@@ -139,23 +174,41 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
                       final details = p.id != null ? statuses[p.id!] : null;
                       final status = details?['status'];
                       final color = _statusColor(status);
-                      final projectName = (p.projectName != null && p.projectName!.trim().isNotEmpty)
+                      final projectName =
+                          (p.projectName != null &&
+                              p.projectName!.trim().isNotEmpty)
                           ? p.projectName!.trim()
-                          : (p.projectId != null ? 'مشروع #${p.projectId}' : 'مشروع غير محدد');
+                          : (p.projectId != null
+                                ? 'مشروع #${p.projectId}'
+                                : 'مشروع غير محدد');
                       return ListTile(
                         onTap: () => Navigator.of(ctx).pop(p),
-                        title: Text(projectName, style: const TextStyle(fontWeight: FontWeight.w700)),
-                        subtitle: Text('تاريخ التنفيذ: ${fmt.format(p.reportDatetime)}'),
+                        title: Text(
+                          projectName,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          'تاريخ التنفيذ: ${fmt.format(p.reportDatetime)}',
+                        ),
                         trailing: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
                             color: color.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: color.withValues(alpha: 0.45)),
+                            border: Border.all(
+                              color: color.withValues(alpha: 0.45),
+                            ),
                           ),
                           child: Text(
                             _statusLabel(status),
-                            style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12),
+                            style: TextStyle(
+                              color: color,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
                       );
@@ -171,15 +224,22 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
   }
 
   Future<void> _pickOtherDateAndLoad() async {
-    final now = DateTime.now();
+    final t = _todayOnly();
+    final yesterday = t.subtract(const Duration(days: 1));
+    final tomorrow = t.add(const Duration(days: 1));
+    var initial = _selectedDate;
+    if (initial.isBefore(yesterday)) initial = yesterday;
+    if (initial.isAfter(tomorrow)) initial = tomorrow;
     final picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime(now.year - 1, 1, 1),
-      lastDate: DateTime(now.year + 2, 12, 31),
+      initialDate: initial,
+      firstDate: yesterday,
+      lastDate: tomorrow,
     );
     if (picked == null) return;
-    setState(() => _selectedDate = DateTime(picked.year, picked.month, picked.day));
+    setState(
+      () => _selectedDate = DateTime(picked.year, picked.month, picked.day),
+    );
     await _loadPlan(silentIfEmpty: false);
   }
 
@@ -189,18 +249,20 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
       final reports = await _db.getDetailedReports(
         dateFrom: _selectedDate,
         dateTo: _selectedDate,
-        userId: widget.user.id,
+        userId: _planOwnerUserId,
       );
       final syntheticBySourceId = <int, DetailedReportModel>{};
       if (_db is ApiStorageService) {
         try {
           final reopened = await _db.getPostponedReopenedPlans(
             reopenDate: _selectedDate,
-            userId: widget.user.id,
+            userId: _planOwnerUserId,
           );
           for (final item in reopened) {
             final sourcePlanIdRaw = item['source_plan_id'];
-            final sourcePlanId = sourcePlanIdRaw is int ? sourcePlanIdRaw : int.tryParse('$sourcePlanIdRaw');
+            final sourcePlanId = sourcePlanIdRaw is int
+                ? sourcePlanIdRaw
+                : int.tryParse('$sourcePlanIdRaw');
             final planMapRaw = item['plan'];
             if (sourcePlanId == null || planMapRaw is! Map) continue;
             final planMap = Map<String, dynamic>.from(planMapRaw);
@@ -232,7 +294,13 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
       if (mergedReports.isEmpty) {
         if (!silentIfEmpty && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('لا توجد خطة مسجلة لهذا التاريخ لنفس مهندس الموقع')),
+            SnackBar(
+              content: Text(
+                widget.user.canManageAnySiteWorkPlan
+                    ? 'لا توجد خطة مسجلة لهذا التاريخ للمهندس المحدد'
+                    : 'لا توجد خطة مسجلة لهذا التاريخ لنفس مهندس الموقع',
+              ),
+            ),
           );
         }
         return;
@@ -246,7 +314,9 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
         if (sourcePlan == null) return;
       }
       final selectedPlan = sourcePlan;
-      final selectedStatus = selectedPlan.id != null ? statuses[selectedPlan.id!] : null;
+      final selectedStatus = selectedPlan.id != null
+          ? statuses[selectedPlan.id!]
+          : null;
       final initialExecutionStatus = selectedStatus?['status'];
       final initialPostponedReasonText = selectedStatus?['postponedReasonText'];
       final initialModificationSummary = selectedStatus?['modificationSummary'];
@@ -283,54 +353,65 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
             initialPostponedReasonText: initialPostponedReasonText,
             initialModificationSummary: initialModificationSummary,
             executionInfoMessage: executionInfoMessage,
-            onExecutionSubmit: ({
-              required DetailedReportModel plan,
-              required String action,
-              String? modificationSummary,
-              String? postponeReasonKey,
-              String? postponeReasonLabel,
-              String? postponeCustomReason,
-              String? postponeNotes,
-              DateTime? postponeReopenDate,
-            }) async {
-              try {
-                if (_db is! ApiStorageService) {
-                  throw Exception('حفظ الخطط المنفذة متاح عبر API فقط حالياً');
-                }
-                final status = action == 'postponed'
-                    ? 'postponed'
-                    : (action == 'confirmed_edited' ? 'confirmed_edited' : 'confirmed');
-                await _db.addExecutedPlan(
-                  plan: plan,
-                  userId: widget.user.id,
-                  userName: widget.user.name,
-                  planDate: plan.reportDatetime,
-                  status: status,
-                  sourcePlanId: selectedPlan.id,
-                  modificationSummary: modificationSummary,
-                  postponeReasonKey: postponeReasonKey,
-                  postponeReasonLabel: postponeReasonLabel,
-                  postponeCustomReason: postponeCustomReason,
-                  postponeNotes: postponeNotes,
-                  postponeReopenDate: postponeReopenDate,
-                );
-                return true;
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('تعذر حفظ التنفيذ: $e'), backgroundColor: Colors.red),
-                  );
-                }
-                return false;
-              }
-            },
+            onExecutionSubmit:
+                ({
+                  required DetailedReportModel plan,
+                  required String action,
+                  String? modificationSummary,
+                  String? postponeReasonKey,
+                  String? postponeReasonLabel,
+                  String? postponeCustomReason,
+                  String? postponeNotes,
+                  DateTime? postponeReopenDate,
+                }) async {
+                  try {
+                    if (_db is! ApiStorageService) {
+                      throw Exception(
+                        'حفظ الخطط المنفذة متاح عبر API فقط حالياً',
+                      );
+                    }
+                    final status = action == 'postponed'
+                        ? 'postponed'
+                        : (action == 'confirmed_edited'
+                              ? 'confirmed_edited'
+                              : 'confirmed');
+                    await _db.addExecutedPlan(
+                      plan: plan,
+                      userId: selectedPlan.userId,
+                      userName: selectedPlan.userName,
+                      planDate: plan.reportDatetime,
+                      status: status,
+                      sourcePlanId: selectedPlan.id,
+                      modificationSummary: modificationSummary,
+                      postponeReasonKey: postponeReasonKey,
+                      postponeReasonLabel: postponeReasonLabel,
+                      postponeCustomReason: postponeCustomReason,
+                      postponeNotes: postponeNotes,
+                      postponeReopenDate: postponeReopenDate,
+                    );
+                    return true;
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('تعذر حفظ التنفيذ: $e'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                    return false;
+                  }
+                },
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('خطأ أثناء تحميل الخطة: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('خطأ أثناء تحميل الخطة: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -341,7 +422,20 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
   Widget build(BuildContext context) {
     final dateText = DateFormat('yyyy/MM/dd').format(_selectedDate);
     final t = _todayOnly();
-    final isToday = _selectedDate.year == t.year && _selectedDate.month == t.month && _selectedDate.day == t.day;
+    final yesterday = t.subtract(const Duration(days: 1));
+    final tomorrow = t.add(const Duration(days: 1));
+    final isToday =
+        _selectedDate.year == t.year &&
+        _selectedDate.month == t.month &&
+        _selectedDate.day == t.day;
+    final isYesterday =
+        _selectedDate.year == yesterday.year &&
+        _selectedDate.month == yesterday.month &&
+        _selectedDate.day == yesterday.day;
+    final isTomorrow =
+        _selectedDate.year == tomorrow.year &&
+        _selectedDate.month == tomorrow.month &&
+        _selectedDate.day == tomorrow.day;
 
     return Scaffold(
       appBar: AppBar(
@@ -354,11 +448,42 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('اسم مهندس الموقع'),
-              subtitle: Text(widget.user.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-            ),
+            if (widget.user.canManageAnySiteWorkPlan &&
+                _siteEngineers.isNotEmpty) ...[
+              DropdownButtonFormField<UserModel>(
+                value: _selectedPlanOwner,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'مهندس الموقع (الخطة)',
+                  border: OutlineInputBorder(),
+                  helperText: 'صلاحية خاصة: عرض وتعديل وحذف خطط أي مهندس',
+                ),
+                items: _siteEngineers
+                    .map(
+                      (u) => DropdownMenuItem(
+                        value: u,
+                        child: Text(u.name, overflow: TextOverflow.ellipsis),
+                      ),
+                    )
+                    .toList(),
+                onChanged: _loading
+                    ? null
+                    : (u) async {
+                        if (u == null) return;
+                        setState(() => _selectedPlanOwner = u);
+                        await _loadPlan(silentIfEmpty: false);
+                      },
+              ),
+              const SizedBox(height: 12),
+            ] else
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('اسم مهندس الموقع'),
+                subtitle: Text(
+                  widget.user.name,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
             const SizedBox(height: 12),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -368,9 +493,19 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
                     decoration: InputDecoration(
                       labelText: 'التاريخ',
                       border: const OutlineInputBorder(),
-                      helperText: isToday ? 'مثبت على تاريخ اليوم — استخدم «تغيير» لاختيار يوم آخر' : 'يوم مختلف عن اليوم',
+                      helperText: isToday
+                          ? 'الافتراضي: اليوم — يمكنك اختيار أمس أو اليوم أو الغد'
+                          : (isYesterday
+                                ? 'تم اختيار الأمس'
+                                : (isTomorrow ? 'تم اختيار الغد' : '')),
                     ),
-                    child: Text(dateText, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                    child: Text(
+                      dateText,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -382,7 +517,9 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: _loading ? null : () => _loadPlan(silentIfEmpty: false),
+              onPressed: _loading
+                  ? null
+                  : () => _loadPlan(silentIfEmpty: false),
               icon: _loading
                   ? const SizedBox(
                       width: 16,

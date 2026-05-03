@@ -23,6 +23,8 @@ import '../screens/daily_movement_screen.dart';
 import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
 import '../screens/operation_reports_tracking_screen.dart';
+import '../screens/work_plan_tracking_report_screen.dart';
+import '../screens/icons_control_screen.dart';
 import 'route_persistence.dart';
 
 /// Build the screen for a given route name (for restore after refresh). Returns null if unknown.
@@ -77,16 +79,22 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return OperationReportsScreen(user: user);
     case 'operation-reports-tracking':
       return OperationReportsTrackingScreen(currentUser: user);
+    case 'work-plan-tracking-report':
+      return WorkPlanTrackingReportScreen(currentUser: user);
+    case 'icons-control':
+      return IconsControlScreen(currentUser: user);
     default:
       return null;
   }
 }
 
 /// Push a route and save its name so we can restore on refresh.
-Future<void> pushAndSaveRoute(BuildContext context, String routeName, Widget screen) async {
+Future<void> pushAndSaveRoute(
+  BuildContext context,
+  String routeName,
+  Widget screen,
+) async {
   await saveLastRoute(routeName);
   if (!context.mounted) return;
-  Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => screen),
-  );
+  Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
 }

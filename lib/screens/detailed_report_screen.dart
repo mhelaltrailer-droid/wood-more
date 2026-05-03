@@ -12,8 +12,10 @@ import '../models/project_location_model.dart';
 import '../models/zone_model.dart';
 import '../models/building_model.dart';
 import '../models/detailed_report_model.dart';
+import '../models/daily_report_model.dart';
 import '../services/storage_service.dart';
 import '../services/route_persistence.dart';
+import '../services/last_project_persistence.dart';
 import 'home_screen.dart';
 
 /// قيمة ثابتة لخيار "أخرى" في قائمة المشروعات (id = 0 لا يوجد في قاعدة المشروعات)
@@ -33,9 +35,11 @@ class DetailedReportScreen extends StatefulWidget {
   final UserModel user;
   final String appBarTitle;
   final bool showSummaryField;
+
   /// عنوان حقل الملخص في النموذج (الحقل يُخزَّن في `DetailedReportModel.summary`).
   final String summaryFieldLabel;
   final int summaryMaxLines;
+
   /// إذا كان `true` و`showSummaryField` مفعّلاً، لا يُقبل النموذج بدون نص في حقل الملخص (عند التحرير فقط).
   final bool summaryRequired;
   final bool showAttachmentsSection;
@@ -53,13 +57,34 @@ class DetailedReportScreen extends StatefulWidget {
     String? postponeCustomReason,
     String? postponeNotes,
     DateTime? postponeReopenDate,
-  })? onExecutionSubmit;
+  })?
+  onExecutionSubmit;
   final String? initialExecutionStatus;
   final String? initialPostponedReasonText;
   final String? initialModificationSummary;
   final String? executionInfoMessage;
+
   /// عند `false`: يُحفظ التقرير من هذه الشاشة دون الانتقال لواجهة الماليات (تُكمَل الماليات لاحقاً من أيقونة «الماليات»).
   final bool continueToFinancesOnNext;
+
+  /// أول يوم مسموح اختياره في «تاريخ تنفيذ الخطة» (مثلاً غد لخطة الغد). عند `null` يُسمح بأي تاريخ في النطاق الواسع السابق.
+  final DateTime? plannedExecutionMinSelectableDate;
+
+  /// تاريخ افتراضي لـ «تاريخ تنفيذ الخطة» عند إنشاء تقرير جديد (بدون `initialReport`).
+  final DateTime? plannedExecutionDefaultDate;
+
+  /// نص زر الحفظ/المتابعة السفلي عند عدم الانتقال للماليات؛ إن وُجد يُستخدم بدل «حفظ التقرير».
+  final String? primaryWorkActionLabel;
+
+  /// رسالة [SnackBar] بعد الحفظ بدون ماليات؛ إن وُجدت تُعرض بدل الرسالة الافتراضية التي تشير لأيقونة الماليات.
+  final String? workSavedSuccessMessage;
+
+  /// وضع العرض فقط (بدون إجراءات تنفيذ الخطة): زر سفلي «التالي» لفتح الماليات بعد معاينة الخطة.
+  final Future<void> Function(BuildContext context)?
+  onReadOnlyProceedToFinances;
+
+  /// عند التعديل: معرّف التقرير المحفوظ؛ يُستدعى [updateDetailedReport] بدل الإضافة.
+  final int? editingReportId;
 
   const DetailedReportScreen({
     super.key,
@@ -81,6 +106,12 @@ class DetailedReportScreen extends StatefulWidget {
     this.initialModificationSummary,
     this.executionInfoMessage,
     this.continueToFinancesOnNext = true,
+    this.plannedExecutionMinSelectableDate,
+    this.plannedExecutionDefaultDate,
+    this.primaryWorkActionLabel,
+    this.workSavedSuccessMessage,
+    this.onReadOnlyProceedToFinances,
+    this.editingReportId,
   });
 
   @override
@@ -137,14 +168,23 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.initialExecutionStatus != null && widget.initialExecutionStatus!.trim().isNotEmpty) {
+    if (widget.showPlannedExecutionDate &&
+        widget.initialReport == null &&
+        widget.plannedExecutionDefaultDate != null) {
+      final d = widget.plannedExecutionDefaultDate!;
+      _plannedExecutionDate = DateTime(d.year, d.month, d.day);
+    }
+    if (widget.initialExecutionStatus != null &&
+        widget.initialExecutionStatus!.trim().isNotEmpty) {
       if (widget.initialExecutionStatus == 'postponed') {
         _postponedLocked = true;
         _executionDone = false;
-        _postponedReasonText = widget.initialPostponedReasonText ?? 'تم تأجيل التنفيذ';
+        _postponedReasonText =
+            widget.initialPostponedReasonText ?? 'تم تأجيل التنفيذ';
       } else {
         _executionDone = true;
-        _executionDoneMessage = widget.initialExecutionStatus == 'confirmed_edited'
+        _executionDoneMessage =
+            widget.initialExecutionStatus == 'confirmed_edited'
             ? 'تم التعديل ثم التنفيذ'
             : 'تم التنفيذ';
         _finalModificationSummary = widget.initialModificationSummary;
@@ -161,7 +201,9 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     super.dispose();
   }
 
-  bool get _isReadOnlyNow => widget.readOnly && (_postponedLocked || !_editExecutionMode || _executionDone);
+  bool get _isReadOnlyNow =>
+      widget.readOnly &&
+      (_postponedLocked || !_editExecutionMode || _executionDone);
   bool get _lockProjectAndDate => widget.readOnly;
 
   Future<void> _loadData() async {
@@ -169,6 +211,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     List<SupervisorModel> supervisors = [];
     List<ContractorModel> contractors = [];
     List<WorkPhaseModel> phases = const [];
+    LastAttendanceProject? lastAttendanceProject;
     String? loadError;
 
     try {
@@ -193,16 +236,41 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       phases = _fallbackDetailedReportPhases;
       loadError = (loadError != null ? '$loadError; ' : '') + 'مراحل العمل: $e';
     }
+    if (widget.initialReport == null && !widget.readOnly) {
+      try {
+        lastAttendanceProject = await getLastAttendanceProjectForUser(
+          widget.user.id,
+        );
+      } catch (_) {}
+    }
     if (mounted) {
+      ProjectModel? defaultProject = _selectedProject;
+      if (defaultProject == null &&
+          lastAttendanceProject != null &&
+          projects.isNotEmpty) {
+        for (final p in projects) {
+          if (lastAttendanceProject!.projectId != null &&
+              p.id == lastAttendanceProject!.projectId) {
+            defaultProject = p;
+            break;
+          }
+        }
+        if (defaultProject == null) {
+          for (final p in projects) {
+            if (p.name.trim() == lastAttendanceProject!.projectName) {
+              defaultProject = p;
+              break;
+            }
+          }
+        }
+      }
       setState(() {
         _projects = projects;
         _supervisors = supervisors;
-        _contractors = contractors
-            .where((c) {
-              final n = c.name.trim().toLowerCase();
-              return n != 'لايوجد مقاول' && n != 'ذاتي';
-            })
-            .toList();
+        _contractors = contractors.where((c) {
+          final n = c.name.trim().toLowerCase();
+          return n != 'لايوجد مقاول' && n != 'ذاتي';
+        }).toList();
         _phases = phases;
         final phaseIds = phases.map((p) => p.id).toSet();
         for (final row in _workSiteRows) {
@@ -212,16 +280,50 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
             }
           }
         }
+        _selectedProject = defaultProject;
       });
+      if (defaultProject != null && defaultProject.id != _otherProject.id) {
+        await _loadStructureForProject(defaultProject.id);
+      }
       if (!_initialReportApplied && widget.initialReport != null) {
         await _applyInitialReport(widget.initialReport!);
         _initialReportApplied = true;
       }
       if (loadError != null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('تحذير: $loadError'), backgroundColor: Colors.orange),
+          SnackBar(
+            content: Text('تحذير: $loadError'),
+            backgroundColor: Colors.orange,
+          ),
         );
       }
+    }
+  }
+
+  Future<void> _pickPlannedExecutionDate() async {
+    if (_lockProjectAndDate) return;
+    final now = DateTime.now();
+    final minD = widget.plannedExecutionMinSelectableDate != null
+        ? DateTime(
+            widget.plannedExecutionMinSelectableDate!.year,
+            widget.plannedExecutionMinSelectableDate!.month,
+            widget.plannedExecutionMinSelectableDate!.day,
+          )
+        : DateTime(now.year - 1, 1, 1);
+    final lastDate = DateTime(now.year + 2, 12, 31);
+    var initial = _plannedExecutionDate ?? minD;
+    if (initial.isBefore(minD)) initial = minD;
+    if (initial.isAfter(lastDate)) initial = lastDate;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: minD,
+      lastDate: lastDate,
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _plannedExecutionDate = DateTime(picked.year, picked.month, picked.day);
+      });
     }
   }
 
@@ -255,8 +357,12 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       }
     } else if ((report.projectName ?? '').trim().startsWith('أخرى')) {
       selectedProject = _otherProject;
-      final m = RegExp(r'^أخرى\s*\((.*)\)$').firstMatch(report.projectName!.trim());
-      _otherProjectNameController.text = m != null ? m.group(1) ?? '' : report.projectName!;
+      final m = RegExp(
+        r'^أخرى\s*\((.*)\)$',
+      ).firstMatch(report.projectName!.trim());
+      _otherProjectNameController.text = m != null
+          ? m.group(1) ?? ''
+          : report.projectName!;
     }
 
     SupervisorModel? selectedSupervisor;
@@ -282,7 +388,8 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
 
     if (projectId != null) {
       await _loadStructureForProject(projectId);
-    } else if (selectedProject != null && selectedProject.id != _otherProject.id) {
+    } else if (selectedProject != null &&
+        selectedProject.id != _otherProject.id) {
       await _loadStructureForProject(selectedProject.id);
     }
 
@@ -292,19 +399,29 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
           '${line.contractorId ?? 0}|${line.locationId ?? 0}|${line.zoneId ?? 0}|${line.buildingId ?? 0}';
       final row = grouped.putIfAbsent(
         key,
-        () => WorkSiteBlockRow(showCraftsmanAndAssistantCounts: widget.showCraftsmanAndAssistantCounts)
-          ..contractorId = line.contractorId
-          ..locationId = line.locationId
-          ..zoneId = line.zoneId
-          ..buildingId = line.buildingId
-          ..phaseSlots = [],
+        () =>
+            WorkSiteBlockRow(
+                showCraftsmanAndAssistantCounts:
+                    widget.showCraftsmanAndAssistantCounts,
+              )
+              ..contractorId = line.contractorId
+              ..locationId = line.locationId
+              ..zoneId = line.zoneId
+              ..buildingId = line.buildingId
+              ..phaseSlots = [],
       );
       row.phaseSlots.add(
         PhaseSlot(
           phaseId: line.phaseId,
           workersCount: line.workersCount,
-          craftsmanCount: line.contractorWorkersCount > 0 ? line.contractorWorkersCount : 1,
-          assistantCount: line.selfWorkersCount > 0 ? line.selfWorkersCount : 1,
+          craftsmanCount: widget.showCraftsmanAndAssistantCounts
+              ? line.contractorWorkersCount
+              : (line.contractorWorkersCount > 0
+                    ? line.contractorWorkersCount
+                    : 1),
+          assistantCount: widget.showCraftsmanAndAssistantCounts
+              ? line.selfWorkersCount
+              : (line.selfWorkersCount > 0 ? line.selfWorkersCount : 1),
         ),
       );
     }
@@ -314,11 +431,24 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
         row.locationPath = _pathForLocationId(row.locationId!);
       }
       if (row.phaseSlots.isEmpty) {
-        row.phaseSlots.add(PhaseSlot());
+        row.phaseSlots.add(
+          PhaseSlot(
+            workersCount: widget.showCraftsmanAndAssistantCounts ? 0 : 1,
+            craftsmanCount: widget.showCraftsmanAndAssistantCounts ? 0 : 1,
+            assistantCount: widget.showCraftsmanAndAssistantCounts ? 0 : 1,
+          ),
+        );
       }
     }
     setState(() {
-      _workSiteRows = rows.isNotEmpty ? rows : [WorkSiteBlockRow(showCraftsmanAndAssistantCounts: widget.showCraftsmanAndAssistantCounts)];
+      _workSiteRows = rows.isNotEmpty
+          ? rows
+          : [
+              WorkSiteBlockRow(
+                showCraftsmanAndAssistantCounts:
+                    widget.showCraftsmanAndAssistantCounts,
+              ),
+            ];
     });
   }
 
@@ -354,7 +484,8 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
             final folders = cLocs.where((l) => l.isFolder).length;
             // نفضّل الهيكلة الأكثر اكتمالاً: عدد مواقع العمل ثم المجلدات ثم الزونات.
             final score = (workSites * 10000) + (folders * 100) + cZones.length;
-            final isTieAndNewer = score == bestScore && candidate.id > bestProjectId;
+            final isTieAndNewer =
+                score == bestScore && candidate.id > bestProjectId;
             if (score > bestScore || isTieAndNewer) {
               bestScore = score;
               bestLocs = cLocs;
@@ -373,7 +504,9 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       setState(() {
         _projectLocs = locs;
         _zones = zones;
-        if (_selectedProject != null && _selectedProject!.id == projectId && resolvedProjectId != projectId) {
+        if (_selectedProject != null &&
+            _selectedProject!.id == projectId &&
+            resolvedProjectId != projectId) {
           ProjectModel? matched;
           for (final p in _projects) {
             if (p.id == resolvedProjectId) {
@@ -382,7 +515,10 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
             }
           }
           if (matched == null) {
-            matched = ProjectModel(id: resolvedProjectId, name: _selectedProject!.name);
+            matched = ProjectModel(
+              id: resolvedProjectId,
+              name: _selectedProject!.name,
+            );
             _projects = [..._projects, matched];
           }
           _selectedProject = matched;
@@ -393,7 +529,10 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       if (!mounted) return;
       setState(() => _loadingStructure = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('فشل تحميل هيكلة المشروع: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text('فشل تحميل هيكلة المشروع: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -459,7 +598,14 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
   }
 
   void _addWorkSiteBlock() {
-    setState(() => _workSiteRows.add(WorkSiteBlockRow(showCraftsmanAndAssistantCounts: widget.showCraftsmanAndAssistantCounts)));
+    setState(
+      () => _workSiteRows.add(
+        WorkSiteBlockRow(
+          showCraftsmanAndAssistantCounts:
+              widget.showCraftsmanAndAssistantCounts,
+        ),
+      ),
+    );
   }
 
   void _removeWorkSiteBlock(int index) {
@@ -474,19 +620,25 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       );
       return;
     }
+    final nextSlotIndex = block.phaseSlots.length;
     final selectedPhaseId = await showDialog<int>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('اختر المرحلة المضافة'),
+        title: Text('اختر نوع ${_phaseSlotStepLabel(nextSlotIndex)}'),
         content: DropdownButtonFormField<int>(
           isExpanded: true,
           value: null,
           decoration: const InputDecoration(
-            labelText: 'المرحلة',
+            labelText: 'نوع المرحلة',
             border: OutlineInputBorder(),
           ),
           items: _phases
-              .map((p) => DropdownMenuItem<int>(value: p.id, child: Text(p.name, overflow: TextOverflow.ellipsis)))
+              .map(
+                (p) => DropdownMenuItem<int>(
+                  value: p.id,
+                  child: Text(p.name, overflow: TextOverflow.ellipsis),
+                ),
+              )
               .toList(),
           onChanged: (v) {
             if (v != null) Navigator.of(ctx).pop(v);
@@ -501,20 +653,26 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       ),
     );
     if (selectedPhaseId == null) return;
-    final inheritedWorkers = block.phaseSlots.isNotEmpty && block.phaseSlots.first.workersCount >= 1
+    final inheritedWorkers = block.phaseSlots.isNotEmpty
         ? block.phaseSlots.first.workersCount
-        : 1;
+        : (widget.showCraftsmanAndAssistantCounts ? 0 : 1);
     setState(() {
-      block.phaseSlots.add(PhaseSlot(
-        phaseId: selectedPhaseId,
-        workersCount: inheritedWorkers,
-        craftsmanCount: widget.showCraftsmanAndAssistantCounts
-            ? (block.phaseSlots.isNotEmpty ? block.phaseSlots.first.craftsmanCount : 1)
-            : 1,
-        assistantCount: widget.showCraftsmanAndAssistantCounts
-            ? (block.phaseSlots.isNotEmpty ? block.phaseSlots.first.assistantCount : 1)
-            : 1,
-      ));
+      block.phaseSlots.add(
+        PhaseSlot(
+          phaseId: selectedPhaseId,
+          workersCount: inheritedWorkers,
+          craftsmanCount: widget.showCraftsmanAndAssistantCounts
+              ? (block.phaseSlots.isNotEmpty
+                    ? block.phaseSlots.first.craftsmanCount
+                    : 0)
+              : 1,
+          assistantCount: widget.showCraftsmanAndAssistantCounts
+              ? (block.phaseSlots.isNotEmpty
+                    ? block.phaseSlots.first.assistantCount
+                    : 0)
+              : 1,
+        ),
+      );
     });
   }
 
@@ -526,18 +684,26 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
   DetailedReportModel? _buildReportForNext() {
     if (!_formKey.currentState!.validate()) return null;
     if (widget.showPlannedExecutionDate && _plannedExecutionDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اختر تاريخ تنفيذ الخطة')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('اختر تاريخ تنفيذ الخطة')));
       return null;
     }
     if (_selectedProject == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اختر المشروع')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('اختر المشروع')));
       return null;
     }
     if (_isOtherProject) {
       final otherName = _otherProjectNameController.text.trim();
       if (otherName.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('عند اختيار "أخرى" يرجى كتابة اسم المشروع في الخانة أدناه')),
+          const SnackBar(
+            content: Text(
+              'عند اختيار "أخرى" يرجى كتابة اسم المشروع في الخانة أدناه',
+            ),
+          ),
         );
         return null;
       }
@@ -551,8 +717,8 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
               content: Text(
                 _projectLocs.isNotEmpty
                     ? (_projectHasWorkSites
-                        ? 'أكمل اختيار الموقع الفرعي حتى «موقع العمل» لكل موقع عمل تُدخل له مراحل'
-                        : 'اختر الموقع الفرعي من الهيكلة لكل موقع عمل')
+                          ? 'أكمل اختيار الموقع الفرعي حتى «موقع العمل» لكل موقع عمل تُدخل له مراحل'
+                          : 'اختر الموقع الفرعي من الهيكلة لكل موقع عمل')
                     : 'اختر المنطقة (زون) والمبنى لكل موقع عمل تُدخل له مراحل',
               ),
               backgroundColor: Colors.orange,
@@ -562,21 +728,33 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
         }
       }
       var addedAnyPhase = false;
-      final baseWorkers = block.phaseSlots.isNotEmpty && block.phaseSlots.first.workersCount >= 1
+      final baseWorkers = block.phaseSlots.isNotEmpty
           ? block.phaseSlots.first.workersCount
-          : 1;
+          : 0;
       for (final slot in block.phaseSlots) {
         if (slot.phaseId == null) continue;
-        lines.add(DetailedReportLineModel(
-          contractorId: block.contractorId,
-          zoneId: _isOtherProject || _projectLocs.isNotEmpty ? null : block.zoneId,
-          buildingId: _isOtherProject || _projectLocs.isNotEmpty ? null : block.buildingId,
-          locationId: _isOtherProject || _projectLocs.isEmpty ? null : block.locationId,
-          phaseId: slot.phaseId!,
-          contractorWorkersCount: widget.showCraftsmanAndAssistantCounts ? slot.craftsmanCount : 0,
-          selfWorkersCount: widget.showCraftsmanAndAssistantCounts ? slot.assistantCount : 0,
-          workersCount: baseWorkers,
-        ));
+        lines.add(
+          DetailedReportLineModel(
+            contractorId: block.contractorId,
+            zoneId: _isOtherProject || _projectLocs.isNotEmpty
+                ? null
+                : block.zoneId,
+            buildingId: _isOtherProject || _projectLocs.isNotEmpty
+                ? null
+                : block.buildingId,
+            locationId: _isOtherProject || _projectLocs.isEmpty
+                ? null
+                : block.locationId,
+            phaseId: slot.phaseId!,
+            contractorWorkersCount: widget.showCraftsmanAndAssistantCounts
+                ? slot.craftsmanCount
+                : 0,
+            selfWorkersCount: widget.showCraftsmanAndAssistantCounts
+                ? slot.assistantCount
+                : 0,
+            workersCount: baseWorkers,
+          ),
+        );
         addedAnyPhase = true;
       }
       if (!_isOtherProject && _rowPlaceOk(block) && !addedAnyPhase) {
@@ -595,17 +773,44 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       );
       return null;
     }
+    final ownerId =
+        widget.editingReportId != null && widget.initialReport != null
+        ? widget.initialReport!.userId
+        : widget.user.id;
+    final ownerName =
+        widget.editingReportId != null && widget.initialReport != null
+        ? widget.initialReport!.userName
+        : widget.user.name;
+    final exp = widget.editingReportId != null && widget.initialReport != null
+        ? List<ExpenseItem>.from(widget.initialReport!.expenses)
+        : const <ExpenseItem>[];
+    final att = widget.editingReportId != null && widget.initialReport != null
+        ? List<DetailedReportAttachment>.from(widget.initialReport!.attachments)
+        : (widget.showAttachmentsSection
+              ? List<DetailedReportAttachment>.from(_attachments)
+              : const <DetailedReportAttachment>[]);
+
     return DetailedReportModel(
-      userId: widget.user.id,
-      userName: widget.user.name,
-      reportDatetime: widget.showPlannedExecutionDate && _plannedExecutionDate != null ? _plannedExecutionDate! : DateTime.now(),
+      id: widget.editingReportId,
+      userId: ownerId,
+      userName: ownerName,
+      reportDatetime:
+          widget.showPlannedExecutionDate && _plannedExecutionDate != null
+          ? _plannedExecutionDate!
+          : DateTime.now(),
       projectId: _isOtherProject ? null : _selectedProject!.id,
-      projectName: _isOtherProject ? 'أخرى (${_otherProjectNameController.text.trim()})' : _selectedProject!.name,
+      projectName: _isOtherProject
+          ? 'أخرى (${_otherProjectNameController.text.trim()})'
+          : _selectedProject!.name,
       supervisorId: _selectedSupervisor?.id,
-      summary: widget.showSummaryField && _summaryController.text.trim().isNotEmpty ? _summaryController.text.trim() : null,
+      createdAt: widget.initialReport?.createdAt,
+      summary:
+          widget.showSummaryField && _summaryController.text.trim().isNotEmpty
+          ? _summaryController.text.trim()
+          : null,
       lines: lines,
-      expenses: const [],
-      attachments: widget.showAttachmentsSection ? List<DetailedReportAttachment>.from(_attachments) : const [],
+      expenses: exp,
+      attachments: att,
     );
   }
 
@@ -614,7 +819,8 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     if (report == null || !mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => DetailedReportFinancesScreen(user: widget.user, report: report),
+        builder: (context) =>
+            DetailedReportFinancesScreen(user: widget.user, report: report),
       ),
     );
   }
@@ -624,10 +830,20 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     if (report == null || !mounted) return;
     setState(() => _persistingWorkOnly = true);
     try {
-      await _db.addDetailedReport(report);
+      if (widget.editingReportId != null) {
+        await _db.updateDetailedReport(widget.editingReportId!, report);
+      } else {
+        await _db.addDetailedReport(report);
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم حفظ التقرير. يمكنك إدخال الماليات من أيقونة الماليات عند الحاجة'), backgroundColor: Colors.green),
+        SnackBar(
+          content: Text(
+            widget.workSavedSuccessMessage ??
+                'تم حفظ التقرير. يمكنك إدخال الماليات من أيقونة الماليات عند الحاجة',
+          ),
+          backgroundColor: Colors.green,
+        ),
       );
       await saveLastRoute('home');
       if (!mounted) return;
@@ -662,18 +878,86 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     return null;
   }
 
-  List<Widget> _buildLocationCascade(WorkSiteBlockRow row) {
+  /// يمنع تكرار **موقع العمل** (ورقة `work_site` مثل SHED01) بين صفّين؛
+  /// المجلدات/المستوى الأول (مثل Villa 77) يُسمح باستخدامها في أكثر من صف
+  /// مع اختيار مواقع عمل مختلفة تحتها.
+  bool _isLocationChildTakenByOtherRow(
+    int rowIndex,
+    WorkSiteBlockRow row,
+    int depth,
+    int childId,
+  ) {
+    if (depth > 0 && row.locationPath.length < depth) return false;
+    ProjectLocationModel? childNode;
+    for (final l in _projectLocs) {
+      if (l.id == childId) {
+        childNode = l;
+        break;
+      }
+    }
+    if (childNode == null || !childNode.isWorkSite) return false;
+
+    final candidatePath = [...row.locationPath.take(depth), childId];
+    for (var i = 0; i < _workSiteRows.length; i++) {
+      if (i == rowIndex) continue;
+      final other = _workSiteRows[i];
+      if (other.locationPath.length != candidatePath.length) continue;
+      var same = true;
+      for (var p = 0; p < candidatePath.length; p++) {
+        if (other.locationPath[p] != candidatePath[p]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return true;
+    }
+    return false;
+  }
+
+  List<Widget> _buildLocationCascade(int rowIndex, WorkSiteBlockRow row) {
     final widgets = <Widget>[];
     int? parentId;
     var depth = 0;
+    final filterTakenBranches = !_isReadOnlyNow;
     while (true) {
-      final children = _projectLocs.where((l) => l.parentId == parentId).toList()
-        ..sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
+      final children =
+          _projectLocs.where((l) => l.parentId == parentId).toList()
+            ..sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
       if (children.isEmpty) break;
 
-      final selectedAtDepth = depth < row.locationPath.length ? row.locationPath[depth] : null;
+      final selectedAtDepth = depth < row.locationPath.length
+          ? row.locationPath[depth]
+          : null;
+      bool branchTakenByOtherRow(int id) =>
+          filterTakenBranches &&
+          _isLocationChildTakenByOtherRow(rowIndex, row, depth, id);
+
+      if (selectedAtDepth != null &&
+          children.any((c) => c.id == selectedAtDepth) &&
+          branchTakenByOtherRow(selectedAtDepth)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (rowIndex >= _workSiteRows.length) return;
+          if (_workSiteRows[rowIndex] != row) return;
+          if (depth >= row.locationPath.length) return;
+          if (row.locationPath[depth] != selectedAtDepth) return;
+          setState(() {
+            row.locationPath = row.locationPath.take(depth).toList();
+            _recalcLocationId(row);
+          });
+        });
+      }
+
       final validSelected =
-          selectedAtDepth != null && children.any((c) => c.id == selectedAtDepth) ? selectedAtDepth : null;
+          selectedAtDepth != null &&
+              children.any((c) => c.id == selectedAtDepth) &&
+              !branchTakenByOtherRow(selectedAtDepth)
+          ? selectedAtDepth
+          : null;
+
+      final cascadeItems = filterTakenBranches
+          ? children.where((c) => !branchTakenByOtherRow(c.id)).toList()
+          : children;
 
       final d = depth;
       widgets.add(
@@ -683,30 +967,34 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
             value: validSelected,
             isExpanded: true,
             decoration: InputDecoration(
-              labelText: depth == 0 ? 'موقع المشروع (المستوى 1)' : 'المستوى ${depth + 1}',
+              labelText: depth == 0
+                  ? 'موقع المشروع (المستوى 1)'
+                  : 'المستوى ${depth + 1}',
               border: const OutlineInputBorder(),
               isDense: true,
             ),
             items: [
               const DropdownMenuItem<int>(value: null, child: Text('— اختر —')),
-              ...children.map(
+              ...cascadeItems.map(
                 (c) => DropdownMenuItem(
                   value: c.id,
                   child: Text(c.name, overflow: TextOverflow.ellipsis),
                 ),
               ),
             ],
-            onChanged: _isReadOnlyNow ? null : (id) {
-              setState(() {
-                if (id == null) {
-                  row.locationPath = row.locationPath.take(d).toList();
-                  _recalcLocationId(row);
-                  return;
-                }
-                row.locationPath = [...row.locationPath.take(d), id];
-                _recalcLocationId(row);
-              });
-            },
+            onChanged: _isReadOnlyNow
+                ? null
+                : (id) {
+                    setState(() {
+                      if (id == null) {
+                        row.locationPath = row.locationPath.take(d).toList();
+                        _recalcLocationId(row);
+                        return;
+                      }
+                      row.locationPath = [...row.locationPath.take(d), id];
+                      _recalcLocationId(row);
+                    });
+                  },
           ),
         ),
       );
@@ -733,15 +1021,25 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
             isDense: true,
           ),
           items: [
-            const DropdownMenuItem<ZoneModel?>(value: null, child: Text('— اختر المنطقة —')),
-            ..._zones.map((z) => DropdownMenuItem(value: z, child: Text(z.name, overflow: TextOverflow.ellipsis))),
+            const DropdownMenuItem<ZoneModel?>(
+              value: null,
+              child: Text('— اختر المنطقة —'),
+            ),
+            ..._zones.map(
+              (z) => DropdownMenuItem(
+                value: z,
+                child: Text(z.name, overflow: TextOverflow.ellipsis),
+              ),
+            ),
           ],
-          onChanged: _isReadOnlyNow ? null : (z) async {
-            row.zoneId = z?.id;
-            row.buildingId = null;
-            if (z != null) await _ensureBuildingsLoaded(z.id);
-            setState(() {});
-          },
+          onChanged: _isReadOnlyNow
+              ? null
+              : (z) async {
+                  row.zoneId = z?.id;
+                  row.buildingId = null;
+                  if (z != null) await _ensureBuildingsLoaded(z.id);
+                  setState(() {});
+                },
         ),
         if (row.zoneId != null) ...[
           const SizedBox(height: 8),
@@ -754,12 +1052,20 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
               isDense: true,
             ),
             items: [
-              const DropdownMenuItem<BuildingModel?>(value: null, child: Text('— اختر المبنى —')),
+              const DropdownMenuItem<BuildingModel?>(
+                value: null,
+                child: Text('— اختر المبنى —'),
+              ),
               ...(_buildingsCache[row.zoneId!] ?? []).map(
-                (b) => DropdownMenuItem(value: b, child: Text(b.name, overflow: TextOverflow.ellipsis)),
+                (b) => DropdownMenuItem(
+                  value: b,
+                  child: Text(b.name, overflow: TextOverflow.ellipsis),
+                ),
               ),
             ],
-            onChanged: _isReadOnlyNow ? null : (b) => setState(() => row.buildingId = b?.id),
+            onChanged: _isReadOnlyNow
+                ? null
+                : (b) => setState(() => row.buildingId = b?.id),
           ),
         ],
       ],
@@ -774,7 +1080,31 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     return null;
   }
 
-  Widget _buildPhaseSlotRow(WorkSiteBlockRow block, int slotIndex, PhaseSlot slot) {
+  /// عنوان عرض لكل فتحة مرحلة (الأولى، الثانية، …).
+  static String _phaseSlotStepLabel(int slotIndex) {
+    const labels = <String>[
+      'المرحلة الاولي',
+      'المرحلة الثانية',
+      'المرحلة الثالثة',
+      'المرحلة الرابعة',
+      'المرحلة الخامسة',
+      'المرحلة السادسة',
+      'المرحلة السابعة',
+      'المرحلة الثامنة',
+      'المرحلة التاسعة',
+      'المرحلة العاشرة',
+    ];
+    if (slotIndex >= 0 && slotIndex < labels.length) {
+      return labels[slotIndex];
+    }
+    return 'المرحلة ${slotIndex + 1}';
+  }
+
+  Widget _buildPhaseSlotRow(
+    WorkSiteBlockRow block,
+    int slotIndex,
+    PhaseSlot slot,
+  ) {
     String phaseNameById(int? id) {
       if (id == null) return '—';
       for (final p in _phases) {
@@ -783,104 +1113,206 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       return '—';
     }
 
+    Widget phaseField = slotIndex == 0
+        ? DropdownButtonFormField<int>(
+            value: slot.phaseId,
+            isExpanded: true,
+            decoration: InputDecoration(
+              labelText: _phaseSlotStepLabel(0),
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+            items: [
+              const DropdownMenuItem<int>(
+                value: null,
+                child: Text('— اختر المرحلة —'),
+              ),
+              ..._phases.map(
+                (p) => DropdownMenuItem<int>(
+                  value: p.id,
+                  child: Text(p.name, overflow: TextOverflow.ellipsis),
+                ),
+              ),
+            ],
+            onChanged: _isReadOnlyNow
+                ? null
+                : (v) => setState(() => slot.phaseId = v),
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                _phaseSlotStepLabel(slotIndex),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                alignment: Alignment.centerRight,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  phaseNameById(slot.phaseId),
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          );
+
+    final removeButton = IconButton(
+      icon: const Icon(Icons.close, size: 20, color: Colors.red),
+      onPressed: (_isReadOnlyNow || block.phaseSlots.length <= 1)
+          ? null
+          : () => _removePhaseSlot(block, slotIndex),
+      tooltip: 'حذف هذه المرحلة',
+    );
+
+    Widget workersCountField() => SizedBox(
+      width: 110,
+      child: DropdownButtonFormField<int>(
+        value: slot.workersCount >= 0 ? slot.workersCount : 0,
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: 'عدد العمال',
+          border: OutlineInputBorder(),
+          isDense: true,
+        ),
+        items: List.generate(
+          14,
+          (n) => n,
+        ).map((n) => DropdownMenuItem(value: n, child: Text('$n'))).toList(),
+        onChanged: _isReadOnlyNow
+            ? null
+            : (v) {
+                final value = v ?? 0;
+                setState(() {
+                  slot.workersCount = value;
+                  for (var i = 1; i < block.phaseSlots.length; i++) {
+                    block.phaseSlots[i].workersCount = value;
+                  }
+                });
+              },
+      ),
+    );
+
+    Widget craftsmanField() => SizedBox(
+      width: 100,
+      child: DropdownButtonFormField<int>(
+        value: slot.craftsmanCount >= 0 && slot.craftsmanCount <= 13
+            ? slot.craftsmanCount
+            : 0,
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: 'صنايعي',
+          border: OutlineInputBorder(),
+          isDense: true,
+        ),
+        items: List.generate(
+          14,
+          (n) => n,
+        ).map((n) => DropdownMenuItem(value: n, child: Text('$n'))).toList(),
+        onChanged: _isReadOnlyNow
+            ? null
+            : (v) {
+                final value = v ?? 0;
+                setState(() {
+                  slot.craftsmanCount = value;
+                  for (var i = 1; i < block.phaseSlots.length; i++) {
+                    block.phaseSlots[i].craftsmanCount = value;
+                  }
+                });
+              },
+      ),
+    );
+
+    Widget assistantField() => SizedBox(
+      width: 100,
+      child: DropdownButtonFormField<int>(
+        value: slot.assistantCount >= 0 && slot.assistantCount <= 13
+            ? slot.assistantCount
+            : 0,
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: 'مساعد',
+          border: OutlineInputBorder(),
+          isDense: true,
+        ),
+        items: List.generate(
+          14,
+          (n) => n,
+        ).map((n) => DropdownMenuItem(value: n, child: Text('$n'))).toList(),
+        onChanged: _isReadOnlyNow
+            ? null
+            : (v) {
+                final value = v ?? 0;
+                setState(() {
+                  slot.assistantCount = value;
+                  for (var i = 1; i < block.phaseSlots.length; i++) {
+                    block.phaseSlots[i].assistantCount = value;
+                  }
+                });
+              },
+      ),
+    );
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 2,
-            child: slotIndex == 0
-                ? DropdownButtonFormField<int>(
-                    value: slot.phaseId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'المرحلة', border: OutlineInputBorder(), isDense: true),
-                    items: [
-                      const DropdownMenuItem<int>(value: null, child: Text('— اختر المرحلة —')),
-                      ..._phases.map((p) => DropdownMenuItem<int>(value: p.id, child: Text(p.name, overflow: TextOverflow.ellipsis))),
-                    ],
-                    onChanged: _isReadOnlyNow ? null : (v) => setState(() => slot.phaseId = v),
-                  )
-                : Container(
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade400),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      phaseNameById(slot.phaseId),
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-          ),
-          const SizedBox(width: 12),
-          if (slotIndex == 0)
-            SizedBox(
-              width: 110,
-              child: DropdownButtonFormField<int>(
-                value: slot.workersCount >= 0 ? slot.workersCount : 0,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'عدد العمال', border: OutlineInputBorder(), isDense: true),
-                items: List.generate(14, (n) => n).map((n) => DropdownMenuItem(value: n, child: Text('$n'))).toList(),
-                onChanged: _isReadOnlyNow ? null : (v) {
-                  final value = v ?? 0;
-                  setState(() {
-                    slot.workersCount = value;
-                    for (var i = 1; i < block.phaseSlots.length; i++) {
-                      block.phaseSlots[i].workersCount = value;
-                    }
-                  });
-                },
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isNarrow = constraints.maxWidth < 760;
+          if (!isNarrow) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 2, child: phaseField),
+                const SizedBox(width: 12),
+                if (slotIndex == 0) workersCountField(),
+                if (slotIndex == 0 &&
+                    widget.showCraftsmanAndAssistantCounts) ...[
+                  const SizedBox(width: 8),
+                  craftsmanField(),
+                  const SizedBox(width: 8),
+                  assistantField(),
+                ],
+                removeButton,
+              ],
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: phaseField),
+                  removeButton,
+                ],
               ),
-            ),
-          if (slotIndex == 0 && widget.showCraftsmanAndAssistantCounts) ...[
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 95,
-              child: DropdownButtonFormField<int>(
-                value: slot.craftsmanCount >= 0 && slot.craftsmanCount <= 13 ? slot.craftsmanCount : 0,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'صنايعي', border: OutlineInputBorder(), isDense: true),
-                items: List.generate(14, (n) => n).map((n) => DropdownMenuItem(value: n, child: Text('$n'))).toList(),
-                onChanged: _isReadOnlyNow ? null : (v) {
-                  final value = v ?? 0;
-                  setState(() {
-                    slot.craftsmanCount = value;
-                    for (var i = 1; i < block.phaseSlots.length; i++) {
-                      block.phaseSlots[i].craftsmanCount = value;
-                    }
-                  });
-                },
-              ),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 95,
-              child: DropdownButtonFormField<int>(
-                value: slot.assistantCount >= 0 && slot.assistantCount <= 13 ? slot.assistantCount : 0,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'مساعد', border: OutlineInputBorder(), isDense: true),
-                items: List.generate(14, (n) => n).map((n) => DropdownMenuItem(value: n, child: Text('$n'))).toList(),
-                onChanged: _isReadOnlyNow ? null : (v) {
-                  final value = v ?? 0;
-                  setState(() {
-                    slot.assistantCount = value;
-                    for (var i = 1; i < block.phaseSlots.length; i++) {
-                      block.phaseSlots[i].assistantCount = value;
-                    }
-                  });
-                },
-              ),
-            ),
-          ],
-          IconButton(
-            icon: const Icon(Icons.close, size: 20, color: Colors.red),
-            onPressed: (_isReadOnlyNow || block.phaseSlots.length <= 1) ? null : () => _removePhaseSlot(block, slotIndex),
-            tooltip: 'حذف هذه المرحلة',
-          ),
-        ],
+              if (slotIndex == 0) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    workersCountField(),
+                    if (widget.showCraftsmanAndAssistantCounts)
+                      craftsmanField(),
+                    if (widget.showCraftsmanAndAssistantCounts)
+                      assistantField(),
+                  ],
+                ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -895,7 +1327,15 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
           children: [
             Row(
               children: [
-                Expanded(child: Text('موقع العمل ${index + 1}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
+                Expanded(
+                  child: Text(
+                    'موقع العمل ${index + 1}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
                 if (_workSiteRows.length > 1 && !_isReadOnlyNow)
                   IconButton(
                     icon: const Icon(Icons.delete_outline, color: Colors.red),
@@ -906,7 +1346,10 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
             ),
             if (!_isOtherProject) ...[
               const SizedBox(height: 8),
-              const Text('مكان العمل', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              const Text(
+                'مكان العمل',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              ),
               const SizedBox(height: 8),
               if (_loadingStructure)
                 const Padding(
@@ -919,7 +1362,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                   style: TextStyle(fontSize: 11, color: Colors.grey),
                 ),
                 const SizedBox(height: 8),
-                ..._buildLocationCascade(row),
+                ..._buildLocationCascade(index, row),
               ] else if (_zones.isNotEmpty) ...[
                 const Text(
                   'لا توجد مواقع فرعية في الهيكلة؛ استخدم المنطقة والمبنى.',
@@ -944,9 +1387,16 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                 isDense: true,
               ),
               items: [
-                ..._contractors.map((c) => DropdownMenuItem(value: c, child: Text(c.name, overflow: TextOverflow.ellipsis))),
+                ..._contractors.map(
+                  (c) => DropdownMenuItem(
+                    value: c,
+                    child: Text(c.name, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
               ],
-              onChanged: _isReadOnlyNow ? null : (v) => setState(() => row.contractorId = v?.id),
+              onChanged: _isReadOnlyNow
+                  ? null
+                  : (v) => setState(() => row.contractorId = v?.id),
             ),
             const SizedBox(height: 12),
             const Text(
@@ -956,12 +1406,18 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
             const SizedBox(height: 4),
             Text(
               widget.showCraftsmanAndAssistantCounts
-                  ? 'في المرحلة الأولى: اختر المرحلة وعدد العمال وعدد الصنايعي وعدد المساعد. عند إضافة مرحلة جديدة: يتم اختيار المرحلة مرة واحدة وتظهر بدون قوائم إضافية، مع نفس الأعداد تلقائياً.'
-                  : 'في المرحلة الأولى: اختر المرحلة وعدد العمال. عند إضافة مرحلة جديدة: يتم اختيار المرحلة مرة واحدة وتظهر بدون قوائم إضافية، مع نفس عدد العمال تلقائياً.',
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade700, height: 1.35),
+                  ? 'في المرحلة الاولي: اختر نوع المرحلة (مثل تقطيع WPC) وعدد العمال وعدد الصنايعي وعدد المساعد. عند إضافة مرحلة جديدة: تُسمّى تلقائياً (المرحلة الثانية، …) ويُختار نوعها مرة واحدة مع نفس الأعداد.'
+                  : 'في المرحلة الاولي: اختر نوع المرحلة وعدد العمال. عند إضافة مرحلة جديدة: تُسمّى تلقائياً (المرحلة الثانية، …) ويُختار نوعها مرة واحدة مع نفس عدد العمال.',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey.shade700,
+                height: 1.35,
+              ),
             ),
             const SizedBox(height: 8),
-            ...row.phaseSlots.asMap().entries.map((e) => _buildPhaseSlotRow(row, e.key, e.value)),
+            ...row.phaseSlots.asMap().entries.map(
+              (e) => _buildPhaseSlotRow(row, e.key, e.value),
+            ),
             if (!_isReadOnlyNow)
               Align(
                 alignment: AlignmentDirectional.centerStart,
@@ -1021,11 +1477,16 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
         if (bytes == null) continue;
         final mime = _mimeFromFileName(f.name, imageOnly: true);
         final data = 'data:$mime;base64,${base64Encode(bytes)}';
-        _attachments.add(DetailedReportAttachment(kind: 'image', fileName: f.name, data: data));
+        _attachments.add(
+          DetailedReportAttachment(kind: 'image', fileName: f.name, data: data),
+        );
       }
       if (mounted) setState(() {});
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
+        );
     }
   }
 
@@ -1043,11 +1504,20 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
         final mime = _mimeFromFileName(f.name, imageOnly: false);
         final data = 'data:$mime;base64,${base64Encode(bytes)}';
         final isImg = mime.startsWith('image/');
-        _attachments.add(DetailedReportAttachment(kind: isImg ? 'image' : 'file', fileName: f.name, data: data));
+        _attachments.add(
+          DetailedReportAttachment(
+            kind: isImg ? 'image' : 'file',
+            fileName: f.name,
+            data: data,
+          ),
+        );
       }
       if (mounted) setState(() {});
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
+        );
     }
   }
 
@@ -1061,17 +1531,46 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (_) {
       return const [
-        {'reason_key': 'materials_shortage', 'label': 'نقص خامات', 'requires_custom': false},
-        {'reason_key': 'site_not_ready', 'label': 'عدم جاهزية موقع العمل', 'requires_custom': false},
-        {'reason_key': 'approval_delay', 'label': 'تأخر اعتماد/موافقة', 'requires_custom': false},
-        {'reason_key': 'weather', 'label': 'ظروف جوية', 'requires_custom': false},
-        {'reason_key': 'labor_shortage', 'label': 'نقص عمالة', 'requires_custom': false},
+        {
+          'reason_key': 'materials_shortage',
+          'label': 'نقص خامات',
+          'requires_custom': false,
+        },
+        {
+          'reason_key': 'site_not_ready',
+          'label': 'عدم جاهزية موقع العمل',
+          'requires_custom': false,
+        },
+        {
+          'reason_key': 'approval_delay',
+          'label': 'تأخر اعتماد/موافقة',
+          'requires_custom': false,
+        },
+        {
+          'reason_key': 'weather',
+          'label': 'ظروف جوية',
+          'requires_custom': false,
+        },
+        {
+          'reason_key': 'labor_shortage',
+          'label': 'نقص عمالة',
+          'requires_custom': false,
+        },
         {'reason_key': 'other', 'label': 'أخرى', 'requires_custom': true},
       ];
     }
   }
 
-  Future<({String key, String label, String? custom, String? notes, DateTime reopenDate})?> _askPostponeReason() async {
+  Future<
+    ({
+      String key,
+      String label,
+      String? custom,
+      String? notes,
+      DateTime reopenDate,
+    })?
+  >
+  _askPostponeReason() async {
     final reasons = await _loadPostponeReasons();
     if (!mounted) return null;
     String? selectedKey;
@@ -1080,110 +1579,138 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     final customController = TextEditingController();
     final notesController = TextEditingController();
     DateTime? reopenDate;
-    final result = await showDialog<({String key, String label, String? custom, String? notes, DateTime reopenDate})>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          title: const Text('سبب التأجيل'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String>(
-                value: selectedKey,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'اختر سبب التأجيل *',
-                  border: OutlineInputBorder(),
-                ),
-                items: reasons
-                    .map((r) => DropdownMenuItem<String>(
-                          value: (r['reason_key'] ?? '').toString(),
-                          child: Text((r['label'] ?? '').toString(), overflow: TextOverflow.ellipsis),
-                        ))
-                    .toList(),
-                onChanged: (v) {
-                  setLocal(() {
-                    selectedKey = v;
-                    final matched = reasons.where((r) => (r['reason_key'] ?? '').toString() == v).toList();
-                    selectedLabel = matched.isEmpty ? null : (matched.first['label'] ?? '').toString();
-                    requiresCustom = matched.isNotEmpty && matched.first['requires_custom'] == true;
-                  });
-                },
-              ),
-              if (requiresCustom) ...[
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: customController,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'اكتب السبب *',
-                    border: OutlineInputBorder(),
+    final result =
+        await showDialog<
+          ({
+            String key,
+            String label,
+            String? custom,
+            String? notes,
+            DateTime reopenDate,
+          })
+        >(
+          context: context,
+          builder: (ctx) => StatefulBuilder(
+            builder: (ctx, setLocal) => AlertDialog(
+              title: const Text('سبب التأجيل'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: selectedKey,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'اختر سبب التأجيل *',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: reasons
+                        .map(
+                          (r) => DropdownMenuItem<String>(
+                            value: (r['reason_key'] ?? '').toString(),
+                            child: Text(
+                              (r['label'] ?? '').toString(),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) {
+                      setLocal(() {
+                        selectedKey = v;
+                        final matched = reasons
+                            .where(
+                              (r) => (r['reason_key'] ?? '').toString() == v,
+                            )
+                            .toList();
+                        selectedLabel = matched.isEmpty
+                            ? null
+                            : (matched.first['label'] ?? '').toString();
+                        requiresCustom =
+                            matched.isNotEmpty &&
+                            matched.first['requires_custom'] == true;
+                      });
+                    },
                   ),
+                  if (requiresCustom) ...[
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: customController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'اكتب السبب *',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  InkWell(
+                    onTap: () async {
+                      final now = DateTime.now();
+                      final picked = await showDatePicker(
+                        context: ctx,
+                        initialDate: reopenDate ?? now,
+                        firstDate: DateTime(now.year - 1, 1, 1),
+                        lastDate: DateTime(now.year + 2, 12, 31),
+                      );
+                      if (picked == null) return;
+                      setLocal(() {
+                        reopenDate = DateTime(
+                          picked.year,
+                          picked.month,
+                          picked.day,
+                        );
+                      });
+                    },
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'تاريخ إعادة فتح الخطة *',
+                        border: OutlineInputBorder(),
+                      ),
+                      child: Text(
+                        reopenDate == null
+                            ? '— اختر التاريخ —'
+                            : '${reopenDate!.year.toString().padLeft(4, '0')}-${reopenDate!.month.toString().padLeft(2, '0')}-${reopenDate!.day.toString().padLeft(2, '0')}',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: notesController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'ملاحظات (اختياري)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('إلغاء'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final custom = customController.text.trim();
+                    if (selectedKey == null || selectedLabel == null) return;
+                    if (requiresCustom && custom.isEmpty) return;
+                    if (reopenDate == null) return;
+                    Navigator.pop(ctx, (
+                      key: selectedKey!,
+                      label: selectedLabel!,
+                      custom: custom.isEmpty ? null : custom,
+                      notes: notesController.text.trim().isEmpty
+                          ? null
+                          : notesController.text.trim(),
+                      reopenDate: reopenDate!,
+                    ));
+                  },
+                  child: const Text('تأكيد التأجيل'),
                 ),
               ],
-              const SizedBox(height: 12),
-              InkWell(
-                onTap: () async {
-                  final now = DateTime.now();
-                  final picked = await showDatePicker(
-                    context: ctx,
-                    initialDate: reopenDate ?? now,
-                    firstDate: DateTime(now.year - 1, 1, 1),
-                    lastDate: DateTime(now.year + 2, 12, 31),
-                  );
-                  if (picked == null) return;
-                  setLocal(() {
-                    reopenDate = DateTime(picked.year, picked.month, picked.day);
-                  });
-                },
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'تاريخ إعادة فتح الخطة *',
-                    border: OutlineInputBorder(),
-                  ),
-                  child: Text(
-                    reopenDate == null
-                        ? '— اختر التاريخ —'
-                        : '${reopenDate!.year.toString().padLeft(4, '0')}-${reopenDate!.month.toString().padLeft(2, '0')}-${reopenDate!.day.toString().padLeft(2, '0')}',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: notesController,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'ملاحظات (اختياري)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
-            FilledButton(
-              onPressed: () {
-                final custom = customController.text.trim();
-                if (selectedKey == null || selectedLabel == null) return;
-                if (requiresCustom && custom.isEmpty) return;
-                if (reopenDate == null) return;
-                Navigator.pop(
-                  ctx,
-                  (
-                    key: selectedKey!,
-                    label: selectedLabel!,
-                    custom: custom.isEmpty ? null : custom,
-                    notes: notesController.text.trim().isEmpty ? null : notesController.text.trim(),
-                    reopenDate: reopenDate!,
-                  ),
-                );
-              },
-              child: const Text('تأكيد التأجيل'),
             ),
-          ],
-        ),
-      ),
-    );
+          ),
+        );
     customController.dispose();
     notesController.dispose();
     return result;
@@ -1191,9 +1718,13 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
 
   Future<void> _submitExecution(String action) async {
     if (_executing || _executionDone) return;
-    if (action == 'confirmed_edited' && _modificationSummaryController.text.trim().isEmpty) {
+    if (action == 'confirmed_edited' &&
+        _modificationSummaryController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى كتابة ملخص التعديلات قبل تأكيد التنفيذ'), backgroundColor: Colors.orange),
+        const SnackBar(
+          content: Text('يرجى كتابة ملخص التعديلات قبل تأكيد التنفيذ'),
+          backgroundColor: Colors.orange,
+        ),
       );
       return;
     }
@@ -1211,60 +1742,83 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       postponeNotes = reason.notes;
       postponeReopenDate = reason.reopenDate;
     }
-    final DetailedReportModel? plan = _editExecutionMode ? _buildReportForNext() : (widget.initialReport ?? _buildReportForNext());
+    final DetailedReportModel? plan = _editExecutionMode
+        ? _buildReportForNext()
+        : (widget.initialReport ?? _buildReportForNext());
     if (plan == null) return;
     setState(() => _executing = true);
     try {
-      final ok = await (widget.onExecutionSubmit?.call(
-            plan: plan,
-            action: action,
-            modificationSummary: _modificationSummaryController.text.trim().isEmpty
-                ? null
-                : _modificationSummaryController.text.trim(),
-            postponeReasonKey: postponeReasonKey,
-            postponeReasonLabel: postponeReasonLabel,
-            postponeCustomReason: postponeCustomReason,
-            postponeNotes: postponeNotes,
-            postponeReopenDate: postponeReopenDate,
-          ) ??
-          Future.value(false));
+      final ok =
+          await (widget.onExecutionSubmit?.call(
+                plan: plan,
+                action: action,
+                modificationSummary:
+                    _modificationSummaryController.text.trim().isEmpty
+                    ? null
+                    : _modificationSummaryController.text.trim(),
+                postponeReasonKey: postponeReasonKey,
+                postponeReasonLabel: postponeReasonLabel,
+                postponeCustomReason: postponeCustomReason,
+                postponeNotes: postponeNotes,
+                postponeReopenDate: postponeReopenDate,
+              ) ??
+              Future.value(false));
       if (!mounted) return;
       if (!ok) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تعذر حفظ التنفيذ'), backgroundColor: Colors.red),
+          const SnackBar(
+            content: Text('تعذر حفظ التنفيذ'),
+            backgroundColor: Colors.red,
+          ),
         );
         return;
       }
       if (action == 'postponed') {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم التأجيل'), backgroundColor: Colors.orange),
+          const SnackBar(
+            content: Text('تم التأجيل'),
+            backgroundColor: Colors.orange,
+          ),
         );
         setState(() {
           _postponedLocked = true;
           _editExecutionMode = false;
           _executionDone = false;
           _executionDoneMessage = null;
-          _postponedReasonText = postponeReasonKey == 'other' && postponeCustomReason != null && postponeCustomReason.trim().isNotEmpty
+          _postponedReasonText =
+              postponeReasonKey == 'other' &&
+                  postponeCustomReason != null &&
+                  postponeCustomReason.trim().isNotEmpty
               ? 'تم التأجيل: ${postponeCustomReason.trim()}'
               : 'تم التأجيل: ${postponeReasonLabel ?? 'سبب غير محدد'}';
           if (postponeReopenDate != null) {
-            _postponedReasonText = '$_postponedReasonText\nتاريخ إعادة الفتح: ${postponeReopenDate.year.toString().padLeft(4, '0')}-${postponeReopenDate.month.toString().padLeft(2, '0')}-${postponeReopenDate.day.toString().padLeft(2, '0')}';
+            _postponedReasonText =
+                '$_postponedReasonText\nتاريخ إعادة الفتح: ${postponeReopenDate.year.toString().padLeft(4, '0')}-${postponeReopenDate.month.toString().padLeft(2, '0')}-${postponeReopenDate.day.toString().padLeft(2, '0')}';
           }
           if (postponeNotes != null && postponeNotes.trim().isNotEmpty) {
-            _postponedReasonText = '${_postponedReasonText!}\nملاحظات: ${postponeNotes.trim()}';
+            _postponedReasonText =
+                '${_postponedReasonText!}\nملاحظات: ${postponeNotes.trim()}';
           }
         });
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم التأكيد'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('تم التأكيد'),
+            backgroundColor: Colors.green,
+          ),
         );
         final summaryText = _modificationSummaryController.text.trim();
         setState(() {
           _executionDone = true;
           _postponedLocked = false;
           _editExecutionMode = false;
-          _executionDoneMessage = action == 'confirmed_edited' ? 'تم التعديل ثم التنفيذ' : 'تم التنفيذ';
-          _finalModificationSummary = action == 'confirmed_edited' && summaryText.isNotEmpty ? summaryText : null;
+          _executionDoneMessage = action == 'confirmed_edited'
+              ? 'تم التعديل ثم التنفيذ'
+              : 'تم التنفيذ';
+          _finalModificationSummary =
+              action == 'confirmed_edited' && summaryText.isNotEmpty
+              ? summaryText
+              : null;
         });
       }
     } finally {
@@ -1272,356 +1826,623 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     }
   }
 
+  Future<void> _onFinancesNextPressed() async {
+    if (widget.onReadOnlyProceedToFinances == null) return;
+    if (widget.initialReport?.id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'لا يمكن فتح الماليات: الخطة غير محفوظة بعد (لا يوجد رقم تقرير)',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    await widget.onReadOnlyProceedToFinances!(context);
+  }
+
+  Future<void> _superAdminDeletePlan() async {
+    final id = widget.initialReport?.id;
+    if (id == null || !widget.user.canManageAnySiteWorkPlan) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('حذف خطة العمل'),
+        content: const Text('سيتم حذف هذه الخطة نهائياً من النظام. متابعة؟'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _db.deleteDetailedReport(id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم حذف الخطة'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تعذر الحذف: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _superAdminOpenEditPlan() {
+    final plan = widget.initialReport;
+    if (plan?.id == null || !widget.user.canManageAnySiteWorkPlan) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (ctx) => DetailedReportScreen(
+          user: widget.user,
+          editingReportId: plan!.id,
+          initialReport: plan,
+          readOnly: false,
+          showExecutionActions: false,
+          appBarTitle: 'تعديل خطة العمل',
+          showSummaryField: true,
+          summaryFieldLabel: 'تفاصيل خطة العمل',
+          summaryMaxLines: 6,
+          summaryRequired: true,
+          showAttachmentsSection: false,
+          showPlannedExecutionDate: true,
+          showCraftsmanAndAssistantCounts: true,
+          continueToFinancesOnNext: false,
+          primaryWorkActionLabel: 'حفظ التعديلات',
+          workSavedSuccessMessage: 'تم حفظ تعديلات الخطة',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final financesBar =
+        widget.readOnly &&
+            !widget.showExecutionActions &&
+            widget.onReadOnlyProceedToFinances != null
+        ? SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+              child: FilledButton(
+                onPressed: _onFinancesNextPressed,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: const Color(0xFF1B5E20),
+                ),
+                child: const Text('التالي'),
+              ),
+            ),
+          )
+        : null;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.appBarTitle),
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
+        actions: [
+          if (widget.readOnly &&
+              widget.initialReport?.id != null &&
+              widget.user.canManageAnySiteWorkPlan) ...[
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'تعديل الخطة',
+              onPressed: _superAdminOpenEditPlan,
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'حذف الخطة',
+              onPressed: _superAdminDeletePlan,
+            ),
+          ],
+        ],
       ),
+      bottomNavigationBar: financesBar,
       body: Form(
         key: _formKey,
         child: Scrollbar(
           thumbVisibility: true,
           child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            _readOnlyRow('اسم المهندس', widget.user.name),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<ProjectModel>(
-              value: _selectedProject,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'اسم المشروع *',
-                border: OutlineInputBorder(),
+            padding: const EdgeInsets.all(20),
+            children: [
+              _readOnlyRow(
+                'اسم المهندس',
+                widget.initialReport != null
+                    ? widget.initialReport!.userName
+                    : widget.user.name,
               ),
-              items: [
-                const DropdownMenuItem<ProjectModel>(value: null, child: Text('— اختر المشروع —')),
-                ..._projects.where((p) => p.name != 'أخرى').map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis))),
-                const DropdownMenuItem<ProjectModel>(value: _otherProject, child: Text('أخرى')),
-              ],
-              onChanged: _lockProjectAndDate ? null : (v) {
-                setState(() {
-                  _selectedProject = v;
-                  _workSiteRows = [
-                    WorkSiteBlockRow(showCraftsmanAndAssistantCounts: widget.showCraftsmanAndAssistantCounts),
-                  ];
-                  _attachments.clear();
-                  _projectLocs = [];
-                  _zones = [];
-                  _buildingsCache.clear();
-                  _loadingStructure = false;
-                });
-                if (v != null && v.id != _otherProject.id) {
-                  _loadStructureForProject(v.id);
-                }
-              },
-              validator: (v) => v == null ? 'المشروع إلزامي' : null,
-            ),
-            if (widget.showPlannedExecutionDate) ...[
               const SizedBox(height: 16),
-              InkWell(
-                onTap: _lockProjectAndDate ? null : () async {
-                  final now = DateTime.now();
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: _plannedExecutionDate ?? now,
-                    firstDate: DateTime(now.year - 1, 1, 1),
-                    lastDate: DateTime(now.year + 2, 12, 31),
-                  );
-                  if (picked != null) {
-                    setState(() {
-                      _plannedExecutionDate = DateTime(picked.year, picked.month, picked.day);
-                    });
-                  }
-                },
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'تاريخ تنفيذ الخطة *',
-                    border: OutlineInputBorder(),
-                  ),
-                  child: Text(
-                    _plannedExecutionDate == null
-                        ? '— اختر التاريخ —'
-                        : '${_plannedExecutionDate!.year.toString().padLeft(4, '0')}-${_plannedExecutionDate!.month.toString().padLeft(2, '0')}-${_plannedExecutionDate!.day.toString().padLeft(2, '0')}',
-                  ),
-                ),
-              ),
-            ],
-            if (_isOtherProject) ...[
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _otherProjectNameController,
-                enabled: !_isReadOnlyNow,
+              DropdownButtonFormField<ProjectModel>(
+                value: _selectedProject,
+                isExpanded: true,
                 decoration: const InputDecoration(
-                  labelText: 'حدد المشروع (إلزامي عند اختيار أخرى) *',
-                  hintText: 'اكتب اسم المشروع أو وصفاً قصيراً',
+                  labelText: 'اسم المشروع *',
                   border: OutlineInputBorder(),
                 ),
-                validator: (v) {
-                  if (_isOtherProject && (v == null || v.trim().isEmpty)) return 'مطلوب عند اختيار أخرى';
-                  return null;
-                },
-                onChanged: _isReadOnlyNow ? null : (_) => setState(() {}),
-              ),
-            ],
-            const SizedBox(height: 24),
-            if (_selectedProject != null || (widget.readOnly && widget.initialReport != null)) ...[
-              const Text('توزيع العمال حسب الموقع والمرحلة', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 12),
-              ..._workSiteRows.asMap().entries.map((e) => _buildWorkSiteBlockCard(e.key, e.value)),
-              if (!_isReadOnlyNow)
-                OutlinedButton.icon(
-                  onPressed: _addWorkSiteBlock,
-                  icon: const Icon(Icons.add),
-                  label: const Text('إضافة موقع عمل آخر'),
-                ),
-            ],
-            if (_lockProjectAndDate && _selectedProject == null && _initialProjectDisplayName != null) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey.withValues(alpha: 0.25)),
-                ),
-                child: Text(
-                  'المشروع المسجل بالخطة: $_initialProjectDisplayName',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-            const SizedBox(height: 24),
-            DropdownButtonFormField<SupervisorModel>(
-              value: _selectedSupervisor,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'اسم المشرف',
-                border: OutlineInputBorder(),
-              ),
-              items: [
-                const DropdownMenuItem<SupervisorModel>(value: null, child: Text('— اختر المشرف —')),
-                ..._supervisors.map((s) => DropdownMenuItem(value: s, child: Text(s.name, overflow: TextOverflow.ellipsis))),
-              ],
-              onChanged: _isReadOnlyNow ? null : (v) => setState(() => _selectedSupervisor = v),
-            ),
-            const SizedBox(height: 24),
-            if (widget.showSummaryField) ...[
-              TextFormField(
-                controller: _summaryController,
-                maxLines: widget.summaryMaxLines,
-                readOnly: _isReadOnlyNow,
-                decoration: InputDecoration(
-                  labelText: widget.summaryRequired && !_isReadOnlyNow ? '${widget.summaryFieldLabel} *' : widget.summaryFieldLabel,
-                  border: const OutlineInputBorder(),
-                  alignLabelWithHint: true,
-                ),
-                validator: widget.summaryRequired && !_isReadOnlyNow
-                    ? (v) {
-                        if (v == null || v.trim().isEmpty) {
-                          return 'حقل «${widget.summaryFieldLabel}» إلزامي';
-                        }
-                        return null;
-                      }
-                    : null,
-              ),
-              const SizedBox(height: 20),
-            ],
-            if (widget.showAttachmentsSection) ...[
-              const Text('مرفقات (اختياري)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-              const SizedBox(height: 8),
-              const Text('يمكن إرفاق صور أو ملفات قبل الانتقال لخطوة الماليات.', style: TextStyle(fontSize: 12, color: Colors.grey)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _isReadOnlyNow ? null : _pickSummaryImages,
-                    icon: const Icon(Icons.add_photo_alternate_outlined, size: 20),
-                    label: const Text('إرفاق صورة أو أكثر'),
+                items: [
+                  const DropdownMenuItem<ProjectModel>(
+                    value: null,
+                    child: Text('— اختر المشروع —'),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: _isReadOnlyNow ? null : _pickSummaryFiles,
-                    icon: const Icon(Icons.attach_file, size: 20),
-                    label: const Text('إرفاق ملف أو أكثر'),
+                  ..._projects
+                      .where((p) => p.name != 'أخرى')
+                      .map(
+                        (p) => DropdownMenuItem(
+                          value: p,
+                          child: Text(p.name, overflow: TextOverflow.ellipsis),
+                        ),
+                      ),
+                  const DropdownMenuItem<ProjectModel>(
+                    value: _otherProject,
+                    child: Text('أخرى'),
                   ),
                 ],
+                onChanged: _lockProjectAndDate
+                    ? null
+                    : (v) {
+                        setState(() {
+                          _selectedProject = v;
+                          _workSiteRows = [
+                            WorkSiteBlockRow(
+                              showCraftsmanAndAssistantCounts:
+                                  widget.showCraftsmanAndAssistantCounts,
+                            ),
+                          ];
+                          _attachments.clear();
+                          _projectLocs = [];
+                          _zones = [];
+                          _buildingsCache.clear();
+                          _loadingStructure = false;
+                        });
+                        if (v != null && v.id != _otherProject.id) {
+                          _loadStructureForProject(v.id);
+                        }
+                      },
+                validator: (v) => v == null ? 'المشروع إلزامي' : null,
               ),
-              if (_attachments.isNotEmpty) ...[
+              if (widget.showPlannedExecutionDate) ...[
+                const SizedBox(height: 16),
+                if (_lockProjectAndDate)
+                  InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'تاريخ تنفيذ الخطة *',
+                      border: OutlineInputBorder(),
+                    ),
+                    child: Text(
+                      _plannedExecutionDate == null
+                          ? '—'
+                          : '${_plannedExecutionDate!.year.toString().padLeft(4, '0')}-${_plannedExecutionDate!.month.toString().padLeft(2, '0')}-${_plannedExecutionDate!.day.toString().padLeft(2, '0')}',
+                    ),
+                  )
+                else
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            labelText: 'تاريخ تنفيذ الخطة *',
+                            border: const OutlineInputBorder(),
+                            helperText:
+                                widget.plannedExecutionMinSelectableDate != null
+                                ? 'لا يُسمح باختيار تاريخ مضى لهذه الخطة'
+                                : null,
+                          ),
+                          child: Text(
+                            _plannedExecutionDate == null
+                                ? '— اختر التاريخ —'
+                                : '${_plannedExecutionDate!.year.toString().padLeft(4, '0')}-${_plannedExecutionDate!.month.toString().padLeft(2, '0')}-${_plannedExecutionDate!.day.toString().padLeft(2, '0')}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: _pickPlannedExecutionDate,
+                        child: const Text('تغيير'),
+                      ),
+                    ],
+                  ),
+              ],
+              if (_isOtherProject) ...[
                 const SizedBox(height: 12),
-                ..._attachments.asMap().entries.map((e) {
-                  final i = e.key;
-                  final a = e.value;
-                  final label = a.fileName?.isNotEmpty == true ? a.fileName! : (a.kind == 'image' ? 'صورة' : 'ملف');
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 6),
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(a.kind == 'image' ? Icons.image_outlined : Icons.insert_drive_file_outlined),
-                      title: Text(label, overflow: TextOverflow.ellipsis),
-                      subtitle: Text(a.kind == 'image' ? 'صورة' : 'ملف'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.close, color: Colors.red),
-                        onPressed: _isReadOnlyNow ? null : () => _removeAttachmentAt(i),
+                TextFormField(
+                  controller: _otherProjectNameController,
+                  enabled: !_isReadOnlyNow,
+                  decoration: const InputDecoration(
+                    labelText: 'حدد المشروع (إلزامي عند اختيار أخرى) *',
+                    hintText: 'اكتب اسم المشروع أو وصفاً قصيراً',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (v) {
+                    if (_isOtherProject && (v == null || v.trim().isEmpty))
+                      return 'مطلوب عند اختيار أخرى';
+                    return null;
+                  },
+                  onChanged: _isReadOnlyNow ? null : (_) => setState(() {}),
+                ),
+              ],
+              const SizedBox(height: 24),
+              if (_selectedProject != null ||
+                  (widget.readOnly && widget.initialReport != null)) ...[
+                const Text(
+                  'توزيع العمال حسب الموقع والمرحلة',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const SizedBox(height: 12),
+                ..._workSiteRows.asMap().entries.map(
+                  (e) => _buildWorkSiteBlockCard(e.key, e.value),
+                ),
+                if (!_isReadOnlyNow)
+                  OutlinedButton.icon(
+                    onPressed: _addWorkSiteBlock,
+                    icon: const Icon(Icons.add),
+                    label: const Text('إضافة موقع عمل آخر'),
+                  ),
+              ],
+              if (_lockProjectAndDate &&
+                  _selectedProject == null &&
+                  _initialProjectDisplayName != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.grey.withValues(alpha: 0.25),
+                    ),
+                  ),
+                  child: Text(
+                    'المشروع المسجل بالخطة: $_initialProjectDisplayName',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              DropdownButtonFormField<SupervisorModel>(
+                value: _selectedSupervisor,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'اسم المشرف',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  const DropdownMenuItem<SupervisorModel>(
+                    value: null,
+                    child: Text('— اختر المشرف —'),
+                  ),
+                  ..._supervisors.map(
+                    (s) => DropdownMenuItem(
+                      value: s,
+                      child: Text(s.name, overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+                ],
+                onChanged: _isReadOnlyNow
+                    ? null
+                    : (v) => setState(() => _selectedSupervisor = v),
+              ),
+              const SizedBox(height: 24),
+              if (widget.showSummaryField) ...[
+                TextFormField(
+                  controller: _summaryController,
+                  maxLines: widget.summaryMaxLines,
+                  readOnly: _isReadOnlyNow,
+                  decoration: InputDecoration(
+                    labelText: widget.summaryRequired && !_isReadOnlyNow
+                        ? '${widget.summaryFieldLabel} *'
+                        : widget.summaryFieldLabel,
+                    border: const OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                  validator: widget.summaryRequired && !_isReadOnlyNow
+                      ? (v) {
+                          if (v == null || v.trim().isEmpty) {
+                            return 'حقل «${widget.summaryFieldLabel}» إلزامي';
+                          }
+                          return null;
+                        }
+                      : null,
+                ),
+                const SizedBox(height: 20),
+              ],
+              if (widget.showAttachmentsSection) ...[
+                const Text(
+                  'مرفقات (اختياري)',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'يمكن إرفاق صور أو ملفات قبل الانتقال لخطوة الماليات.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _isReadOnlyNow ? null : _pickSummaryImages,
+                      icon: const Icon(
+                        Icons.add_photo_alternate_outlined,
+                        size: 20,
+                      ),
+                      label: const Text('إرفاق صورة أو أكثر'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _isReadOnlyNow ? null : _pickSummaryFiles,
+                      icon: const Icon(Icons.attach_file, size: 20),
+                      label: const Text('إرفاق ملف أو أكثر'),
+                    ),
+                  ],
+                ),
+                if (_attachments.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  ..._attachments.asMap().entries.map((e) {
+                    final i = e.key;
+                    final a = e.value;
+                    final label = a.fileName?.isNotEmpty == true
+                        ? a.fileName!
+                        : (a.kind == 'image' ? 'صورة' : 'ملف');
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(
+                          a.kind == 'image'
+                              ? Icons.image_outlined
+                              : Icons.insert_drive_file_outlined,
+                        ),
+                        title: Text(label, overflow: TextOverflow.ellipsis),
+                        subtitle: Text(a.kind == 'image' ? 'صورة' : 'ملف'),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.close, color: Colors.red),
+                          onPressed: _isReadOnlyNow
+                              ? null
+                              : () => _removeAttachmentAt(i),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ],
+              const SizedBox(height: 24),
+              if (!_isReadOnlyNow && !widget.showExecutionActions)
+                FilledButton(
+                  onPressed: _persistingWorkOnly
+                      ? null
+                      : (widget.continueToFinancesOnNext
+                            ? _goNext
+                            : _saveWorkWithoutFinances),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: const Color(0xFF1B5E20),
+                  ),
+                  child: _persistingWorkOnly
+                      ? const SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : Text(
+                          widget.continueToFinancesOnNext
+                              ? 'التالي'
+                              : (widget.primaryWorkActionLabel ??
+                                    'حفظ التقرير'),
+                        ),
+                ),
+              if (widget.showExecutionActions && _executionDone) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 14,
+                    horizontal: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.green.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Text(
+                    _executionDoneMessage ?? 'تم التنفيذ',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green,
+                    ),
+                  ),
+                ),
+                if ((_finalModificationSummary ?? '').trim().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Colors.blue.withValues(alpha: 0.35),
                       ),
                     ),
-                  );
-                }),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'ملخص التعديلات',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(_finalModificationSummary!.trim()),
+                      ],
+                    ),
+                  ),
+                ],
               ],
-            ],
-            const SizedBox(height: 24),
-            if (!_isReadOnlyNow && !widget.showExecutionActions)
-              FilledButton(
-                onPressed: _persistingWorkOnly
-                    ? null
-                    : (widget.continueToFinancesOnNext ? _goNext : _saveWorkWithoutFinances),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  backgroundColor: const Color(0xFF1B5E20),
-                ),
-                child: _persistingWorkOnly
-                    ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Text(widget.continueToFinancesOnNext ? 'التالي' : 'حفظ التقرير'),
-              ),
-            if (widget.showExecutionActions && _executionDone) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.withValues(alpha: 0.5)),
-                ),
-                child: Text(
-                  _executionDoneMessage ?? 'تم التنفيذ',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green),
-                ),
-              ),
-              if ((_finalModificationSummary ?? '').trim().isNotEmpty) ...[
-                const SizedBox(height: 10),
+              if ((widget.executionInfoMessage ?? '').trim().isNotEmpty) ...[
                 Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 12,
+                    horizontal: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.blue.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue.withValues(alpha: 0.35)),
+                    border: Border.all(
+                      color: Colors.blue.withValues(alpha: 0.35),
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'ملخص التعديلات',
-                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(_finalModificationSummary!.trim()),
-                    ],
+                  child: Text(
+                    widget.executionInfoMessage!.trim(),
+                    style: const TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              if (widget.showExecutionActions &&
+                  _postponedLocked &&
+                  !_executionDone) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 14,
+                    horizontal: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.orange.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Text(
+                    _postponedReasonText ?? 'تم تأجيل التنفيذ',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonal(
+                  onPressed: _executing
+                      ? null
+                      : () {
+                          setState(() {
+                            _postponedLocked = false;
+                            _editExecutionMode = false;
+                          });
+                        },
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  child: const Text('إعادة فتح للتنفيذ'),
+                ),
+              ],
+              if (widget.showExecutionActions &&
+                  !_executionDone &&
+                  !_editExecutionMode &&
+                  !_postponedLocked) ...[
+                FilledButton(
+                  onPressed: _executing
+                      ? null
+                      : () => _submitExecution('confirmed'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: const Color(0xFF1B5E20),
+                  ),
+                  child: Text(_executing ? 'جاري الحفظ...' : 'تأكيد التنفيذ'),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonal(
+                  onPressed: _executing
+                      ? null
+                      : () {
+                          setState(() => _editExecutionMode = true);
+                        },
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  child: const Text('تأكيد+تعديل'),
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: _executing
+                      ? null
+                      : () => _submitExecution('postponed'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: Colors.orange,
+                  ),
+                  child: const Text('تأجيل التنفيذ'),
+                ),
+              ],
+              if (widget.showExecutionActions &&
+                  !_executionDone &&
+                  _editExecutionMode) ...[
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _modificationSummaryController,
+                  maxLines: 3,
+                  validator: (v) {
+                    if ((v ?? '').trim().isEmpty)
+                      return 'ملخص التعديلات إلزامي';
+                    return null;
+                  },
+                  decoration: const InputDecoration(
+                    labelText: 'ملخص التعديلات *',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: _executing
+                      ? null
+                      : () => _submitExecution('confirmed_edited'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: const Color(0xFF1B5E20),
+                  ),
+                  child: Text(_executing ? 'جاري الحفظ...' : 'تأكيد التنفيذ'),
                 ),
               ],
             ],
-            if ((widget.executionInfoMessage ?? '').trim().isNotEmpty) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.withValues(alpha: 0.35)),
-                ),
-                child: Text(
-                  widget.executionInfoMessage!.trim(),
-                  style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.w600),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            if (widget.showExecutionActions && _postponedLocked && !_executionDone) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.withValues(alpha: 0.5)),
-                ),
-                child: Text(
-                  _postponedReasonText ?? 'تم تأجيل التنفيذ',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
-                ),
-              ),
-              const SizedBox(height: 12),
-              FilledButton.tonal(
-                onPressed: _executing
-                    ? null
-                    : () {
-                        setState(() {
-                          _postponedLocked = false;
-                          _editExecutionMode = false;
-                        });
-                      },
-                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                child: const Text('إعادة فتح للتنفيذ'),
-              ),
-            ],
-            if (widget.showExecutionActions && !_executionDone && !_editExecutionMode && !_postponedLocked) ...[
-              FilledButton(
-                onPressed: _executing ? null : () => _submitExecution('confirmed'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  backgroundColor: const Color(0xFF1B5E20),
-                ),
-                child: Text(_executing ? 'جاري الحفظ...' : 'تأكيد التنفيذ'),
-              ),
-              const SizedBox(height: 12),
-              FilledButton.tonal(
-                onPressed: _executing
-                    ? null
-                    : () {
-                        setState(() => _editExecutionMode = true);
-                      },
-                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                child: const Text('تأكيد+تعديل'),
-              ),
-              const SizedBox(height: 12),
-              FilledButton(
-                onPressed: _executing ? null : () => _submitExecution('postponed'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  backgroundColor: Colors.orange,
-                ),
-                child: const Text('تأجيل التنفيذ'),
-              ),
-            ],
-            if (widget.showExecutionActions && !_executionDone && _editExecutionMode) ...[
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _modificationSummaryController,
-                maxLines: 3,
-                validator: (v) {
-                  if ((v ?? '').trim().isEmpty) return 'ملخص التعديلات إلزامي';
-                  return null;
-                },
-                decoration: const InputDecoration(
-                  labelText: 'ملخص التعديلات *',
-                  border: OutlineInputBorder(),
-                  alignLabelWithHint: true,
-                ),
-              ),
-              const SizedBox(height: 12),
-              FilledButton(
-                onPressed: _executing ? null : () => _submitExecution('confirmed_edited'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  backgroundColor: const Color(0xFF1B5E20),
-                ),
-                child: Text(_executing ? 'جاري الحفظ...' : 'تأكيد التنفيذ'),
-              ),
-            ],
-          ],
           ),
         ),
       ),
@@ -1634,7 +2455,13 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 120, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w500))),
+          SizedBox(
+            width: 120,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+          ),
           Expanded(child: Text(value)),
         ],
       ),
@@ -1674,12 +2501,14 @@ class WorkSiteBlockRow {
     this.contractorId,
     List<PhaseSlot>? phaseSlots,
     bool showCraftsmanAndAssistantCounts = false,
-  })  : locationPath = locationPath ?? [],
-        phaseSlots = phaseSlots ??
-            [
-              PhaseSlot(
-                craftsmanCount: showCraftsmanAndAssistantCounts ? 1 : 1,
-                assistantCount: showCraftsmanAndAssistantCounts ? 1 : 1,
-              ),
-            ];
+  }) : locationPath = locationPath ?? [],
+       phaseSlots =
+           phaseSlots ??
+           [
+             PhaseSlot(
+               workersCount: showCraftsmanAndAssistantCounts ? 0 : 1,
+               craftsmanCount: showCraftsmanAndAssistantCounts ? 0 : 1,
+               assistantCount: showCraftsmanAndAssistantCounts ? 0 : 1,
+             ),
+           ];
 }

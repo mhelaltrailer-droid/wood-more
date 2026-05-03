@@ -442,7 +442,7 @@ CREATE TABLE IF NOT EXISTS detailed_report_lines (
   building_id INTEGER REFERENCES buildings(id),
   location_id INTEGER REFERENCES project_locations(id),
   phase_id INTEGER NOT NULL REFERENCES work_phases(id),
-  workers_count INTEGER NOT NULL CHECK (workers_count >= 1)
+  workers_count INTEGER NOT NULL CHECK (workers_count >= 0)
 );
 
 DO $$

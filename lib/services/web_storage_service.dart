@@ -20,6 +20,7 @@ import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../data/default_materials.dart';
+import 'icon_visibility_service.dart';
 
 /// تخزين للويب باستخدام SharedPreferences
 class WebStorageService {
@@ -43,28 +44,120 @@ class WebStorageService {
   static const _engineerBalanceKey = 'wood_engineer_balance';
   static const _engineerCustodyKey = 'wood_engineer_custody';
   static const _systemLockedKey = 'wood_system_locked';
+  static const _homeIconsVisibilityKey = 'wood_home_icons_visibility';
 
-  Future<SharedPreferences> get _prefs async => await SharedPreferences.getInstance();
+  Future<SharedPreferences> get _prefs async =>
+      await SharedPreferences.getInstance();
 
   static List<Map<String, dynamic>> _defaultUsers() {
     const defaultPassword = '0000';
     return [
-      {'id': 1, 'name': 'Hany', 'email': 'hany.samir1708@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-      {'id': 2, 'name': 'Emam', 'email': 'amirelazab46@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-      {'id': 3, 'name': 'Mansur', 'email': 'saedm0566@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-      {'id': 4, 'name': 'Mahmud', 'email': 'mahmoudsiko630@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-      {'id': 5, 'name': 'Abdhusseny', 'email': 'abdallaelhosseny1011@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-      {'id': 6, 'name': 'Hamza', 'email': 'hamzamhamad704@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-      {'id': 7, 'name': 'Gohary', 'email': 'mohamedelgohary371@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-      {'id': 8, 'name': 'Amr', 'email': 'amrelshabrawy55@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-      {'id': 9, 'name': 'Hassan', 'email': 'mouhammed.helal@gmail.com', 'role': 'site_engineer', 'password': defaultPassword},
-      {'id': 10, 'name': 'Helal', 'email': 'mouhamedhelal.cor@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
-      {'id': 11, 'name': 'Shams', 'email': 'islam.shams2050@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
-      {'id': 12, 'name': 'Abdrhman', 'email': 'AbdelrhmanEllaithy828@gmail.com', 'role': 'site_engineer_manager', 'password': defaultPassword},
-      {'id': 13, 'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin', 'password': defaultPassword},
-        {'id': 14, 'name': 'Helal', 'email': 'h@h.com', 'role': 'app_admin', 'password': '123'},
-        {'id': 15, 'name': 'account manager', 'email': 'Account@gmail.com', 'role': 'accountant', 'password': '0000'},
-      ];
+      {
+        'id': 1,
+        'name': 'Hany',
+        'email': 'hany.samir1708@gmail.com',
+        'role': 'site_engineer',
+        'password': defaultPassword,
+      },
+      {
+        'id': 2,
+        'name': 'Emam',
+        'email': 'amirelazab46@gmail.com',
+        'role': 'site_engineer',
+        'password': defaultPassword,
+      },
+      {
+        'id': 3,
+        'name': 'Mansur',
+        'email': 'saedm0566@gmail.com',
+        'role': 'site_engineer',
+        'password': defaultPassword,
+      },
+      {
+        'id': 4,
+        'name': 'Mahmud',
+        'email': 'mahmoudsiko630@gmail.com',
+        'role': 'site_engineer',
+        'password': defaultPassword,
+      },
+      {
+        'id': 5,
+        'name': 'Abdhusseny',
+        'email': 'abdallaelhosseny1011@gmail.com',
+        'role': 'site_engineer',
+        'password': defaultPassword,
+      },
+      {
+        'id': 6,
+        'name': 'Hamza',
+        'email': 'hamzamhamad704@gmail.com',
+        'role': 'site_engineer',
+        'password': defaultPassword,
+      },
+      {
+        'id': 7,
+        'name': 'Gohary',
+        'email': 'mohamedelgohary371@gmail.com',
+        'role': 'site_engineer',
+        'password': defaultPassword,
+      },
+      {
+        'id': 8,
+        'name': 'Amr',
+        'email': 'amrelshabrawy55@gmail.com',
+        'role': 'site_engineer',
+        'password': defaultPassword,
+      },
+      {
+        'id': 9,
+        'name': 'Hassan',
+        'email': 'mouhammed.helal@gmail.com',
+        'role': 'site_engineer',
+        'password': defaultPassword,
+      },
+      {
+        'id': 10,
+        'name': 'Helal',
+        'email': 'mouhamedhelal.cor@gmail.com',
+        'role': 'site_engineer_manager',
+        'password': defaultPassword,
+      },
+      {
+        'id': 11,
+        'name': 'Shams',
+        'email': 'islam.shams2050@gmail.com',
+        'role': 'site_engineer_manager',
+        'password': defaultPassword,
+      },
+      {
+        'id': 12,
+        'name': 'Abdrhman',
+        'email': 'AbdelrhmanEllaithy828@gmail.com',
+        'role': 'site_engineer_manager',
+        'password': defaultPassword,
+      },
+      {
+        'id': 13,
+        'name': 'مسؤول التطبيق',
+        'email': 'mouhammedhelal@gmail.com',
+        'role': 'app_admin',
+        'password': defaultPassword,
+      },
+      {
+        'id': 14,
+        'name': 'Helal',
+        'email': 'h@h.com',
+        'role': 'app_admin',
+        'password': '123',
+      },
+      {
+        'id': 15,
+        'name': 'account manager',
+        'email': 'Account@gmail.com',
+        'role': 'accountant',
+        'password': '0000',
+      },
+    ];
   }
 
   Future<void> _initData() async {
@@ -84,64 +177,155 @@ class WebStorageService {
         await prefs.setString(_usersKey, jsonEncode(_defaultUsers()));
         return;
       }
-      final hasAdmin = list.any((e) => ((e as Map)['email'] as String).toLowerCase() == 'mouhammedhelal@gmail.com');
+      final hasAdmin = list.any(
+        (e) =>
+            ((e as Map)['email'] as String).toLowerCase() ==
+            'mouhammedhelal@gmail.com',
+      );
       if (!hasAdmin) {
-        final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-        list.add({'id': nextId, 'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin', 'password': '0000'});
+        final nextId = list.isEmpty
+            ? 1
+            : (list
+                      .map((e) => (e as Map)['id'] as int)
+                      .reduce((a, b) => a > b ? a : b) +
+                  1);
+        list.add({
+          'id': nextId,
+          'name': 'مسؤول التطبيق',
+          'email': 'mouhammedhelal@gmail.com',
+          'role': 'app_admin',
+          'password': '0000',
+        });
         await prefs.setString(_usersKey, jsonEncode(list));
       }
-      final hasHelal = list.any((e) => ((e as Map)['email'] as String).toLowerCase() == 'h@h.com');
+      final hasHelal = list.any(
+        (e) => ((e as Map)['email'] as String).toLowerCase() == 'h@h.com',
+      );
       if (!hasHelal) {
-        final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-        list.add({'id': nextId, 'name': 'Helal', 'email': 'h@h.com', 'role': 'app_admin', 'password': '123'});
+        final nextId = list.isEmpty
+            ? 1
+            : (list
+                      .map((e) => (e as Map)['id'] as int)
+                      .reduce((a, b) => a > b ? a : b) +
+                  1);
+        list.add({
+          'id': nextId,
+          'name': 'Helal',
+          'email': 'h@h.com',
+          'role': 'app_admin',
+          'password': '123',
+        });
         await prefs.setString(_usersKey, jsonEncode(list));
       }
-      final hasAccountant = list.any((e) => ((e as Map)['email'] as String).toLowerCase() == 'account@gmail.com');
+      final hasAccountant = list.any(
+        (e) =>
+            ((e as Map)['email'] as String).toLowerCase() ==
+            'account@gmail.com',
+      );
       if (!hasAccountant) {
-        final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-        list.add({'id': nextId, 'name': 'account manager', 'email': 'Account@gmail.com', 'role': 'accountant', 'password': '0000'});
+        final nextId = list.isEmpty
+            ? 1
+            : (list
+                      .map((e) => (e as Map)['id'] as int)
+                      .reduce((a, b) => a > b ? a : b) +
+                  1);
+        list.add({
+          'id': nextId,
+          'name': 'account manager',
+          'email': 'Account@gmail.com',
+          'role': 'accountant',
+          'password': '0000',
+        });
         await prefs.setString(_usersKey, jsonEncode(list));
       }
     }
     if (prefs.getString(_projectsKey) == null) {
       final projectNames = [
-        'UTC_Z5_CRC_F', 'Mivida 31_CRC_F', 'UTC_Z5_EMAAR Building C_F', 'Zed east_ORASCOM_F',
-        'Belle Vie_El-Hazek_F', 'CAIRO GATE elain (02)_CRC_F', 'Cairo gate_ACC_W', 'Z1_EMAAR_F',
-        'Community Center_CRC_W', 'Terrace Zayed_CRC_W', 'Silver Sands_REDCON_D', 'CAR SHADE_W&M_W',
-        'OLD CITY_ORASCOM_W', 'Cairo gate-Eden_ATRUM_F', 'AUC Campus Expansion_Orascom_W&F',
-        'UTC - 2 Villa- Link International_W', 'UTC - 2 Villa- Link International_F', 'City Gate_CCC_W',
-        'cairo gate - locanda_INOVOO_F', 'Village West _ club_FIT-OUT_W', 'Village West _Villa_W',
-        'Mivida gardens_Atrium_F', 'Village West_CRC_ F', 'Up Town Cairo _Z5 _EMAAR_W', 'Belle Vie _ EMAAR_W',
-        'Village West _ CRC_ W', 'Wood&More(head office)',
+        'UTC_Z5_CRC_F',
+        'Mivida 31_CRC_F',
+        'UTC_Z5_EMAAR Building C_F',
+        'Zed east_ORASCOM_F',
+        'Belle Vie_El-Hazek_F',
+        'CAIRO GATE elain (02)_CRC_F',
+        'Cairo gate_ACC_W',
+        'Z1_EMAAR_F',
+        'Community Center_CRC_W',
+        'Terrace Zayed_CRC_W',
+        'Silver Sands_REDCON_D',
+        'CAR SHADE_W&M_W',
+        'OLD CITY_ORASCOM_W',
+        'Cairo gate-Eden_ATRUM_F',
+        'AUC Campus Expansion_Orascom_W&F',
+        'UTC - 2 Villa- Link International_W',
+        'UTC - 2 Villa- Link International_F',
+        'City Gate_CCC_W',
+        'cairo gate - locanda_INOVOO_F',
+        'Village West _ club_FIT-OUT_W',
+        'Village West _Villa_W',
+        'Mivida gardens_Atrium_F',
+        'Village West_CRC_ F',
+        'Up Town Cairo _Z5 _EMAAR_W',
+        'Belle Vie _ EMAAR_W',
+        'Village West _ CRC_ W',
+        'Wood&More(head office)',
       ];
-      final projects = projectNames.asMap().entries.map((e) => {'id': e.key + 1, 'name': e.value}).toList();
+      final projects = projectNames
+          .asMap()
+          .entries
+          .map((e) => {'id': e.key + 1, 'name': e.value})
+          .toList();
       await prefs.setString(_projectsKey, jsonEncode(projects));
     }
     if (prefs.getString(_attendanceKey) == null) {
       await prefs.setString(_attendanceKey, jsonEncode([]));
     }
     if (prefs.getString(_materialsKey) == null) {
-      final materialsList = defaultMaterialsList.asMap().entries.map((e) => {'id': e.key + 1, 'name': e.value}).toList();
+      final materialsList = defaultMaterialsList
+          .asMap()
+          .entries
+          .map((e) => {'id': e.key + 1, 'name': e.value})
+          .toList();
       await prefs.setString(_materialsKey, jsonEncode(materialsList));
     }
     if (prefs.getString(_dailyReportsKey) == null) {
       await prefs.setString(_dailyReportsKey, jsonEncode([]));
     }
-    if (prefs.getString(_zonesKey) == null) await prefs.setString(_zonesKey, jsonEncode([]));
-    if (prefs.getString(_projectLocationsKey) == null) await prefs.setString(_projectLocationsKey, jsonEncode([]));
-    if (prefs.getString(_buildingsKey) == null) await prefs.setString(_buildingsKey, jsonEncode([]));
-    if (prefs.getString(_supervisorsKey) == null) await prefs.setString(_supervisorsKey, jsonEncode([]));
-    if (prefs.getString(_contractorsKey) == null) await prefs.setString(_contractorsKey, jsonEncode([]));
-    if (prefs.getString(_projectStockKey) == null) await prefs.setString(_projectStockKey, jsonEncode([]));
-    if (prefs.getString(_projectStockLedgerKey) == null) await prefs.setString(_projectStockLedgerKey, jsonEncode([]));
-    if (prefs.getString(_locationMaterialsKey) == null) await prefs.setString(_locationMaterialsKey, jsonEncode([]));
-    if (prefs.getString(_locationWithdrawalKey) == null) await prefs.setString(_locationWithdrawalKey, jsonEncode([]));
-    if (prefs.getString(_unitsKey) == null) await prefs.setString(_unitsKey, jsonEncode([]));
-    if (prefs.getString(_buildingMaterialsKey) == null) await prefs.setString(_buildingMaterialsKey, jsonEncode([]));
-    if (prefs.getString(_buildingCutlistKey) == null) await prefs.setString(_buildingCutlistKey, jsonEncode([]));
-    if (prefs.getString(_engineerBalanceKey) == null) await prefs.setString(_engineerBalanceKey, jsonEncode([]));
-    if (prefs.getString(_engineerCustodyKey) == null) await prefs.setString(_engineerCustodyKey, jsonEncode([]));
-    if (!prefs.containsKey(_systemLockedKey)) await prefs.setBool(_systemLockedKey, false);
+    if (prefs.getString(_zonesKey) == null)
+      await prefs.setString(_zonesKey, jsonEncode([]));
+    if (prefs.getString(_projectLocationsKey) == null)
+      await prefs.setString(_projectLocationsKey, jsonEncode([]));
+    if (prefs.getString(_buildingsKey) == null)
+      await prefs.setString(_buildingsKey, jsonEncode([]));
+    if (prefs.getString(_supervisorsKey) == null)
+      await prefs.setString(_supervisorsKey, jsonEncode([]));
+    if (prefs.getString(_contractorsKey) == null)
+      await prefs.setString(_contractorsKey, jsonEncode([]));
+    if (prefs.getString(_projectStockKey) == null)
+      await prefs.setString(_projectStockKey, jsonEncode([]));
+    if (prefs.getString(_projectStockLedgerKey) == null)
+      await prefs.setString(_projectStockLedgerKey, jsonEncode([]));
+    if (prefs.getString(_locationMaterialsKey) == null)
+      await prefs.setString(_locationMaterialsKey, jsonEncode([]));
+    if (prefs.getString(_locationWithdrawalKey) == null)
+      await prefs.setString(_locationWithdrawalKey, jsonEncode([]));
+    if (prefs.getString(_unitsKey) == null)
+      await prefs.setString(_unitsKey, jsonEncode([]));
+    if (prefs.getString(_buildingMaterialsKey) == null)
+      await prefs.setString(_buildingMaterialsKey, jsonEncode([]));
+    if (prefs.getString(_buildingCutlistKey) == null)
+      await prefs.setString(_buildingCutlistKey, jsonEncode([]));
+    if (prefs.getString(_engineerBalanceKey) == null)
+      await prefs.setString(_engineerBalanceKey, jsonEncode([]));
+    if (prefs.getString(_engineerCustodyKey) == null)
+      await prefs.setString(_engineerCustodyKey, jsonEncode([]));
+    if (!prefs.containsKey(_systemLockedKey))
+      await prefs.setBool(_systemLockedKey, false);
+    if (prefs.getString(_homeIconsVisibilityKey) == null) {
+      await prefs.setString(
+        _homeIconsVisibilityKey,
+        jsonEncode(IconVisibilityService.normalizeAllConfig(null)),
+      );
+    }
   }
 
   Future<bool> isSystemLocked() async {
@@ -156,11 +340,41 @@ class WebStorageService {
     await prefs.setBool(_systemLockedKey, locked);
   }
 
+  Future<Map<String, Map<String, bool>>> getHomeIconsVisibilityConfig() async {
+    await _initData();
+    final prefs = await _prefs;
+    final raw = prefs.getString(_homeIconsVisibilityKey);
+    if (raw == null || raw.trim().isEmpty)
+      return IconVisibilityService.normalizeAllConfig(null);
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>)
+        return IconVisibilityService.normalizeAllConfig(decoded);
+      if (decoded is Map)
+        return IconVisibilityService.normalizeAllConfig(
+          Map<String, dynamic>.from(decoded),
+        );
+    } catch (_) {}
+    return IconVisibilityService.normalizeAllConfig(null);
+  }
+
+  Future<void> setHomeIconsVisibilityForRole(
+    String role,
+    Map<String, bool> roleConfig,
+  ) async {
+    await _initData();
+    final prefs = await _prefs;
+    final current = await getHomeIconsVisibilityConfig();
+    current[role] = Map<String, bool>.from(roleConfig);
+    await prefs.setString(_homeIconsVisibilityKey, jsonEncode(current));
+  }
+
   Future<List<String>> getMaterials() async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_materialsKey)!) as List;
-    if (list.isNotEmpty && list[0] is! Map) return list.map((e) => e as String).toList()..sort();
+    if (list.isNotEmpty && list[0] is! Map)
+      return list.map((e) => e as String).toList()..sort();
     return list.map((e) => (e as Map)['name'] as String).toList()..sort();
   }
 
@@ -169,8 +383,13 @@ class WebStorageService {
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_materialsKey)!) as List;
     if (list.isEmpty) return [];
-    if (list[0] is Map) return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    return (list as List).asMap().entries.map((e) => {'id': e.key + 1, 'name': e.value as String}).toList();
+    if (list[0] is Map)
+      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    return (list as List)
+        .asMap()
+        .entries
+        .map((e) => {'id': e.key + 1, 'name': e.value as String})
+        .toList();
   }
 
   /// حد أقصى لعدد التقارير المخزنة على الويب لتجنب QuotaExceededError
@@ -182,7 +401,12 @@ class WebStorageService {
     final prefs = await _prefs;
     List list = jsonDecode(prefs.getString(_dailyReportsKey)!) as List;
     final map = report.toJson();
-    map['id'] = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    map['id'] = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
     map['created_at'] = DateTime.now().toIso8601String();
     list.insert(0, map);
 
@@ -203,7 +427,8 @@ class WebStorageService {
     try {
       await prefs.setString(_dailyReportsKey, encoded);
     } catch (e) {
-      if (e.toString().contains('QuotaExceeded') || e.toString().contains('quota')) {
+      if (e.toString().contains('QuotaExceeded') ||
+          e.toString().contains('quota')) {
         // محاولة ثانية: تقليص عدد التقارير وإزالة مرفقات التقرير الجديد
         list = list.sublist(0, list.length > 20 ? 20 : list.length);
         if (list.isNotEmpty) {
@@ -230,7 +455,8 @@ class WebStorageService {
     if (report.projectId != null) {
       for (final m in report.materials) {
         if (m.materialName.isEmpty || m.quantity.isEmpty) continue;
-        final qty = double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+        final qty =
+            double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
         if (qty <= 0) continue;
         final unit = m.unit.isEmpty ? 'متر' : m.unit;
         await deductProjectStock(
@@ -265,24 +491,60 @@ class WebStorageService {
     await prefs.setString(_engineerBalanceKey, jsonEncode(newList));
   }
 
-  Future<void> addCustody(int userId, double amount, String note, [String? documentPath]) async {
+  Future<void> addCustody(
+    int userId,
+    double amount,
+    String note, [
+    String? documentPath,
+  ]) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_engineerCustodyKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'user_id': userId, 'amount': amount, 'created_at': DateTime.now().toIso8601String(), 'note': note, 'document_path': documentPath, 'movement_type': 'custody'});
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
+    list.add({
+      'id': nextId,
+      'user_id': userId,
+      'amount': amount,
+      'created_at': DateTime.now().toIso8601String(),
+      'note': note,
+      'document_path': documentPath,
+      'movement_type': 'custody',
+    });
     await prefs.setString(_engineerCustodyKey, jsonEncode(list));
     final current = await getEngineerBalance(userId);
     await setEngineerBalance(userId, current - amount);
   }
 
   /// تسجيل حركة إضافة رصيد أو سحب رصيد فقط (بدون تغيير الرصيد)
-  Future<void> addBalanceMovement(int userId, double amount, String note, String movementType) async {
+  Future<void> addBalanceMovement(
+    int userId,
+    double amount,
+    String note,
+    String movementType,
+  ) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_engineerCustodyKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'user_id': userId, 'amount': amount, 'created_at': DateTime.now().toIso8601String(), 'note': note, 'document_path': null, 'movement_type': movementType});
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
+    list.add({
+      'id': nextId,
+      'user_id': userId,
+      'amount': amount,
+      'created_at': DateTime.now().toIso8601String(),
+      'note': note,
+      'document_path': null,
+      'movement_type': movementType,
+    });
     await prefs.setString(_engineerCustodyKey, jsonEncode(list));
   }
 
@@ -291,9 +553,25 @@ class WebStorageService {
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_engineerCustodyKey)!) as List;
     var result = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    if (userId != null) result = result.where((e) => e['user_id'] == userId).toList();
-    result.sort((a, b) => (b['created_at'] as String).compareTo(a['created_at'] as String));
-    return result.map((e) => {'id': e['id'], 'user_id': e['user_id'], 'amount': (e['amount'] as num).toDouble(), 'created_at': e['created_at'], 'note': e['note'], 'document_path': e['document_path'], 'movement_type': e['movement_type'] as String? ?? 'custody'}).toList();
+    if (userId != null)
+      result = result.where((e) => e['user_id'] == userId).toList();
+    result.sort(
+      (a, b) =>
+          (b['created_at'] as String).compareTo(a['created_at'] as String),
+    );
+    return result
+        .map(
+          (e) => {
+            'id': e['id'],
+            'user_id': e['user_id'],
+            'amount': (e['amount'] as num).toDouble(),
+            'created_at': e['created_at'],
+            'note': e['note'],
+            'document_path': e['document_path'],
+            'movement_type': e['movement_type'] as String? ?? 'custody',
+          },
+        )
+        .toList();
   }
 
   Future<List<UserModel>> getSiteEngineers() async {
@@ -359,7 +637,9 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectsKey)!) as List;
-    final projects = list.map((m) => ProjectModel.fromMap(Map<String, dynamic>.from(m as Map))).toList();
+    final projects = list
+        .map((m) => ProjectModel.fromMap(Map<String, dynamic>.from(m as Map)))
+        .toList();
     final seen = <String>{};
     final unique = projects.where((p) => seen.add(p.name)).toList();
     unique.sort((a, b) => a.name.compareTo(b.name));
@@ -385,7 +665,9 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_attendanceKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => e['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final nextId = list.isEmpty
+        ? 1
+        : (list.map((e) => e['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
     final map = {
       'id': nextId,
       'user_id': record.userId,
@@ -405,10 +687,18 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_attendanceKey)!) as List;
-    return list.map((m) => AttendanceRecordModel.fromMap(Map<String, dynamic>.from(m as Map))).toList();
+    return list
+        .map(
+          (m) => AttendanceRecordModel.fromMap(
+            Map<String, dynamic>.from(m as Map),
+          ),
+        )
+        .toList();
   }
 
-  Future<List<AttendanceRecordModel>> getAttendanceRecordsByUser(int userId) async {
+  Future<List<AttendanceRecordModel>> getAttendanceRecordsByUser(
+    int userId,
+  ) async {
     final all = await getAllAttendanceRecords();
     final list = all.where((r) => r.userId == userId).toList();
     list.sort((a, b) => b.dateTime.compareTo(a.dateTime)); // الأحدث أولاً
@@ -416,7 +706,10 @@ class WebStorageService {
   }
 
   /// موعد الحضور والانصراف لمستخدم في تاريخ معين (نفس اليوم فقط)
-  Future<({DateTime? checkIn, DateTime? checkOut})> getAttendanceForUserOnDate(int userId, DateTime date) async {
+  Future<({DateTime? checkIn, DateTime? checkOut})> getAttendanceForUserOnDate(
+    int userId,
+    DateTime date,
+  ) async {
     final list = await getAttendanceRecordsByUser(userId);
     final dayStart = DateTime(date.year, date.month, date.day);
     final dayEnd = DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
@@ -424,8 +717,10 @@ class WebStorageService {
     DateTime? checkOut;
     for (final r in list) {
       if (r.dateTime.isBefore(dayStart) || r.dateTime.isAfter(dayEnd)) continue;
-      if (r.isCheckIn && (checkIn == null || r.dateTime.isBefore(checkIn))) checkIn = r.dateTime;
-      if (r.isCheckOut && (checkOut == null || r.dateTime.isAfter(checkOut))) checkOut = r.dateTime;
+      if (r.isCheckIn && (checkIn == null || r.dateTime.isBefore(checkIn)))
+        checkIn = r.dateTime;
+      if (r.isCheckOut && (checkOut == null || r.dateTime.isAfter(checkOut)))
+        checkOut = r.dateTime;
     }
     return (checkIn: checkIn, checkOut: checkOut);
   }
@@ -448,7 +743,15 @@ class WebStorageService {
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_dailyReportsKey)!) as List;
     final fromDate = DateTime(dateFrom.year, dateFrom.month, dateFrom.day);
-    final toEnd = DateTime(dateTo.year, dateTo.month, dateTo.day, 23, 59, 59, 999);
+    final toEnd = DateTime(
+      dateTo.year,
+      dateTo.month,
+      dateTo.day,
+      23,
+      59,
+      59,
+      999,
+    );
     final reports = <DailyReportData>[];
     for (final m in list) {
       final map = Map<String, dynamic>.from(m as Map);
@@ -476,16 +779,27 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_usersKey)!) as List;
-    final out = list.map<UserModel>((m) => UserModel.fromMap(Map<String, dynamic>.from(m as Map))).toList();
+    final out = list
+        .map<UserModel>(
+          (m) => UserModel.fromMap(Map<String, dynamic>.from(m as Map)),
+        )
+        .toList();
     out.sort((UserModel a, UserModel b) => a.name.compareTo(b.name));
     return out;
   }
 
-  Future<int> addUser(String name, String email, String password, String role) async {
+  Future<int> addUser(
+    String name,
+    String email,
+    String password,
+    String role,
+  ) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_usersKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => e['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final nextId = list.isEmpty
+        ? 1
+        : (list.map((e) => e['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
     final pwd = password.trim().isEmpty ? '0000' : password.trim();
     list.add({
       'id': nextId,
@@ -498,7 +812,13 @@ class WebStorageService {
     return nextId;
   }
 
-  Future<void> updateUser(int id, String name, String email, String role, [String? password]) async {
+  Future<void> updateUser(
+    int id,
+    String name,
+    String email,
+    String role, [
+    String? password,
+  ]) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_usersKey)!) as List;
@@ -506,7 +826,9 @@ class WebStorageService {
       final map = Map<String, dynamic>.from(list[i] as Map);
       if (map['id'] != id) continue;
       final existingPassword = map['password']?.toString().trim() ?? '0000';
-      final pwd = (password != null && password.trim().isNotEmpty) ? password.trim() : existingPassword;
+      final pwd = (password != null && password.trim().isNotEmpty)
+          ? password.trim()
+          : existingPassword;
       list[i] = {
         'id': id,
         'name': name,
@@ -522,7 +844,9 @@ class WebStorageService {
   Future<void> deleteUser(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_usersKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_usersKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
     await prefs.setString(_usersKey, jsonEncode(list));
   }
 
@@ -530,8 +854,16 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectsKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => e['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'name': name});
+    final normalized = name.trim().toLowerCase();
+    for (final row in list) {
+      final map = Map<String, dynamic>.from(row as Map);
+      final existing = (map['name']?.toString() ?? '').trim().toLowerCase();
+      if (existing == normalized) return map['id'] as int;
+    }
+    final nextId = list.isEmpty
+        ? 1
+        : (list.map((e) => e['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    list.add({'id': nextId, 'name': name.trim()});
     list.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
     await prefs.setString(_projectsKey, jsonEncode(list));
     return nextId;
@@ -554,10 +886,18 @@ class WebStorageService {
   Future<void> deleteProject(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_projectsKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
-    final zones = (jsonDecode(prefs.getString(_zonesKey)!) as List).where((e) => (e as Map)['project_id'] != id).toList();
-    final plocs = (jsonDecode(prefs.getString(_projectLocationsKey)!) as List).where((e) => (e as Map)['project_id'] != id).toList();
-    final stock = (jsonDecode(prefs.getString(_projectStockKey)!) as List).where((e) => (e as Map)['project_id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_projectsKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
+    final zones = (jsonDecode(prefs.getString(_zonesKey)!) as List)
+        .where((e) => (e as Map)['project_id'] != id)
+        .toList();
+    final plocs = (jsonDecode(prefs.getString(_projectLocationsKey)!) as List)
+        .where((e) => (e as Map)['project_id'] != id)
+        .toList();
+    final stock = (jsonDecode(prefs.getString(_projectStockKey)!) as List)
+        .where((e) => (e as Map)['project_id'] != id)
+        .toList();
     await prefs.setString(_projectsKey, jsonEncode(list));
     await prefs.setString(_zonesKey, jsonEncode(zones));
     await prefs.setString(_projectLocationsKey, jsonEncode(plocs));
@@ -567,15 +907,25 @@ class WebStorageService {
   Future<List<ZoneModel>> getZones(int projectId) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_zonesKey)!) as List).where((e) => (e as Map)['project_id'] == projectId).toList();
-    return list.map((m) => ZoneModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()..sort((a, b) => a.name.compareTo(b.name));
+    final list = (jsonDecode(prefs.getString(_zonesKey)!) as List)
+        .where((e) => (e as Map)['project_id'] == projectId)
+        .toList();
+    return list
+        .map((m) => ZoneModel.fromMap(Map<String, dynamic>.from(m as Map)))
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
   }
 
   Future<int> addZone(int projectId, String name) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_zonesKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
     list.add({'id': nextId, 'project_id': projectId, 'name': name});
     await prefs.setString(_zonesKey, jsonEncode(list));
     return nextId;
@@ -587,7 +937,11 @@ class WebStorageService {
     final list = jsonDecode(prefs.getString(_zonesKey)!) as List;
     for (var i = 0; i < list.length; i++) {
       if ((list[i] as Map)['id'] == id) {
-        list[i] = {'id': id, 'project_id': (list[i] as Map)['project_id'], 'name': name};
+        list[i] = {
+          'id': id,
+          'project_id': (list[i] as Map)['project_id'],
+          'name': name,
+        };
         break;
       }
     }
@@ -597,8 +951,12 @@ class WebStorageService {
   Future<void> deleteZone(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_zonesKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
-    final buildings = (jsonDecode(prefs.getString(_buildingsKey)!) as List).where((e) => (e as Map)['zone_id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_zonesKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
+    final buildings = (jsonDecode(prefs.getString(_buildingsKey)!) as List)
+        .where((e) => (e as Map)['zone_id'] != id)
+        .toList();
     await prefs.setString(_zonesKey, jsonEncode(list));
     await prefs.setString(_buildingsKey, jsonEncode(buildings));
   }
@@ -609,15 +967,35 @@ class WebStorageService {
     final list = (jsonDecode(prefs.getString(_projectLocationsKey)!) as List)
         .where((e) => (e as Map)['project_id'] == projectId)
         .toList();
-    return list.map((m) => ProjectLocationModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()
-      ..sort((a, b) => a.displayOrder != b.displayOrder ? a.displayOrder.compareTo(b.displayOrder) : a.id.compareTo(b.id));
+    return list
+        .map(
+          (m) =>
+              ProjectLocationModel.fromMap(Map<String, dynamic>.from(m as Map)),
+        )
+        .toList()
+      ..sort(
+        (a, b) => a.displayOrder != b.displayOrder
+            ? a.displayOrder.compareTo(b.displayOrder)
+            : a.id.compareTo(b.id),
+      );
   }
 
-  Future<int> addProjectLocation({required int projectId, int? parentId, required String name, required String type, int displayOrder = 0}) async {
+  Future<int> addProjectLocation({
+    required int projectId,
+    int? parentId,
+    required String name,
+    required String type,
+    int displayOrder = 0,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectLocationsKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
     list.add({
       'id': nextId,
       'project_id': projectId,
@@ -630,7 +1008,11 @@ class WebStorageService {
     return nextId;
   }
 
-  Future<void> updateProjectLocation(int id, {String? name, int? displayOrder}) async {
+  Future<void> updateProjectLocation(
+    int id, {
+    String? name,
+    int? displayOrder,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectLocationsKey)!) as List;
@@ -657,30 +1039,59 @@ class WebStorageService {
       for (final e in list) {
         final m = e as Map;
         final pid = m['parent_id'];
-        final eid = m['id'] is int ? m['id'] as int : int.parse(m['id'].toString());
-        if (pid != null && toRemove.contains(pid is int ? pid : int.parse(pid.toString())) && !toRemove.contains(eid)) {
+        final eid = m['id'] is int
+            ? m['id'] as int
+            : int.parse(m['id'].toString());
+        if (pid != null &&
+            toRemove.contains(pid is int ? pid : int.parse(pid.toString())) &&
+            !toRemove.contains(eid)) {
           toRemove.add(eid);
           changed = true;
         }
       }
     }
-    final filtered = list.where((e) => !toRemove.contains((e as Map)['id'] is int ? (e as Map)['id'] as int : int.parse((e as Map)['id'].toString()))).toList();
+    final filtered = list
+        .where(
+          (e) => !toRemove.contains(
+            (e as Map)['id'] is int
+                ? (e as Map)['id'] as int
+                : int.parse((e as Map)['id'].toString()),
+          ),
+        )
+        .toList();
     await prefs.setString(_projectLocationsKey, jsonEncode(filtered));
   }
 
   Future<List<BuildingModel>> getBuildings(int zoneId) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_buildingsKey)!) as List).where((e) => (e as Map)['zone_id'] == zoneId).toList();
-    return list.map((m) => BuildingModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()..sort((a, b) => a.name.compareTo(b.name));
+    final list = (jsonDecode(prefs.getString(_buildingsKey)!) as List)
+        .where((e) => (e as Map)['zone_id'] == zoneId)
+        .toList();
+    return list
+        .map((m) => BuildingModel.fromMap(Map<String, dynamic>.from(m as Map)))
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
   }
 
   Future<int> addBuilding(BuildingModel b) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_buildingsKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'zone_id': b.zoneId, 'name': b.name, 'storage_info': b.storageInfo, 'model_details': b.modelDetails, 'cut_list': b.cutList});
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
+    list.add({
+      'id': nextId,
+      'zone_id': b.zoneId,
+      'name': b.name,
+      'storage_info': b.storageInfo,
+      'model_details': b.modelDetails,
+      'cut_list': b.cutList,
+    });
     await prefs.setString(_buildingsKey, jsonEncode(list));
     return nextId;
   }
@@ -691,7 +1102,14 @@ class WebStorageService {
     final list = jsonDecode(prefs.getString(_buildingsKey)!) as List;
     for (var i = 0; i < list.length; i++) {
       if ((list[i] as Map)['id'] == b.id) {
-        list[i] = {'id': b.id, 'zone_id': b.zoneId, 'name': b.name, 'storage_info': b.storageInfo, 'model_details': b.modelDetails, 'cut_list': b.cutList};
+        list[i] = {
+          'id': b.id,
+          'zone_id': b.zoneId,
+          'name': b.name,
+          'storage_info': b.storageInfo,
+          'model_details': b.modelDetails,
+          'cut_list': b.cutList,
+        };
         break;
       }
     }
@@ -701,10 +1119,18 @@ class WebStorageService {
   Future<void> deleteBuilding(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_buildingsKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
-    final units = (jsonDecode(prefs.getString(_unitsKey)!) as List).where((e) => (e as Map)['building_id'] != id).toList();
-    final bm = (jsonDecode(prefs.getString(_buildingMaterialsKey)!) as List).where((e) => (e as Map)['building_id'] != id).toList();
-    final bc = (jsonDecode(prefs.getString(_buildingCutlistKey)!) as List).where((e) => (e as Map)['building_id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_buildingsKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
+    final units = (jsonDecode(prefs.getString(_unitsKey)!) as List)
+        .where((e) => (e as Map)['building_id'] != id)
+        .toList();
+    final bm = (jsonDecode(prefs.getString(_buildingMaterialsKey)!) as List)
+        .where((e) => (e as Map)['building_id'] != id)
+        .toList();
+    final bc = (jsonDecode(prefs.getString(_buildingCutlistKey)!) as List)
+        .where((e) => (e as Map)['building_id'] != id)
+        .toList();
     await prefs.setString(_buildingsKey, jsonEncode(list));
     await prefs.setString(_unitsKey, jsonEncode(units));
     await prefs.setString(_buildingMaterialsKey, jsonEncode(bm));
@@ -714,16 +1140,34 @@ class WebStorageService {
   Future<List<ProjectStockModel>> getProjectStock(int projectId) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_projectStockKey)!) as List).where((e) => (e as Map)['project_id'] == projectId).toList();
-    return list.map((m) => ProjectStockModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()..sort((a, b) => a.materialName.compareTo(b.materialName));
+    final list = (jsonDecode(prefs.getString(_projectStockKey)!) as List)
+        .where((e) => (e as Map)['project_id'] == projectId)
+        .toList();
+    return list
+        .map(
+          (m) => ProjectStockModel.fromMap(Map<String, dynamic>.from(m as Map)),
+        )
+        .toList()
+      ..sort((a, b) => a.materialName.compareTo(b.materialName));
   }
 
   Future<int> addProjectStock(ProjectStockModel s) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectStockKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'project_id': s.projectId, 'material_name': s.materialName, 'quantity': s.quantity, 'unit': s.unit});
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
+    list.add({
+      'id': nextId,
+      'project_id': s.projectId,
+      'material_name': s.materialName,
+      'quantity': s.quantity,
+      'unit': s.unit,
+    });
     await prefs.setString(_projectStockKey, jsonEncode(list));
     return nextId;
   }
@@ -734,7 +1178,13 @@ class WebStorageService {
     final list = jsonDecode(prefs.getString(_projectStockKey)!) as List;
     for (var i = 0; i < list.length; i++) {
       if ((list[i] as Map)['id'] == s.id) {
-        list[i] = {'id': s.id, 'project_id': s.projectId, 'material_name': s.materialName, 'quantity': s.quantity, 'unit': s.unit};
+        list[i] = {
+          'id': s.id,
+          'project_id': s.projectId,
+          'material_name': s.materialName,
+          'quantity': s.quantity,
+          'unit': s.unit,
+        };
         break;
       }
     }
@@ -744,7 +1194,9 @@ class WebStorageService {
   Future<void> deleteProjectStock(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_projectStockKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_projectStockKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
     await prefs.setString(_projectStockKey, jsonEncode(list));
   }
 
@@ -761,7 +1213,12 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectStockLedgerKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
     list.insert(0, {
       'id': nextId,
       'project_id': projectId,
@@ -776,24 +1233,54 @@ class WebStorageService {
     await prefs.setString(_projectStockLedgerKey, jsonEncode(list));
   }
 
-  Future<List<ProjectStockLedgerModel>> getStockLedger(int projectId, String materialName) async {
+  Future<List<ProjectStockLedgerModel>> getStockLedger(
+    int projectId,
+    String materialName,
+  ) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectStockLedgerKey)!) as List;
-    final filtered = list.where((e) => (e as Map)['project_id'] == projectId && (e)['material_name'] == materialName).toList();
-    return filtered.map((m) => ProjectStockLedgerModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()
+    final filtered = list
+        .where(
+          (e) =>
+              (e as Map)['project_id'] == projectId &&
+              (e)['material_name'] == materialName,
+        )
+        .toList();
+    return filtered
+        .map(
+          (m) => ProjectStockLedgerModel.fromMap(
+            Map<String, dynamic>.from(m as Map),
+          ),
+        )
+        .toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
   /// خصم رقم الكمية فقط؛ المطابقة بالمشروع + اسم الخامة (الوحدة ثابتة).
-  Future<bool> deductProjectStock(int projectId, String materialName, String unit, double quantity, String engineerName, DateTime reportDate) async {
+  Future<bool> deductProjectStock(
+    int projectId,
+    String materialName,
+    String unit,
+    double quantity,
+    String engineerName,
+    DateTime reportDate,
+  ) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectStockKey)!) as List;
-    final idx = list.indexWhere((e) => (e as Map)['project_id'] == projectId && e['material_name'] == materialName);
+    final idx = list.indexWhere(
+      (e) =>
+          (e as Map)['project_id'] == projectId &&
+          e['material_name'] == materialName,
+    );
     if (idx < 0) return false;
     final row = Map<String, dynamic>.from(list[idx] as Map);
-    final current = double.tryParse((row['quantity'] as String).replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+    final current =
+        double.tryParse(
+          (row['quantity'] as String).replaceAll(RegExp(r'[^\d.]'), ''),
+        ) ??
+        0;
     final newQty = current - quantity;
     row['quantity'] = newQty.toStringAsFixed(2);
     list[idx] = row;
@@ -811,11 +1298,21 @@ class WebStorageService {
     return true;
   }
 
-  Future<List<LocationMaterialModel>> getLocationMaterials(int locationId) async {
+  Future<List<LocationMaterialModel>> getLocationMaterials(
+    int locationId,
+  ) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_locationMaterialsKey)!) as List).where((e) => (e as Map)['location_id'] == locationId).toList();
-    return list.map((m) => LocationMaterialModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()
+    final list = (jsonDecode(prefs.getString(_locationMaterialsKey)!) as List)
+        .where((e) => (e as Map)['location_id'] == locationId)
+        .toList();
+    return list
+        .map(
+          (m) => LocationMaterialModel.fromMap(
+            Map<String, dynamic>.from(m as Map),
+          ),
+        )
+        .toList()
       ..sort((a, b) => a.materialName.compareTo(b.materialName));
   }
 
@@ -823,8 +1320,19 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_locationMaterialsKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'location_id': m.locationId, 'material_name': m.materialName, 'quantity': m.quantity, 'unit': m.unit});
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
+    list.add({
+      'id': nextId,
+      'location_id': m.locationId,
+      'material_name': m.materialName,
+      'quantity': m.quantity,
+      'unit': m.unit,
+    });
     await prefs.setString(_locationMaterialsKey, jsonEncode(list));
     return nextId;
   }
@@ -835,7 +1343,13 @@ class WebStorageService {
     final list = jsonDecode(prefs.getString(_locationMaterialsKey)!) as List;
     for (var i = 0; i < list.length; i++) {
       if ((list[i] as Map)['id'] == m.id) {
-        list[i] = {'id': m.id, 'location_id': m.locationId, 'material_name': m.materialName, 'quantity': m.quantity, 'unit': m.unit};
+        list[i] = {
+          'id': m.id,
+          'location_id': m.locationId,
+          'material_name': m.materialName,
+          'quantity': m.quantity,
+          'unit': m.unit,
+        };
         break;
       }
     }
@@ -845,7 +1359,9 @@ class WebStorageService {
   Future<void> deleteLocationMaterial(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_locationMaterialsKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_locationMaterialsKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
     await prefs.setString(_locationMaterialsKey, jsonEncode(list));
   }
 
@@ -853,9 +1369,13 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
-    final found = list.where((e) => (e as Map)['location_id'] == locationId).toList();
+    final found = list
+        .where((e) => (e as Map)['location_id'] == locationId)
+        .toList();
     if (found.isEmpty) return null;
-    return LocationWithdrawalModel.fromMap(Map<String, dynamic>.from(found.first as Map));
+    return LocationWithdrawalModel.fromMap(
+      Map<String, dynamic>.from(found.first as Map),
+    );
   }
 
   Future<void> createLocationWithdrawal({
@@ -868,7 +1388,10 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final plocs = jsonDecode(prefs.getString(_projectLocationsKey)!) as List;
-    final locMap = plocs.cast<Map?>().firstWhere((e) => e != null && (e as Map)['id'] == locationId, orElse: () => null);
+    final locMap = plocs.cast<Map?>().firstWhere(
+      (e) => e != null && (e as Map)['id'] == locationId,
+      orElse: () => null,
+    );
     if (locMap == null) throw Exception('الموقع غير موجود');
     final projectId = (locMap as Map)['project_id'] as int;
     final materials = await getLocationMaterials(locationId);
@@ -876,13 +1399,22 @@ class WebStorageService {
     final nowStr = now.toIso8601String();
     final stockList = jsonDecode(prefs.getString(_projectStockKey)!) as List;
     for (final m in materials) {
-      final qty = double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+      final qty =
+          double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
       if (qty <= 0) continue;
       final unit = m.unit.isEmpty ? 'وحدة' : m.unit;
-      final idx = stockList.indexWhere((e) => (e as Map)['project_id'] == projectId && e['material_name'] == m.materialName);
+      final idx = stockList.indexWhere(
+        (e) =>
+            (e as Map)['project_id'] == projectId &&
+            e['material_name'] == m.materialName,
+      );
       if (idx >= 0) {
         final row = Map<String, dynamic>.from(stockList[idx] as Map);
-        final current = double.tryParse((row['quantity'] as String).replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+        final current =
+            double.tryParse(
+              (row['quantity'] as String).replaceAll(RegExp(r'[^\d.]'), ''),
+            ) ??
+            0;
         row['quantity'] = (current - qty).toStringAsFixed(2);
         stockList[idx] = row;
         await addProjectStockLedgerEntry(
@@ -898,9 +1430,16 @@ class WebStorageService {
       }
     }
     await prefs.setString(_projectStockKey, jsonEncode(stockList));
-    final withdrawals = jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
-    if (withdrawals.any((e) => (e as Map)['location_id'] == locationId)) throw Exception('تم سحب الخامات من هذا المكان مسبقاً');
-    final nextId = withdrawals.isEmpty ? 1 : (withdrawals.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final withdrawals =
+        jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
+    if (withdrawals.any((e) => (e as Map)['location_id'] == locationId))
+      throw Exception('تم سحب الخامات من هذا المكان مسبقاً');
+    final nextId = withdrawals.isEmpty
+        ? 1
+        : (withdrawals
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
     withdrawals.add({
       'id': nextId,
       'location_id': locationId,
@@ -917,18 +1456,26 @@ class WebStorageService {
   Future<void> deleteLocationWithdrawal(int locationId) async {
     await _initData();
     final prefs = await _prefs;
-    final withdrawalList = jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
-    final found = withdrawalList.cast<Map?>().where((e) => e != null && (e as Map)['location_id'] == locationId).toList();
+    final withdrawalList =
+        jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
+    final found = withdrawalList
+        .cast<Map?>()
+        .where((e) => e != null && (e as Map)['location_id'] == locationId)
+        .toList();
     if (found.isEmpty) return;
     final w = Map<String, dynamic>.from(found.first as Map);
     final withdrawal = LocationWithdrawalModel.fromMap(w);
 
     final plocs = jsonDecode(prefs.getString(_projectLocationsKey)!) as List;
-    final locMap = plocs.cast<Map?>().firstWhere((e) => e != null && (e as Map)['id'] == locationId, orElse: () => null);
+    final locMap = plocs.cast<Map?>().firstWhere(
+      (e) => e != null && (e as Map)['id'] == locationId,
+      orElse: () => null,
+    );
     if (locMap == null) throw Exception('الموقع غير موجود');
     final projectId = (locMap as Map)['project_id'] as int;
 
-    final ledgerRaw = jsonDecode(prefs.getString(_projectStockLedgerKey)!) as List;
+    final ledgerRaw =
+        jsonDecode(prefs.getString(_projectStockLedgerKey)!) as List;
     bool ledgerMatches(Map<String, dynamic> row) {
       if (row['project_id'] != projectId) return false;
       if (row['type'] != 'withdraw_location') return false;
@@ -937,7 +1484,8 @@ class WebStorageService {
       if (uidInt != withdrawal.userId) return false;
       final entryTime = DateTime.tryParse(row['created_at'].toString());
       if (entryTime == null) return false;
-      return entryTime.difference(withdrawal.createdAt).inMilliseconds.abs() <= 2000;
+      return entryTime.difference(withdrawal.createdAt).inMilliseconds.abs() <=
+          2000;
     }
 
     final toRemoveIds = <int>{};
@@ -951,15 +1499,33 @@ class WebStorageService {
       if (delta >= 0) continue;
       final addBack = -delta;
       final materialName = row['material_name'] as String;
-      final idx = stockList.indexWhere((s) => (s as Map)['project_id'] == projectId && s['material_name'] == materialName);
+      final idx = stockList.indexWhere(
+        (s) =>
+            (s as Map)['project_id'] == projectId &&
+            s['material_name'] == materialName,
+      );
       if (idx >= 0) {
         final stockRow = Map<String, dynamic>.from(stockList[idx] as Map);
-        final current = double.tryParse((stockRow['quantity'] as String).replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+        final current =
+            double.tryParse(
+              (stockRow['quantity'] as String).replaceAll(
+                RegExp(r'[^\d.]'),
+                '',
+              ),
+            ) ??
+            0;
         stockRow['quantity'] = (current + addBack).toStringAsFixed(2);
         stockList[idx] = stockRow;
       } else {
-        final unit = (row['unit'] as String?)?.isNotEmpty == true ? row['unit'] as String : 'وحدة';
-        final nextStockId = stockList.isEmpty ? 1 : (stockList.map((x) => (x as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+        final unit = (row['unit'] as String?)?.isNotEmpty == true
+            ? row['unit'] as String
+            : 'وحدة';
+        final nextStockId = stockList.isEmpty
+            ? 1
+            : (stockList
+                      .map((x) => (x as Map)['id'] as int)
+                      .reduce((a, b) => a > b ? a : b) +
+                  1);
         stockList.add({
           'id': nextStockId,
           'project_id': projectId,
@@ -970,8 +1536,12 @@ class WebStorageService {
       }
     }
 
-    final newLedger = ledgerRaw.where((e) => !toRemoveIds.contains((e as Map)['id'] as int)).toList();
-    final newWithdrawals = withdrawalList.where((e) => (e as Map)['location_id'] != locationId).toList();
+    final newLedger = ledgerRaw
+        .where((e) => !toRemoveIds.contains((e as Map)['id'] as int))
+        .toList();
+    final newWithdrawals = withdrawalList
+        .where((e) => (e as Map)['location_id'] != locationId)
+        .toList();
 
     await prefs.setString(_projectStockKey, jsonEncode(stockList));
     await prefs.setString(_projectStockLedgerKey, jsonEncode(newLedger));
@@ -981,16 +1551,32 @@ class WebStorageService {
   Future<List<UnitModel>> getUnits(int buildingId) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_unitsKey)!) as List).where((e) => (e as Map)['building_id'] == buildingId).toList();
-    return list.map((m) => UnitModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()..sort((a, b) => a.name.compareTo(b.name));
+    final list = (jsonDecode(prefs.getString(_unitsKey)!) as List)
+        .where((e) => (e as Map)['building_id'] == buildingId)
+        .toList();
+    return list
+        .map((m) => UnitModel.fromMap(Map<String, dynamic>.from(m as Map)))
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
   }
 
   Future<int> addUnit(UnitModel u) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_unitsKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'building_id': u.buildingId, 'name': u.name, 'model': u.model, 'image_path': u.imagePath});
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
+    list.add({
+      'id': nextId,
+      'building_id': u.buildingId,
+      'name': u.name,
+      'model': u.model,
+      'image_path': u.imagePath,
+    });
     await prefs.setString(_unitsKey, jsonEncode(list));
     return nextId;
   }
@@ -1001,7 +1587,13 @@ class WebStorageService {
     final list = jsonDecode(prefs.getString(_unitsKey)!) as List;
     for (var i = 0; i < list.length; i++) {
       if ((list[i] as Map)['id'] == u.id) {
-        list[i] = {'id': u.id, 'building_id': u.buildingId, 'name': u.name, 'model': u.model, 'image_path': u.imagePath};
+        list[i] = {
+          'id': u.id,
+          'building_id': u.buildingId,
+          'name': u.name,
+          'model': u.model,
+          'image_path': u.imagePath,
+        };
         break;
       }
     }
@@ -1011,22 +1603,40 @@ class WebStorageService {
   Future<void> deleteUnit(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_unitsKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_unitsKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
     await prefs.setString(_unitsKey, jsonEncode(list));
   }
 
-  Future<List<BuildingMaterialModel>> getBuildingMaterials(int buildingId) async {
+  Future<List<BuildingMaterialModel>> getBuildingMaterials(
+    int buildingId,
+  ) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_buildingMaterialsKey)!) as List).where((e) => (e as Map)['building_id'] == buildingId).toList();
-    return list.map((m) => BuildingMaterialModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()..sort((a, b) => a.materialName.compareTo(b.materialName));
+    final list = (jsonDecode(prefs.getString(_buildingMaterialsKey)!) as List)
+        .where((e) => (e as Map)['building_id'] == buildingId)
+        .toList();
+    return list
+        .map(
+          (m) => BuildingMaterialModel.fromMap(
+            Map<String, dynamic>.from(m as Map),
+          ),
+        )
+        .toList()
+      ..sort((a, b) => a.materialName.compareTo(b.materialName));
   }
 
   Future<int> addBuildingMaterial(BuildingMaterialModel m) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_buildingMaterialsKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
     list.add({...m.toMap(), 'id': nextId});
     await prefs.setString(_buildingMaterialsKey, jsonEncode(list));
     return nextId;
@@ -1048,23 +1658,41 @@ class WebStorageService {
   Future<void> deleteBuildingMaterial(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_buildingMaterialsKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_buildingMaterialsKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
     await prefs.setString(_buildingMaterialsKey, jsonEncode(list));
   }
 
   Future<List<BuildingCutlistModel>> getBuildingCutlists(int buildingId) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_buildingCutlistKey)!) as List).where((e) => (e as Map)['building_id'] == buildingId).toList();
-    return list.map((m) => BuildingCutlistModel.fromMap(Map<String, dynamic>.from(m as Map))).toList();
+    final list = (jsonDecode(prefs.getString(_buildingCutlistKey)!) as List)
+        .where((e) => (e as Map)['building_id'] == buildingId)
+        .toList();
+    return list
+        .map(
+          (m) =>
+              BuildingCutlistModel.fromMap(Map<String, dynamic>.from(m as Map)),
+        )
+        .toList();
   }
 
   Future<int> addBuildingCutlist(BuildingCutlistModel c) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_buildingCutlistKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'building_id': c.buildingId, 'image_path': c.imagePath});
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
+    list.add({
+      'id': nextId,
+      'building_id': c.buildingId,
+      'image_path': c.imagePath,
+    });
     await prefs.setString(_buildingCutlistKey, jsonEncode(list));
     return nextId;
   }
@@ -1072,7 +1700,9 @@ class WebStorageService {
   Future<void> deleteBuildingCutlist(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_buildingCutlistKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_buildingCutlistKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
     await prefs.setString(_buildingCutlistKey, jsonEncode(list));
   }
 
@@ -1080,14 +1710,24 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_supervisorsKey)!) as List;
-    return list.map((m) => SupervisorModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()..sort((a, b) => a.name.compareTo(b.name));
+    return list
+        .map(
+          (m) => SupervisorModel.fromMap(Map<String, dynamic>.from(m as Map)),
+        )
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
   }
 
   Future<int> addSupervisor(String name) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_supervisorsKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
     list.add({'id': nextId, 'name': name});
     await prefs.setString(_supervisorsKey, jsonEncode(list));
     return nextId;
@@ -1109,7 +1749,9 @@ class WebStorageService {
   Future<void> deleteSupervisor(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_supervisorsKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_supervisorsKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
     await prefs.setString(_supervisorsKey, jsonEncode(list));
   }
 
@@ -1117,14 +1759,24 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_contractorsKey)!) as List;
-    return list.map((m) => ContractorModel.fromMap(Map<String, dynamic>.from(m as Map))).toList()..sort((a, b) => a.name.compareTo(b.name));
+    return list
+        .map(
+          (m) => ContractorModel.fromMap(Map<String, dynamic>.from(m as Map)),
+        )
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
   }
 
   Future<int> addContractor(String name) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_contractorsKey)!) as List;
-    final nextId = list.isEmpty ? 1 : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final nextId = list.isEmpty
+        ? 1
+        : (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
     list.add({'id': nextId, 'name': name});
     await prefs.setString(_contractorsKey, jsonEncode(list));
     return nextId;
@@ -1146,7 +1798,9 @@ class WebStorageService {
   Future<void> deleteContractor(int id) async {
     await _initData();
     final prefs = await _prefs;
-    final list = (jsonDecode(prefs.getString(_contractorsKey)!) as List).where((e) => (e as Map)['id'] != id).toList();
+    final list = (jsonDecode(prefs.getString(_contractorsKey)!) as List)
+        .where((e) => (e as Map)['id'] != id)
+        .toList();
     await prefs.setString(_contractorsKey, jsonEncode(list));
   }
 
@@ -1155,7 +1809,11 @@ class WebStorageService {
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_materialsKey)!) as List;
     if (list.isNotEmpty && list[0] is Map) {
-      final nextId = (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b)) + 1;
+      final nextId =
+          (list
+              .map((e) => (e as Map)['id'] as int)
+              .reduce((a, b) => a > b ? a : b)) +
+          1;
       list.add({'id': nextId, 'name': name});
     } else {
       list.add({'id': list.length + 1, 'name': name});
@@ -1194,11 +1852,25 @@ class WebStorageService {
       WorkPhaseModel(id: 3, name: 'تركيب WPC'),
       WorkPhaseModel(id: 4, name: 'معالجة'),
       WorkPhaseModel(id: 5, name: 'دهان'),
+      WorkPhaseModel(id: 6, name: 'تشوين'),
+      WorkPhaseModel(id: 7, name: 'تركيب ارضيات'),
+      WorkPhaseModel(id: 8, name: 'تركيب Q.round + وزر'),
     ];
   }
 
   Future<int> addDetailedReport(DetailedReportModel report) async {
-    throw UnimplementedError('التقرير المفصل يتطلب الاتصال بالخادم. يرجى ضبط config.json.');
+    throw UnimplementedError(
+      'التقرير المفصل يتطلب الاتصال بالخادم. يرجى ضبط config.json.',
+    );
+  }
+
+  Future<void> updateDetailedReport(
+    int reportId,
+    DetailedReportModel report,
+  ) async {
+    throw UnimplementedError(
+      'تعديل التقرير المفصل يتطلب الاتصال بالخادم. يرجى ضبط config.json.',
+    );
   }
 
   Future<void> patchDetailedReportExpenses({
@@ -1206,7 +1878,9 @@ class WebStorageService {
     required int userId,
     required List<ExpenseItem> expenses,
   }) async {
-    throw UnimplementedError('تعديل الماليات يتطلب الاتصال بالخادم. يرجى ضبط config.json.');
+    throw UnimplementedError(
+      'تعديل الماليات يتطلب الاتصال بالخادم. يرجى ضبط config.json.',
+    );
   }
 
   Future<List<DetailedReportModel>> getDetailedReports({
@@ -1222,7 +1896,8 @@ class WebStorageService {
     throw UnimplementedError('حذف التقرير المفصل يتطلب الاتصال بالخادم.');
   }
 
-  Future<List<LocationWithdrawalForPeriodModel>> getLocationWithdrawalsForPeriod({
+  Future<List<LocationWithdrawalForPeriodModel>>
+  getLocationWithdrawalsForPeriod({
     required DateTime dateFrom,
     required DateTime dateTo,
     int? projectId,

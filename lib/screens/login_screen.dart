@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../services/auth_persistence.dart';
+import '../services/last_project_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
@@ -44,9 +45,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (locked && !isAllowedAdmin) {
         if (!mounted) return;
         setState(() => _isLoading = false);
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const _SystemLockedScreen()),
-        );
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const _SystemLockedScreen()));
         return;
       }
       final user = await _db.validateLogin(
@@ -64,11 +65,26 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       await saveCurrentUser(user);
+      try {
+        final records = await _db.getAttendanceRecordsByUser(user.id);
+        if (records.isNotEmpty) {
+          records.sort((a, b) => b.dateTime.compareTo(a.dateTime));
+          final latestWithProject = records.firstWhere(
+            (r) => (r.projectName ?? '').trim().isNotEmpty,
+            orElse: () => records.first,
+          );
+          final projectName = (latestWithProject.projectName ?? '').trim();
+          if (projectName.isNotEmpty) {
+            await saveLastLoginProject(
+              projectId: latestWithProject.projectId,
+              projectName: projectName,
+            );
+          }
+        }
+      } catch (_) {}
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => HomeScreen(currentUser: user),
-        ),
+        MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)),
       );
     } catch (e) {
       if (mounted) {
@@ -88,10 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF1B5E20),
-              Color(0xFF0D3B0D),
-            ],
+            colors: [Color(0xFF1B5E20), Color(0xFF0D3B0D)],
           ),
         ),
         child: SafeArea(
@@ -176,8 +189,14 @@ class _LoginScreenState extends State<LoginScreen> {
                               prefixIcon: const Icon(Icons.lock_outline),
                               border: const OutlineInputBorder(),
                               suffixIcon: IconButton(
-                                icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
-                                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                ),
+                                onPressed: () => setState(
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
                               ),
                             ),
                             validator: (v) {
@@ -197,12 +216,17 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.error_outline, color: Colors.red.shade700),
+                                  Icon(
+                                    Icons.error_outline,
+                                    color: Colors.red.shade700,
+                                  ),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       _errorMessage!,
-                                      style: TextStyle(color: Colors.red.shade700),
+                                      style: TextStyle(
+                                        color: Colors.red.shade700,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -215,19 +239,21 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: FilledButton(
                               onPressed: _isLoading ? null : _login,
                               style: FilledButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
                                 backgroundColor: const Color(0xFF1B5E20),
                               ),
                               child: _isLoading
-                                ? const SizedBox(
-                                    height: 24,
-                                    width: 24,
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Text('دخول'),
+                                  ? const SizedBox(
+                                      height: 24,
+                                      width: 24,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('دخول'),
                             ),
                           ),
                         ],
@@ -257,15 +283,16 @@ class _SystemLockedScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.build_circle_outlined, size: 90, color: Colors.orange.shade700),
+              Icon(
+                Icons.build_circle_outlined,
+                size: 90,
+                color: Colors.orange.shade700,
+              ),
               const SizedBox(height: 16),
               const Text(
                 'System Locked for maintainance please try again later',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 24),
               FilledButton.icon(

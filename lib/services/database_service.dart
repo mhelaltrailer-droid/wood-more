@@ -21,6 +21,7 @@ import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../data/default_materials.dart';
+import 'icon_visibility_service.dart';
 
 /// خدمة قاعدة البيانات المحلية
 class DatabaseService {
@@ -107,17 +108,25 @@ class DatabaseService {
       await _createDailyReportsAndMaterials(db);
     }
     if (oldVersion < 5) {
-      await db.execute('ALTER TABLE daily_reports ADD COLUMN executed_today TEXT NOT NULL DEFAULT \'\'');
+      await db.execute(
+        'ALTER TABLE daily_reports ADD COLUMN executed_today TEXT NOT NULL DEFAULT \'\'',
+      );
       await db.delete('materials');
       await _seedMaterials(db);
     }
     if (oldVersion < 6) {
       await _createAdminTables(db);
-      final existing = Sqflite.firstIntValue(await db.rawQuery(
-        "SELECT COUNT(*) FROM users WHERE email = 'mouhammedhelal@gmail.com'",
-      ));
+      final existing = Sqflite.firstIntValue(
+        await db.rawQuery(
+          "SELECT COUNT(*) FROM users WHERE email = 'mouhammedhelal@gmail.com'",
+        ),
+      );
       if (existing == 0) {
-        await db.insert('users', {'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin'});
+        await db.insert('users', {
+          'name': 'مسؤول التطبيق',
+          'email': 'mouhammedhelal@gmail.com',
+          'role': 'app_admin',
+        });
       }
     }
     if (oldVersion < 7) {
@@ -125,19 +134,29 @@ class DatabaseService {
     }
     if (oldVersion < 8) {
       try {
-        await db.execute('ALTER TABLE building_materials ADD COLUMN length TEXT DEFAULT \'\'');
+        await db.execute(
+          'ALTER TABLE building_materials ADD COLUMN length TEXT DEFAULT \'\'',
+        );
       } catch (_) {}
       try {
-        await db.execute('ALTER TABLE building_materials ADD COLUMN pieces_count TEXT DEFAULT \'\'');
+        await db.execute(
+          'ALTER TABLE building_materials ADD COLUMN pieces_count TEXT DEFAULT \'\'',
+        );
       } catch (_) {}
       try {
-        await db.execute('ALTER TABLE building_materials ADD COLUMN total_length TEXT DEFAULT \'\'');
+        await db.execute(
+          'ALTER TABLE building_materials ADD COLUMN total_length TEXT DEFAULT \'\'',
+        );
       } catch (_) {}
       try {
-        await db.execute('ALTER TABLE building_materials ADD COLUMN total_area TEXT DEFAULT \'\'');
+        await db.execute(
+          'ALTER TABLE building_materials ADD COLUMN total_area TEXT DEFAULT \'\'',
+        );
       } catch (_) {}
       try {
-        await db.execute('ALTER TABLE building_materials ADD COLUMN image_path TEXT');
+        await db.execute(
+          'ALTER TABLE building_materials ADD COLUMN image_path TEXT',
+        );
       } catch (_) {}
     }
     if (oldVersion < 9) {
@@ -145,19 +164,28 @@ class DatabaseService {
     }
     if (oldVersion < 10) {
       try {
-        await db.execute("ALTER TABLE users ADD COLUMN password TEXT DEFAULT '0000'");
-        await db.rawUpdate("UPDATE users SET password = ? WHERE password IS NULL", ['0000']);
+        await db.execute(
+          "ALTER TABLE users ADD COLUMN password TEXT DEFAULT '0000'",
+        );
+        await db.rawUpdate(
+          "UPDATE users SET password = ? WHERE password IS NULL",
+          ['0000'],
+        );
       } catch (_) {}
     }
     if (oldVersion < 12) {
       try {
-        await db.execute('ALTER TABLE engineer_custody ADD COLUMN document_path TEXT');
+        await db.execute(
+          'ALTER TABLE engineer_custody ADD COLUMN document_path TEXT',
+        );
       } catch (_) {}
     }
     if (oldVersion < 13) {
-      final existing = Sqflite.firstIntValue(await db.rawQuery(
-        "SELECT COUNT(*) FROM users WHERE LOWER(email) = 'h@h.com'",
-      ));
+      final existing = Sqflite.firstIntValue(
+        await db.rawQuery(
+          "SELECT COUNT(*) FROM users WHERE LOWER(email) = 'h@h.com'",
+        ),
+      );
       if (existing == 0) {
         await db.insert('users', {
           'name': 'Helal',
@@ -168,9 +196,11 @@ class DatabaseService {
       }
     }
     if (oldVersion < 14) {
-      final existing = Sqflite.firstIntValue(await db.rawQuery(
-        "SELECT COUNT(*) FROM users WHERE LOWER(email) = 'account@gmail.com'",
-      ));
+      final existing = Sqflite.firstIntValue(
+        await db.rawQuery(
+          "SELECT COUNT(*) FROM users WHERE LOWER(email) = 'account@gmail.com'",
+        ),
+      );
       if (existing == 0) {
         await db.insert('users', {
           'name': 'account manager',
@@ -182,27 +212,37 @@ class DatabaseService {
     }
     if (oldVersion < 15) {
       try {
-        await db.execute("ALTER TABLE engineer_custody ADD COLUMN movement_type TEXT DEFAULT 'custody'");
+        await db.execute(
+          "ALTER TABLE engineer_custody ADD COLUMN movement_type TEXT DEFAULT 'custody'",
+        );
       } catch (_) {}
     }
     if (oldVersion < 16) {
       try {
-        await db.execute('ALTER TABLE daily_reports ADD COLUMN contractors_json TEXT');
+        await db.execute(
+          'ALTER TABLE daily_reports ADD COLUMN contractors_json TEXT',
+        );
       } catch (_) {}
     }
     if (oldVersion < 17) {
       try {
-        await db.execute('ALTER TABLE detailed_reports ADD COLUMN project_name TEXT');
+        await db.execute(
+          'ALTER TABLE detailed_reports ADD COLUMN project_name TEXT',
+        );
       } catch (_) {}
     }
     if (oldVersion < 18) {
       try {
-        await db.execute('ALTER TABLE detailed_reports ADD COLUMN expenses_json TEXT');
+        await db.execute(
+          'ALTER TABLE detailed_reports ADD COLUMN expenses_json TEXT',
+        );
       } catch (_) {}
     }
     if (oldVersion < 21) {
       try {
-        await db.execute('ALTER TABLE detailed_reports ADD COLUMN attachments_json TEXT');
+        await db.execute(
+          'ALTER TABLE detailed_reports ADD COLUMN attachments_json TEXT',
+        );
       } catch (_) {}
     }
     if (oldVersion < 22) {
@@ -229,7 +269,9 @@ class DatabaseService {
           SELECT id, detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, phase_id, workers_count FROM detailed_report_lines
         ''');
         await db.execute('DROP TABLE detailed_report_lines');
-        await db.execute('ALTER TABLE detailed_report_lines_new RENAME TO detailed_report_lines');
+        await db.execute(
+          'ALTER TABLE detailed_report_lines_new RENAME TO detailed_report_lines',
+        );
       } catch (_) {}
     }
     if (oldVersion < 19) {
@@ -301,11 +343,10 @@ class DatabaseService {
         value TEXT NOT NULL
       )
     ''');
-    await db.insert(
-      'app_settings',
-      {'key': 'system_locked', 'value': '0'},
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
+    await db.insert('app_settings', {
+      'key': 'system_locked',
+      'value': '0',
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
   Future<void> _createStoreAndUnitsTables(Database db) async {
@@ -394,7 +435,9 @@ class DatabaseService {
         created_at TEXT NOT NULL
       )
     ''');
-    final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM materials'));
+    final count = Sqflite.firstIntValue(
+      await db.rawQuery('SELECT COUNT(*) FROM materials'),
+    );
     if (count == 0) await _seedMaterials(db);
   }
 
@@ -406,21 +449,83 @@ class DatabaseService {
 
   Future<void> _seedData(Database db) async {
     // المستخدمون
-    await db.insert('users', {'name': 'Hany', 'email': 'hany.samir1708@gmail.com', 'role': 'site_engineer'});
-    await db.insert('users', {'name': 'Emam', 'email': 'amirelazab46@gmail.com', 'role': 'site_engineer'});
-    await db.insert('users', {'name': 'Mansur', 'email': 'saedm0566@gmail.com', 'role': 'site_engineer'});
-    await db.insert('users', {'name': 'Mahmud', 'email': 'mahmoudsiko630@gmail.com', 'role': 'site_engineer'});
-    await db.insert('users', {'name': 'Abdhusseny', 'email': 'abdallaelhosseny1011@gmail.com', 'role': 'site_engineer'});
-    await db.insert('users', {'name': 'Hamza', 'email': 'hamzamhamad704@gmail.com', 'role': 'site_engineer'});
-    await db.insert('users', {'name': 'Gohary', 'email': 'mohamedelgohary371@gmail.com', 'role': 'site_engineer'});
-    await db.insert('users', {'name': 'Amr', 'email': 'amrelshabrawy55@gmail.com', 'role': 'site_engineer'});
-    await db.insert('users', {'name': 'Hassan', 'email': 'mouhammed.helal@gmail.com', 'role': 'site_engineer'});
-    await db.insert('users', {'name': 'Helal', 'email': 'mouhamedhelal.cor@gmail.com', 'role': 'site_engineer_manager'});
-    await db.insert('users', {'name': 'Shams', 'email': 'islam.shams2050@gmail.com', 'role': 'site_engineer_manager'});
-    await db.insert('users', {'name': 'Abdrhman', 'email': 'AbdelrhmanEllaithy828@gmail.com', 'role': 'site_engineer_manager'});
-    await db.insert('users', {'name': 'مسؤول التطبيق', 'email': 'mouhammedhelal@gmail.com', 'role': 'app_admin'});
-    await db.insert('users', {'name': 'Helal', 'email': 'h@h.com', 'role': 'app_admin', 'password': '123'});
-    await db.insert('users', {'name': 'account manager', 'email': 'Account@gmail.com', 'role': 'accountant', 'password': '0000'});
+    await db.insert('users', {
+      'name': 'Hany',
+      'email': 'hany.samir1708@gmail.com',
+      'role': 'site_engineer',
+    });
+    await db.insert('users', {
+      'name': 'Emam',
+      'email': 'amirelazab46@gmail.com',
+      'role': 'site_engineer',
+    });
+    await db.insert('users', {
+      'name': 'Mansur',
+      'email': 'saedm0566@gmail.com',
+      'role': 'site_engineer',
+    });
+    await db.insert('users', {
+      'name': 'Mahmud',
+      'email': 'mahmoudsiko630@gmail.com',
+      'role': 'site_engineer',
+    });
+    await db.insert('users', {
+      'name': 'Abdhusseny',
+      'email': 'abdallaelhosseny1011@gmail.com',
+      'role': 'site_engineer',
+    });
+    await db.insert('users', {
+      'name': 'Hamza',
+      'email': 'hamzamhamad704@gmail.com',
+      'role': 'site_engineer',
+    });
+    await db.insert('users', {
+      'name': 'Gohary',
+      'email': 'mohamedelgohary371@gmail.com',
+      'role': 'site_engineer',
+    });
+    await db.insert('users', {
+      'name': 'Amr',
+      'email': 'amrelshabrawy55@gmail.com',
+      'role': 'site_engineer',
+    });
+    await db.insert('users', {
+      'name': 'Hassan',
+      'email': 'mouhammed.helal@gmail.com',
+      'role': 'site_engineer',
+    });
+    await db.insert('users', {
+      'name': 'Helal',
+      'email': 'mouhamedhelal.cor@gmail.com',
+      'role': 'site_engineer_manager',
+    });
+    await db.insert('users', {
+      'name': 'Shams',
+      'email': 'islam.shams2050@gmail.com',
+      'role': 'site_engineer_manager',
+    });
+    await db.insert('users', {
+      'name': 'Abdrhman',
+      'email': 'AbdelrhmanEllaithy828@gmail.com',
+      'role': 'site_engineer_manager',
+    });
+    await db.insert('users', {
+      'name': 'مسؤول التطبيق',
+      'email': 'mouhammedhelal@gmail.com',
+      'role': 'app_admin',
+    });
+    await db.insert('users', {
+      'name': 'Helal',
+      'email': 'h@h.com',
+      'role': 'app_admin',
+      'password': '123',
+    });
+    await db.insert('users', {
+      'name': 'account manager',
+      'email': 'Account@gmail.com',
+      'role': 'accountant',
+      'password': '0000',
+    });
 
     await _seedProjects(db);
   }
@@ -525,25 +630,51 @@ class DatabaseService {
   }
 
   Future<void> _seedWorkPhases(Database db) async {
-    final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM work_phases')) ?? 0;
+    final count =
+        Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM work_phases'),
+        ) ??
+        0;
     if (count > 0) return;
     await db.insert('work_phases', {'name': 'تركيب اكسسوارات'});
     await db.insert('work_phases', {'name': 'تقطيع WPC'});
     await db.insert('work_phases', {'name': 'تركيب WPC'});
     await db.insert('work_phases', {'name': 'معالجة'});
     await db.insert('work_phases', {'name': 'دهان'});
+    await db.insert('work_phases', {'name': 'تشوين'});
+    await db.insert('work_phases', {'name': 'تركيب ارضيات'});
+    await db.insert('work_phases', {'name': 'تركيب Q.round + وزر'});
   }
 
   Future<void> _seedProjects(Database db) async {
     final projects = [
-      'UTC_Z5_CRC_F', 'Mivida 31_CRC_F', 'UTC_Z5_EMAAR Building C_F', 'Zed east_ORASCOM_F',
-      'Belle Vie_El-Hazek_F', 'CAIRO GATE elain (02)_CRC_F', 'Cairo gate_ACC_W', 'Z1_EMAAR_F',
-      'Community Center_CRC_W', 'Terrace Zayed_CRC_W', 'Silver Sands_REDCON_D', 'CAR SHADE_W&M_W',
-      'OLD CITY_ORASCOM_W', 'Cairo gate-Eden_ATRUM_F', 'AUC Campus Expansion_Orascom_W&F',
-      'UTC - 2 Villa- Link International_W', 'UTC - 2 Villa- Link International_F', 'City Gate_CCC_W',
-      'cairo gate - locanda_INOVOO_F', 'Village West _ club_FIT-OUT_W', 'Village West _Villa_W',
-      'Mivida gardens_Atrium_F', 'Village West_CRC_ F', 'Up Town Cairo _Z5 _EMAAR_W', 'Belle Vie _ EMAAR_W',
-      'Village West _ CRC_ W', 'Wood&More(head office)',
+      'UTC_Z5_CRC_F',
+      'Mivida 31_CRC_F',
+      'UTC_Z5_EMAAR Building C_F',
+      'Zed east_ORASCOM_F',
+      'Belle Vie_El-Hazek_F',
+      'CAIRO GATE elain (02)_CRC_F',
+      'Cairo gate_ACC_W',
+      'Z1_EMAAR_F',
+      'Community Center_CRC_W',
+      'Terrace Zayed_CRC_W',
+      'Silver Sands_REDCON_D',
+      'CAR SHADE_W&M_W',
+      'OLD CITY_ORASCOM_W',
+      'Cairo gate-Eden_ATRUM_F',
+      'AUC Campus Expansion_Orascom_W&F',
+      'UTC - 2 Villa- Link International_W',
+      'UTC - 2 Villa- Link International_F',
+      'City Gate_CCC_W',
+      'cairo gate - locanda_INOVOO_F',
+      'Village West _ club_FIT-OUT_W',
+      'Village West _Villa_W',
+      'Mivida gardens_Atrium_F',
+      'Village West_CRC_ F',
+      'Up Town Cairo _Z5 _EMAAR_W',
+      'Belle Vie _ EMAAR_W',
+      'Village West _ CRC_ W',
+      'Wood&More(head office)',
     ];
     for (final name in projects) {
       await db.insert('projects', {'name': name});
@@ -607,11 +738,50 @@ class DatabaseService {
 
   Future<void> setSystemLocked(bool locked) async {
     final db = await database;
-    await db.insert(
+    await db.insert('app_settings', {
+      'key': 'system_locked',
+      'value': locked ? '1' : '0',
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<Map<String, Map<String, bool>>> getHomeIconsVisibilityConfig() async {
+    final db = await database;
+    final rows = await db.query(
       'app_settings',
-      {'key': 'system_locked', 'value': locked ? '1' : '0'},
-      conflictAlgorithm: ConflictAlgorithm.replace,
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: ['home_icons_visibility'],
+      limit: 1,
     );
+    if (rows.isEmpty) return IconVisibilityService.normalizeAllConfig(null);
+    final raw = rows.first['value']?.toString();
+    if (raw == null || raw.trim().isEmpty)
+      return IconVisibilityService.normalizeAllConfig(null);
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return IconVisibilityService.normalizeAllConfig(decoded);
+      }
+      if (decoded is Map) {
+        return IconVisibilityService.normalizeAllConfig(
+          Map<String, dynamic>.from(decoded),
+        );
+      }
+    } catch (_) {}
+    return IconVisibilityService.normalizeAllConfig(null);
+  }
+
+  Future<void> setHomeIconsVisibilityForRole(
+    String role,
+    Map<String, bool> roleConfig,
+  ) async {
+    final db = await database;
+    final current = await getHomeIconsVisibilityConfig();
+    current[role] = Map<String, bool>.from(roleConfig);
+    await db.insert('app_settings', {
+      'key': 'home_icons_visibility',
+      'value': jsonEncode(current),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   /// الحصول على جميع المشاريع (بدون تكرار الاسم)
@@ -629,7 +799,9 @@ class DatabaseService {
     return maps.map((m) => ProjectModel.fromMap(m)).toList();
   }
 
-  static List<ProjectModel> _deduplicateProjectsByName(List<ProjectModel> list) {
+  static List<ProjectModel> _deduplicateProjectsByName(
+    List<ProjectModel> list,
+  ) {
     final seen = <String>{};
     return list.where((p) => seen.add(p.name)).toList();
   }
@@ -687,13 +859,19 @@ class DatabaseService {
       'supervisor_name': report.supervisorName,
       'contractor_name': report.contractorName,
       'workers_count': report.workersCount,
-      'contractors_json': report.contractors.isEmpty ? null : jsonEncode(report.contractors.map((c) => c.toJson()).toList()),
+      'contractors_json': report.contractors.isEmpty
+          ? null
+          : jsonEncode(report.contractors.map((c) => c.toJson()).toList()),
       'tomorrow_plan': report.tomorrowPlan,
       'document_path': report.documentPath,
       'images_json': jsonEncode(report.imagePaths),
       'notes': report.notes,
-      'materials_json': jsonEncode(report.materials.map((m) => m.toJson()).toList()),
-      'expenses_json': jsonEncode(report.expenses.map((e) => e.toJson()).toList()),
+      'materials_json': jsonEncode(
+        report.materials.map((m) => m.toJson()).toList(),
+      ),
+      'expenses_json': jsonEncode(
+        report.expenses.map((e) => e.toJson()).toList(),
+      ),
       'created_at': DateTime.now().toIso8601String(),
     });
     // خصم إجمالي بنود الماليات من رصيد المهندس
@@ -709,7 +887,8 @@ class DatabaseService {
     if (report.projectId != null) {
       for (final m in report.materials) {
         if (m.materialName.isEmpty || m.quantity.isEmpty) continue;
-        final qty = double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+        final qty =
+            double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
         if (qty <= 0) continue;
         final unit = m.unit.isEmpty ? 'متر' : m.unit;
         await deductProjectStock(
@@ -734,21 +913,29 @@ class DatabaseService {
   /// رصيد مهندس الموقع
   Future<double> getEngineerBalance(int userId) async {
     final db = await database;
-    final rows = await db.query('engineer_balance', where: 'user_id = ?', whereArgs: [userId]);
+    final rows = await db.query(
+      'engineer_balance',
+      where: 'user_id = ?',
+      whereArgs: [userId],
+    );
     if (rows.isEmpty) return 0;
     return (rows.first['balance'] as num?)?.toDouble() ?? 0;
   }
 
   Future<void> setEngineerBalance(int userId, double balance) async {
     final db = await database;
-    await db.insert(
-      'engineer_balance',
-      {'user_id': userId, 'balance': balance},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('engineer_balance', {
+      'user_id': userId,
+      'balance': balance,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  Future<void> addCustody(int userId, double amount, String note, [String? documentPath]) async {
+  Future<void> addCustody(
+    int userId,
+    double amount,
+    String note, [
+    String? documentPath,
+  ]) async {
     final db = await database;
     await db.insert('engineer_custody', {
       'user_id': userId,
@@ -763,7 +950,12 @@ class DatabaseService {
   }
 
   /// تسجيل حركة إضافة رصيد أو سحب رصيد فقط (بدون تغيير الرصيد - يتم من واجهة الماليات)
-  Future<void> addBalanceMovement(int userId, double amount, String note, String movementType) async {
+  Future<void> addBalanceMovement(
+    int userId,
+    double amount,
+    String note,
+    String movementType,
+  ) async {
     final db = await database;
     await db.insert('engineer_custody', {
       'user_id': userId,
@@ -779,20 +971,31 @@ class DatabaseService {
     final db = await database;
     final where = userId != null ? 'user_id = ?' : null;
     final whereArgs = userId != null ? [userId] : null;
-    final rows = await db.query('engineer_custody', where: where, whereArgs: whereArgs, orderBy: 'created_at DESC');
-    return rows.map((r) => {
-      'id': r['id'],
-      'user_id': r['user_id'],
-      'amount': (r['amount'] as num).toDouble(),
-      'created_at': r['created_at'],
-      'note': r['note'],
-      'document_path': r['document_path'],
-      'movement_type': r['movement_type'] as String? ?? 'custody',
-    }).toList();
+    final rows = await db.query(
+      'engineer_custody',
+      where: where,
+      whereArgs: whereArgs,
+      orderBy: 'created_at DESC',
+    );
+    return rows
+        .map(
+          (r) => {
+            'id': r['id'],
+            'user_id': r['user_id'],
+            'amount': (r['amount'] as num).toDouble(),
+            'created_at': r['created_at'],
+            'note': r['note'],
+            'document_path': r['document_path'],
+            'movement_type': r['movement_type'] as String? ?? 'custody',
+          },
+        )
+        .toList();
   }
 
   /// الحصول على سجلات الحضور لمستخدم معين
-  Future<List<AttendanceRecordModel>> getAttendanceRecordsByUser(int userId) async {
+  Future<List<AttendanceRecordModel>> getAttendanceRecordsByUser(
+    int userId,
+  ) async {
     final db = await database;
     final maps = await db.query(
       'attendance_records',
@@ -804,7 +1007,10 @@ class DatabaseService {
   }
 
   /// موعد الحضور والانصراف لمستخدم في تاريخ معين (نفس اليوم فقط)
-  Future<({DateTime? checkIn, DateTime? checkOut})> getAttendanceForUserOnDate(int userId, DateTime date) async {
+  Future<({DateTime? checkIn, DateTime? checkOut})> getAttendanceForUserOnDate(
+    int userId,
+    DateTime date,
+  ) async {
     final list = await getAttendanceRecordsByUser(userId);
     final dayStart = DateTime(date.year, date.month, date.day);
     final dayEnd = DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
@@ -812,8 +1018,10 @@ class DatabaseService {
     DateTime? checkOut;
     for (final r in list) {
       if (r.dateTime.isBefore(dayStart) || r.dateTime.isAfter(dayEnd)) continue;
-      if (r.isCheckIn && (checkIn == null || r.dateTime.isBefore(checkIn))) checkIn = r.dateTime;
-      if (r.isCheckOut && (checkOut == null || r.dateTime.isAfter(checkOut))) checkOut = r.dateTime;
+      if (r.isCheckIn && (checkIn == null || r.dateTime.isBefore(checkIn)))
+        checkIn = r.dateTime;
+      if (r.isCheckOut && (checkOut == null || r.dateTime.isAfter(checkOut)))
+        checkOut = r.dateTime;
     }
     return (checkIn: checkIn, checkOut: checkOut);
   }
@@ -826,8 +1034,20 @@ class DatabaseService {
     int? projectId,
   }) async {
     final db = await database;
-    final fromStr = DateTime(dateFrom.year, dateFrom.month, dateFrom.day).toIso8601String();
-    final toEnd = DateTime(dateTo.year, dateTo.month, dateTo.day, 23, 59, 59, 999).toIso8601String();
+    final fromStr = DateTime(
+      dateFrom.year,
+      dateFrom.month,
+      dateFrom.day,
+    ).toIso8601String();
+    final toEnd = DateTime(
+      dateTo.year,
+      dateTo.month,
+      dateTo.day,
+      23,
+      59,
+      59,
+      999,
+    ).toIso8601String();
     final where = <String>['report_datetime >= ?', 'report_datetime <= ?'];
     final args = <dynamic>[fromStr, toEnd];
     if (userId != null) {
@@ -854,7 +1074,12 @@ class DatabaseService {
     return maps.map((m) => UserModel.fromMap(m)).toList();
   }
 
-  Future<int> addUser(String name, String email, String password, String role) async {
+  Future<int> addUser(
+    String name,
+    String email,
+    String password,
+    String role,
+  ) async {
     final db = await database;
     final pwd = password.trim().isEmpty ? '0000' : password.trim();
     return db.insert('users', {
@@ -865,9 +1090,19 @@ class DatabaseService {
     });
   }
 
-  Future<void> updateUser(int id, String name, String email, String role, [String? password]) async {
+  Future<void> updateUser(
+    int id,
+    String name,
+    String email,
+    String role, [
+    String? password,
+  ]) async {
     final db = await database;
-    final data = <String, dynamic>{'name': name, 'email': email.trim().toLowerCase(), 'role': role};
+    final data = <String, dynamic>{
+      'name': name,
+      'email': email.trim().toLowerCase(),
+      'role': role,
+    };
     if (password != null && password.trim().isNotEmpty) {
       data['password'] = password.trim();
     }
@@ -882,12 +1117,26 @@ class DatabaseService {
   // ——— إدارة المشاريع ———
   Future<int> addProject(String name) async {
     final db = await database;
-    return db.insert('projects', {'name': name});
+    final normalized = name.trim().toLowerCase();
+    final existing = await db.query(
+      'projects',
+      columns: ['id'],
+      where: 'LOWER(TRIM(name)) = ?',
+      whereArgs: [normalized],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return existing.first['id'] as int;
+    return db.insert('projects', {'name': name.trim()});
   }
 
   Future<void> updateProject(int id, String name) async {
     final db = await database;
-    await db.update('projects', {'name': name}, where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'projects',
+      {'name': name},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> deleteProject(int id) async {
@@ -900,7 +1149,12 @@ class DatabaseService {
   // ——— المناطق (زون) ———
   Future<List<ZoneModel>> getZones(int projectId) async {
     final db = await database;
-    final maps = await db.query('zones', where: 'project_id = ?', whereArgs: [projectId], orderBy: 'name');
+    final maps = await db.query(
+      'zones',
+      where: 'project_id = ?',
+      whereArgs: [projectId],
+      orderBy: 'name',
+    );
     return maps.map((m) => ZoneModel.fromMap(m)).toList();
   }
 
@@ -923,11 +1177,22 @@ class DatabaseService {
   // ——— هيكل مواقع المشروع (project_locations) ———
   Future<List<ProjectLocationModel>> getProjectLocations(int projectId) async {
     final db = await database;
-    final maps = await db.query('project_locations', where: 'project_id = ?', whereArgs: [projectId], orderBy: 'display_order, id');
+    final maps = await db.query(
+      'project_locations',
+      where: 'project_id = ?',
+      whereArgs: [projectId],
+      orderBy: 'display_order, id',
+    );
     return maps.map((m) => ProjectLocationModel.fromMap(m)).toList();
   }
 
-  Future<int> addProjectLocation({required int projectId, int? parentId, required String name, required String type, int displayOrder = 0}) async {
+  Future<int> addProjectLocation({
+    required int projectId,
+    int? parentId,
+    required String name,
+    required String type,
+    int displayOrder = 0,
+  }) async {
     final db = await database;
     return db.insert('project_locations', {
       'project_id': projectId,
@@ -938,30 +1203,58 @@ class DatabaseService {
     });
   }
 
-  Future<void> updateProjectLocation(int id, {String? name, int? displayOrder}) async {
+  Future<void> updateProjectLocation(
+    int id, {
+    String? name,
+    int? displayOrder,
+  }) async {
     final db = await database;
     final data = <String, dynamic>{};
     if (name != null) data['name'] = name;
     if (displayOrder != null) data['display_order'] = displayOrder;
     if (data.isEmpty) return;
-    await db.update('project_locations', data, where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'project_locations',
+      data,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> deleteProjectLocation(int id) async {
     final db = await database;
-    final children = await db.query('project_locations', where: 'parent_id = ?', whereArgs: [id]);
+    final children = await db.query(
+      'project_locations',
+      where: 'parent_id = ?',
+      whereArgs: [id],
+    );
     for (final c in children) {
       await deleteProjectLocation(c['id'] as int);
     }
-    await db.delete('location_materials', where: 'location_id = ?', whereArgs: [id]);
-    await db.delete('location_withdrawal', where: 'location_id = ?', whereArgs: [id]);
+    await db.delete(
+      'location_materials',
+      where: 'location_id = ?',
+      whereArgs: [id],
+    );
+    await db.delete(
+      'location_withdrawal',
+      where: 'location_id = ?',
+      whereArgs: [id],
+    );
     await db.delete('project_locations', where: 'id = ?', whereArgs: [id]);
   }
 
   // ——— هيكلة المخازن: خامات لكل موقع فرعي ———
-  Future<List<LocationMaterialModel>> getLocationMaterials(int locationId) async {
+  Future<List<LocationMaterialModel>> getLocationMaterials(
+    int locationId,
+  ) async {
     final db = await database;
-    final maps = await db.query('location_materials', where: 'location_id = ?', whereArgs: [locationId], orderBy: 'material_name');
+    final maps = await db.query(
+      'location_materials',
+      where: 'location_id = ?',
+      whereArgs: [locationId],
+      orderBy: 'material_name',
+    );
     return maps.map((m) => LocationMaterialModel.fromMap(m)).toList();
   }
 
@@ -977,11 +1270,12 @@ class DatabaseService {
 
   Future<void> updateLocationMaterial(LocationMaterialModel m) async {
     final db = await database;
-    await db.update('location_materials', {
-      'material_name': m.materialName,
-      'quantity': m.quantity,
-      'unit': m.unit,
-    }, where: 'id = ?', whereArgs: [m.id]);
+    await db.update(
+      'location_materials',
+      {'material_name': m.materialName, 'quantity': m.quantity, 'unit': m.unit},
+      where: 'id = ?',
+      whereArgs: [m.id],
+    );
   }
 
   Future<void> deleteLocationMaterial(int id) async {
@@ -991,7 +1285,11 @@ class DatabaseService {
 
   Future<LocationWithdrawalModel?> getLocationWithdrawal(int locationId) async {
     final db = await database;
-    final maps = await db.query('location_withdrawal', where: 'location_id = ?', whereArgs: [locationId]);
+    final maps = await db.query(
+      'location_withdrawal',
+      where: 'location_id = ?',
+      whereArgs: [locationId],
+    );
     if (maps.isEmpty) return null;
     return LocationWithdrawalModel.fromMap(maps.first);
   }
@@ -1004,31 +1302,40 @@ class DatabaseService {
     String? deliveryPermitImagesJson,
   }) async {
     final db = await database;
-    final locMaps = await db.query('project_locations', where: 'id = ?', whereArgs: [locationId]);
+    final locMaps = await db.query(
+      'project_locations',
+      where: 'id = ?',
+      whereArgs: [locationId],
+    );
     if (locMaps.isEmpty) throw Exception('الموقع غير موجود');
     final projectId = locMaps.first['project_id'] as int;
     final materials = await getLocationMaterials(locationId);
     final now = DateTime.now();
     final nowStr = now.toIso8601String();
     for (final m in materials) {
-      final qty = double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+      final qty =
+          double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
       if (qty <= 0) continue;
       final unit = m.unit.isEmpty ? 'وحدة' : m.unit;
       final list = await getProjectStock(projectId);
       final row = list.cast<ProjectStockModel?>().firstWhere(
-            (r) => r!.materialName == m.materialName,
-            orElse: () => null,
-          );
+        (r) => r!.materialName == m.materialName,
+        orElse: () => null,
+      );
       if (row != null) {
-        final current = double.tryParse(row.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+        final current =
+            double.tryParse(row.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ??
+            0;
         final newQty = current - qty;
-        await updateProjectStock(ProjectStockModel(
-          id: row.id,
-          projectId: row.projectId,
-          materialName: row.materialName,
-          quantity: newQty.toStringAsFixed(2),
-          unit: row.unit,
-        ));
+        await updateProjectStock(
+          ProjectStockModel(
+            id: row.id,
+            projectId: row.projectId,
+            materialName: row.materialName,
+            quantity: newQty.toStringAsFixed(2),
+            unit: row.unit,
+          ),
+        );
         await addProjectStockLedgerEntry(
           projectId: projectId,
           materialName: m.materialName,
@@ -1057,7 +1364,11 @@ class DatabaseService {
     final withdrawal = await getLocationWithdrawal(locationId);
     if (withdrawal == null) return;
 
-    final locMaps = await db.query('project_locations', where: 'id = ?', whereArgs: [locationId]);
+    final locMaps = await db.query(
+      'project_locations',
+      where: 'id = ?',
+      whereArgs: [locationId],
+    );
     if (locMaps.isEmpty) throw Exception('الموقع غير موجود');
     final projectId = locMaps.first['project_id'] as int;
 
@@ -1073,7 +1384,8 @@ class DatabaseService {
       if (uidInt != withdrawal.userId) return false;
       final entryTime = DateTime.tryParse(row['created_at'].toString());
       if (entryTime == null) return false;
-      return entryTime.difference(withdrawal.createdAt).inMilliseconds.abs() <= 2000;
+      return entryTime.difference(withdrawal.createdAt).inMilliseconds.abs() <=
+          2000;
     }
 
     final ledgers = allLedgers.where(ledgerMatches).toList();
@@ -1085,42 +1397,65 @@ class DatabaseService {
       final materialName = row['material_name'] as String;
       final list = await getProjectStock(projectId);
       final stockRow = list.cast<ProjectStockModel?>().firstWhere(
-            (r) => r!.materialName == materialName,
-            orElse: () => null,
-          );
+        (r) => r!.materialName == materialName,
+        orElse: () => null,
+      );
       if (stockRow != null) {
-        final current = double.tryParse(stockRow.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+        final current =
+            double.tryParse(
+              stockRow.quantity.replaceAll(RegExp(r'[^\d.]'), ''),
+            ) ??
+            0;
         final newQty = current + addBack;
-        await updateProjectStock(ProjectStockModel(
-          id: stockRow.id,
-          projectId: stockRow.projectId,
-          materialName: stockRow.materialName,
-          quantity: newQty.toStringAsFixed(2),
-          unit: stockRow.unit,
-        ));
+        await updateProjectStock(
+          ProjectStockModel(
+            id: stockRow.id,
+            projectId: stockRow.projectId,
+            materialName: stockRow.materialName,
+            quantity: newQty.toStringAsFixed(2),
+            unit: stockRow.unit,
+          ),
+        );
       } else {
-        final unit = (row['unit'] as String?)?.isNotEmpty == true ? row['unit'] as String : 'وحدة';
-        await addProjectStock(ProjectStockModel(
-          id: 0,
-          projectId: projectId,
-          materialName: materialName,
-          quantity: addBack.toStringAsFixed(2),
-          unit: unit,
-        ));
+        final unit = (row['unit'] as String?)?.isNotEmpty == true
+            ? row['unit'] as String
+            : 'وحدة';
+        await addProjectStock(
+          ProjectStockModel(
+            id: 0,
+            projectId: projectId,
+            materialName: materialName,
+            quantity: addBack.toStringAsFixed(2),
+            unit: unit,
+          ),
+        );
       }
     }
 
     for (final row in ledgers) {
-      await db.delete('project_stock_ledger', where: 'id = ?', whereArgs: [row['id']]);
+      await db.delete(
+        'project_stock_ledger',
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
     }
 
-    await db.delete('location_withdrawal', where: 'location_id = ?', whereArgs: [locationId]);
+    await db.delete(
+      'location_withdrawal',
+      where: 'location_id = ?',
+      whereArgs: [locationId],
+    );
   }
 
   // ——— المباني ———
   Future<List<BuildingModel>> getBuildings(int zoneId) async {
     final db = await database;
-    final maps = await db.query('buildings', where: 'zone_id = ?', whereArgs: [zoneId], orderBy: 'name');
+    final maps = await db.query(
+      'buildings',
+      where: 'zone_id = ?',
+      whereArgs: [zoneId],
+      orderBy: 'name',
+    );
     return maps.map((m) => BuildingModel.fromMap(m)).toList();
   }
 
@@ -1137,37 +1472,65 @@ class DatabaseService {
 
   Future<void> updateBuilding(BuildingModel b) async {
     final db = await database;
-    await db.update('buildings', {
-      'name': b.name,
-      'storage_info': b.storageInfo,
-      'model_details': b.modelDetails,
-      'cut_list': b.cutList,
-    }, where: 'id = ?', whereArgs: [b.id]);
+    await db.update(
+      'buildings',
+      {
+        'name': b.name,
+        'storage_info': b.storageInfo,
+        'model_details': b.modelDetails,
+        'cut_list': b.cutList,
+      },
+      where: 'id = ?',
+      whereArgs: [b.id],
+    );
   }
 
   Future<void> deleteBuilding(int id) async {
     final db = await database;
     await db.delete('units', where: 'building_id = ?', whereArgs: [id]);
-    await db.delete('building_materials', where: 'building_id = ?', whereArgs: [id]);
-    await db.delete('building_cutlist_images', where: 'building_id = ?', whereArgs: [id]);
+    await db.delete(
+      'building_materials',
+      where: 'building_id = ?',
+      whereArgs: [id],
+    );
+    await db.delete(
+      'building_cutlist_images',
+      where: 'building_id = ?',
+      whereArgs: [id],
+    );
     await db.delete('buildings', where: 'id = ?', whereArgs: [id]);
   }
 
   // ——— مخزن المشروع (أرصدة الخامات) ———
   Future<List<ProjectStockModel>> getProjectStock(int projectId) async {
     final db = await database;
-    final maps = await db.query('project_stock', where: 'project_id = ?', whereArgs: [projectId], orderBy: 'material_name');
+    final maps = await db.query(
+      'project_stock',
+      where: 'project_id = ?',
+      whereArgs: [projectId],
+      orderBy: 'material_name',
+    );
     return maps.map((m) => ProjectStockModel.fromMap(m)).toList();
   }
 
   Future<int> addProjectStock(ProjectStockModel s) async {
     final db = await database;
-    return db.insert('project_stock', {'project_id': s.projectId, 'material_name': s.materialName, 'quantity': s.quantity, 'unit': s.unit});
+    return db.insert('project_stock', {
+      'project_id': s.projectId,
+      'material_name': s.materialName,
+      'quantity': s.quantity,
+      'unit': s.unit,
+    });
   }
 
   Future<void> updateProjectStock(ProjectStockModel s) async {
     final db = await database;
-    await db.update('project_stock', {'material_name': s.materialName, 'quantity': s.quantity, 'unit': s.unit}, where: 'id = ?', whereArgs: [s.id]);
+    await db.update(
+      'project_stock',
+      {'material_name': s.materialName, 'quantity': s.quantity, 'unit': s.unit},
+      where: 'id = ?',
+      whereArgs: [s.id],
+    );
   }
 
   Future<void> deleteProjectStock(int id) async {
@@ -1198,7 +1561,10 @@ class DatabaseService {
     });
   }
 
-  Future<List<ProjectStockLedgerModel>> getStockLedger(int projectId, String materialName) async {
+  Future<List<ProjectStockLedgerModel>> getStockLedger(
+    int projectId,
+    String materialName,
+  ) async {
     final db = await database;
     final maps = await db.query(
       'project_stock_ledger',
@@ -1210,22 +1576,32 @@ class DatabaseService {
   }
 
   /// خصم كمية من رصيد خامة في مخزن المشروع (عند حفظ التقرير اليومي). المطابقة باسم الخامة فقط، والخصم على رقم الكمية فقط (الوحدة ثابتة: متر / عود / متر مربع).
-  Future<bool> deductProjectStock(int projectId, String materialName, String unit, double quantity, String engineerName, DateTime reportDate) async {
+  Future<bool> deductProjectStock(
+    int projectId,
+    String materialName,
+    String unit,
+    double quantity,
+    String engineerName,
+    DateTime reportDate,
+  ) async {
     final list = await getProjectStock(projectId);
     final row = list.cast<ProjectStockModel?>().firstWhere(
-          (r) => r!.materialName == materialName,
-          orElse: () => null,
-        );
+      (r) => r!.materialName == materialName,
+      orElse: () => null,
+    );
     if (row == null) return false;
-    final current = double.tryParse(row.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+    final current =
+        double.tryParse(row.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
     final newQty = current - quantity;
-    await updateProjectStock(ProjectStockModel(
-      id: row.id,
-      projectId: row.projectId,
-      materialName: row.materialName,
-      quantity: newQty.toStringAsFixed(2),
-      unit: row.unit,
-    ));
+    await updateProjectStock(
+      ProjectStockModel(
+        id: row.id,
+        projectId: row.projectId,
+        materialName: row.materialName,
+        quantity: newQty.toStringAsFixed(2),
+        unit: row.unit,
+      ),
+    );
     await addProjectStockLedgerEntry(
       projectId: projectId,
       materialName: materialName,
@@ -1241,18 +1617,33 @@ class DatabaseService {
   // ——— الوحدات (مبني → وحدات مثل Th1-M01) ———
   Future<List<UnitModel>> getUnits(int buildingId) async {
     final db = await database;
-    final maps = await db.query('units', where: 'building_id = ?', whereArgs: [buildingId], orderBy: 'name');
+    final maps = await db.query(
+      'units',
+      where: 'building_id = ?',
+      whereArgs: [buildingId],
+      orderBy: 'name',
+    );
     return maps.map((m) => UnitModel.fromMap(m)).toList();
   }
 
   Future<int> addUnit(UnitModel u) async {
     final db = await database;
-    return db.insert('units', {'building_id': u.buildingId, 'name': u.name, 'model': u.model, 'image_path': u.imagePath});
+    return db.insert('units', {
+      'building_id': u.buildingId,
+      'name': u.name,
+      'model': u.model,
+      'image_path': u.imagePath,
+    });
   }
 
   Future<void> updateUnit(UnitModel u) async {
     final db = await database;
-    await db.update('units', {'name': u.name, 'model': u.model, 'image_path': u.imagePath}, where: 'id = ?', whereArgs: [u.id]);
+    await db.update(
+      'units',
+      {'name': u.name, 'model': u.model, 'image_path': u.imagePath},
+      where: 'id = ?',
+      whereArgs: [u.id],
+    );
   }
 
   Future<void> deleteUnit(int id) async {
@@ -1261,9 +1652,16 @@ class DatabaseService {
   }
 
   // ——— تشوينات المبنى (خامات/كمية/وحدة لكل مبنى) ———
-  Future<List<BuildingMaterialModel>> getBuildingMaterials(int buildingId) async {
+  Future<List<BuildingMaterialModel>> getBuildingMaterials(
+    int buildingId,
+  ) async {
     final db = await database;
-    final maps = await db.query('building_materials', where: 'building_id = ?', whereArgs: [buildingId], orderBy: 'material_name');
+    final maps = await db.query(
+      'building_materials',
+      where: 'building_id = ?',
+      whereArgs: [buildingId],
+      orderBy: 'material_name',
+    );
     return maps.map((m) => BuildingMaterialModel.fromMap(m)).toList();
   }
 
@@ -1284,14 +1682,19 @@ class DatabaseService {
 
   Future<void> updateBuildingMaterial(BuildingMaterialModel m) async {
     final db = await database;
-    await db.update('building_materials', {
-      'material_name': m.materialName,
-      'length': m.length,
-      'pieces_count': m.piecesCount,
-      'total_length': m.totalLength,
-      'total_area': m.totalArea,
-      'image_path': m.imagePath,
-    }, where: 'id = ?', whereArgs: [m.id]);
+    await db.update(
+      'building_materials',
+      {
+        'material_name': m.materialName,
+        'length': m.length,
+        'pieces_count': m.piecesCount,
+        'total_length': m.totalLength,
+        'total_area': m.totalArea,
+        'image_path': m.imagePath,
+      },
+      where: 'id = ?',
+      whereArgs: [m.id],
+    );
   }
 
   Future<void> deleteBuildingMaterial(int id) async {
@@ -1302,18 +1705,29 @@ class DatabaseService {
   // ——— قطعيات المبنى (صور) ———
   Future<List<BuildingCutlistModel>> getBuildingCutlists(int buildingId) async {
     final db = await database;
-    final maps = await db.query('building_cutlist_images', where: 'building_id = ?', whereArgs: [buildingId]);
+    final maps = await db.query(
+      'building_cutlist_images',
+      where: 'building_id = ?',
+      whereArgs: [buildingId],
+    );
     return maps.map((m) => BuildingCutlistModel.fromMap(m)).toList();
   }
 
   Future<int> addBuildingCutlist(BuildingCutlistModel c) async {
     final db = await database;
-    return db.insert('building_cutlist_images', {'building_id': c.buildingId, 'image_path': c.imagePath});
+    return db.insert('building_cutlist_images', {
+      'building_id': c.buildingId,
+      'image_path': c.imagePath,
+    });
   }
 
   Future<void> deleteBuildingCutlist(int id) async {
     final db = await database;
-    await db.delete('building_cutlist_images', where: 'id = ?', whereArgs: [id]);
+    await db.delete(
+      'building_cutlist_images',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   // ——— المشرفون ———
@@ -1330,7 +1744,12 @@ class DatabaseService {
 
   Future<void> updateSupervisor(int id, String name) async {
     final db = await database;
-    await db.update('supervisors', {'name': name}, where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'supervisors',
+      {'name': name},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> deleteSupervisor(int id) async {
@@ -1352,7 +1771,12 @@ class DatabaseService {
 
   Future<void> updateContractor(int id, String name) async {
     final db = await database;
-    await db.update('contractors', {'name': name}, where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'contractors',
+      {'name': name},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> deleteContractor(int id) async {
@@ -1375,7 +1799,12 @@ class DatabaseService {
 
   Future<void> updateMaterial(int id, String name) async {
     final db = await database;
-    await db.update('materials', {'name': name}, where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'materials',
+      {'name': name},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> deleteMaterial(int id) async {
@@ -1387,13 +1816,17 @@ class DatabaseService {
   Future<List<Map<String, dynamic>>> getMaterialsWithIds() async {
     final db = await database;
     final maps = await db.query('materials', orderBy: 'name');
-    return maps.map((m) => {'id': m['id'], 'name': m['name'] as String}).toList();
+    return maps
+        .map((m) => {'id': m['id'], 'name': m['name'] as String})
+        .toList();
   }
 
   Future<List<WorkPhaseModel>> getWorkPhases() async {
     final db = await database;
     final maps = await db.query('work_phases', orderBy: 'id');
-    return maps.map((m) => WorkPhaseModel.fromMap(Map<String, dynamic>.from(m))).toList();
+    return maps
+        .map((m) => WorkPhaseModel.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
   }
 
   Future<int> addDetailedReport(DetailedReportModel report) async {
@@ -1407,8 +1840,12 @@ class DatabaseService {
       'supervisor_id': report.supervisorId,
       'created_at': (report.createdAt ?? DateTime.now()).toIso8601String(),
       'summary': report.summary,
-      'expenses_json': report.expenses.isEmpty ? null : jsonEncode(report.expenses.map((e) => e.toJson()).toList()),
-      'attachments_json': report.attachments.isEmpty ? null : jsonEncode(report.attachments.map((e) => e.toJson()).toList()),
+      'expenses_json': report.expenses.isEmpty
+          ? null
+          : jsonEncode(report.expenses.map((e) => e.toJson()).toList()),
+      'attachments_json': report.attachments.isEmpty
+          ? null
+          : jsonEncode(report.attachments.map((e) => e.toJson()).toList()),
     });
     for (final line in report.lines) {
       await db.insert('detailed_report_lines', {
@@ -1435,6 +1872,54 @@ class DatabaseService {
     return id as int;
   }
 
+  /// استبدال بيانات التقرير المفصّل وسطوره (بدون تغيير منطق الماليات هنا).
+  Future<void> updateDetailedReport(
+    int reportId,
+    DetailedReportModel report,
+  ) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete(
+        'detailed_report_lines',
+        where: 'detailed_report_id = ?',
+        whereArgs: [reportId],
+      );
+      await txn.update(
+        'detailed_reports',
+        {
+          'user_id': report.userId,
+          'user_name': report.userName,
+          'report_datetime': report.reportDatetime.toIso8601String(),
+          'project_id': report.projectId ?? 0,
+          'project_name': report.projectName,
+          'supervisor_id': report.supervisorId,
+          'summary': report.summary,
+          'expenses_json': report.expenses.isEmpty
+              ? null
+              : jsonEncode(report.expenses.map((e) => e.toJson()).toList()),
+          'attachments_json': report.attachments.isEmpty
+              ? null
+              : jsonEncode(report.attachments.map((e) => e.toJson()).toList()),
+        },
+        where: 'id = ?',
+        whereArgs: [reportId],
+      );
+      for (final line in report.lines) {
+        await txn.insert('detailed_report_lines', {
+          'detailed_report_id': reportId,
+          'contractor_id': line.contractorId,
+          'contractor_workers_count': line.contractorWorkersCount,
+          'self_workers_count': line.selfWorkersCount,
+          'zone_id': line.zoneId,
+          'building_id': line.buildingId,
+          'location_id': line.locationId,
+          'phase_id': line.phaseId,
+          'workers_count': line.workersCount,
+        });
+      }
+    });
+  }
+
   /// تحديث بنود الماليات فقط (للتقارير المحفوظة مسبقاً دون صرف) مع تعديل رصيد المهندس بالفرق.
   Future<void> patchDetailedReportExpenses({
     required int reportId,
@@ -1442,7 +1927,12 @@ class DatabaseService {
     required List<ExpenseItem> expenses,
   }) async {
     final db = await database;
-    final rows = await db.query('detailed_reports', where: 'id = ?', whereArgs: [reportId], limit: 1);
+    final rows = await db.query(
+      'detailed_reports',
+      where: 'id = ?',
+      whereArgs: [reportId],
+      limit: 1,
+    );
     if (rows.isEmpty) {
       throw Exception('التقرير غير موجود');
     }
@@ -1458,14 +1948,22 @@ class DatabaseService {
         if (oldList != null) {
           for (final e in oldList) {
             final m = Map<String, dynamic>.from(e as Map);
-            oldTotal += double.tryParse((m['amount'] ?? '').toString().replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+            oldTotal +=
+                double.tryParse(
+                  (m['amount'] ?? '').toString().replaceAll(
+                    RegExp(r'[^\d.]'),
+                    '',
+                  ),
+                ) ??
+                0;
           }
         }
       } catch (_) {}
     }
     double newTotal = 0;
     for (final e in expenses) {
-      newTotal += double.tryParse(e.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+      newTotal +=
+          double.tryParse(e.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
     }
     final delta = newTotal - oldTotal;
     if (delta != 0) {
@@ -1487,7 +1985,12 @@ class DatabaseService {
   /// حذف تقرير مفصّل واسترجاع خصم الماليات من رصيد المهندس إن وُجد
   Future<void> deleteDetailedReport(int id) async {
     final db = await database;
-    final rows = await db.query('detailed_reports', where: 'id = ?', whereArgs: [id], limit: 1);
+    final rows = await db.query(
+      'detailed_reports',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
     if (rows.isEmpty) return;
     final userId = rows.first['user_id'] as int;
     final expJson = rows.first['expenses_json'] as String?;
@@ -1498,7 +2001,14 @@ class DatabaseService {
         if (expList != null) {
           for (final e in expList) {
             final m = Map<String, dynamic>.from(e as Map);
-            total += double.tryParse((m['amount'] ?? '').toString().replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+            total +=
+                double.tryParse(
+                  (m['amount'] ?? '').toString().replaceAll(
+                    RegExp(r'[^\d.]'),
+                    '',
+                  ),
+                ) ??
+                0;
           }
         }
       } catch (_) {}
@@ -1507,7 +2017,11 @@ class DatabaseService {
       final current = await getEngineerBalance(userId);
       await setEngineerBalance(userId, current + total);
     }
-    await db.delete('detailed_report_lines', where: 'detailed_report_id = ?', whereArgs: [id]);
+    await db.delete(
+      'detailed_report_lines',
+      where: 'detailed_report_id = ?',
+      whereArgs: [id],
+    );
     await db.delete('detailed_reports', where: 'id = ?', whereArgs: [id]);
   }
 
@@ -1520,15 +2034,38 @@ class DatabaseService {
     final db = await database;
     var where = '1=1';
     final args = <dynamic>[];
-    final fromStr = DateTime(dateFrom.year, dateFrom.month, dateFrom.day).toIso8601String();
-    final toStr = DateTime(dateTo.year, dateTo.month, dateTo.day, 23, 59, 59, 999).toIso8601String();
+    final fromStr = DateTime(
+      dateFrom.year,
+      dateFrom.month,
+      dateFrom.day,
+    ).toIso8601String();
+    final toStr = DateTime(
+      dateTo.year,
+      dateTo.month,
+      dateTo.day,
+      23,
+      59,
+      59,
+      999,
+    ).toIso8601String();
     where += ' AND report_datetime >= ?';
     args.add(fromStr);
     where += ' AND report_datetime <= ?';
     args.add(toStr);
-    if (userId != null) { where += ' AND user_id = ?'; args.add(userId); }
-    if (projectId != null) { where += ' AND project_id = ?'; args.add(projectId); }
-    final maps = await db.query('detailed_reports', where: where, whereArgs: args, orderBy: 'report_datetime DESC');
+    if (userId != null) {
+      where += ' AND user_id = ?';
+      args.add(userId);
+    }
+    if (projectId != null) {
+      where += ' AND project_id = ?';
+      args.add(projectId);
+    }
+    final maps = await db.query(
+      'detailed_reports',
+      where: where,
+      whereArgs: args,
+      orderBy: 'report_datetime DESC',
+    );
     final projectNames = <int, String>{};
     try {
       final projectRows = await db.query('projects', columns: ['id', 'name']);
@@ -1540,29 +2077,46 @@ class DatabaseService {
     final list = <DetailedReportModel>[];
     for (final row in maps) {
       final reportId = row['id'] as int;
-      final lineMaps = await db.query('detailed_report_lines', where: 'detailed_report_id = ?', whereArgs: [reportId], orderBy: 'id');
-      final lines = lineMaps.map((l) => DetailedReportLineModel.fromMap({
-        'id': l['id'],
-        'contractor_id': l['contractor_id'],
-        'contractor_workers_count': l['contractor_workers_count'],
-        'self_workers_count': l['self_workers_count'],
-        'zone_id': l['zone_id'],
-        'building_id': l['building_id'],
-        'location_id': l['location_id'],
-        'phase_id': l['phase_id'],
-        'workers_count': l['workers_count'],
-      })).toList();
+      final lineMaps = await db.query(
+        'detailed_report_lines',
+        where: 'detailed_report_id = ?',
+        whereArgs: [reportId],
+        orderBy: 'id',
+      );
+      final lines = lineMaps
+          .map(
+            (l) => DetailedReportLineModel.fromMap({
+              'id': l['id'],
+              'contractor_id': l['contractor_id'],
+              'contractor_workers_count': l['contractor_workers_count'],
+              'self_workers_count': l['self_workers_count'],
+              'zone_id': l['zone_id'],
+              'building_id': l['building_id'],
+              'location_id': l['location_id'],
+              'phase_id': l['phase_id'],
+              'workers_count': l['workers_count'],
+            }),
+          )
+          .toList();
       final projectIdVal = row['project_id'];
-      final int? pid = projectIdVal != null && (projectIdVal as int) != 0 ? projectIdVal as int : null;
+      final int? pid = projectIdVal != null && (projectIdVal as int) != 0
+          ? projectIdVal as int
+          : null;
       final String? storedName = row['project_name']?.toString();
-      final String? resolvedName = storedName ?? (pid != null ? projectNames[pid] : null);
+      final String? resolvedName =
+          storedName ?? (pid != null ? projectNames[pid] : null);
       List<ExpenseItem> expenses = [];
       try {
         final expJson = row['expenses_json'] as String?;
         if (expJson != null && expJson.trim().isNotEmpty) {
           final expList = jsonDecode(expJson) as List<dynamic>?;
           if (expList != null) {
-            expenses = expList.map((e) => ExpenseItem.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+            expenses = expList
+                .map(
+                  (e) =>
+                      ExpenseItem.fromJson(Map<String, dynamic>.from(e as Map)),
+                )
+                .toList();
           }
         }
       } catch (_) {}
@@ -1573,31 +2127,40 @@ class DatabaseService {
           final al = jsonDecode(aj) as List<dynamic>?;
           if (al != null) {
             attachments = al
-                .map((e) => DetailedReportAttachment.fromJson(Map<String, dynamic>.from(e as Map)))
+                .map(
+                  (e) => DetailedReportAttachment.fromJson(
+                    Map<String, dynamic>.from(e as Map),
+                  ),
+                )
                 .where((a) => a.data.isNotEmpty)
                 .toList();
           }
         }
       } catch (_) {}
-      list.add(DetailedReportModel(
-        id: reportId,
-        userId: row['user_id'] as int,
-        userName: row['user_name'] as String,
-        reportDatetime: DateTime.parse(row['report_datetime'] as String),
-        projectId: pid,
-        projectName: resolvedName,
-        supervisorId: row['supervisor_id'] as int?,
-        createdAt: row['created_at'] != null ? DateTime.tryParse(row['created_at'] as String) : null,
-        summary: row['summary']?.toString(),
-        lines: lines,
-        expenses: expenses,
-        attachments: attachments,
-      ));
+      list.add(
+        DetailedReportModel(
+          id: reportId,
+          userId: row['user_id'] as int,
+          userName: row['user_name'] as String,
+          reportDatetime: DateTime.parse(row['report_datetime'] as String),
+          projectId: pid,
+          projectName: resolvedName,
+          supervisorId: row['supervisor_id'] as int?,
+          createdAt: row['created_at'] != null
+              ? DateTime.tryParse(row['created_at'] as String)
+              : null,
+          summary: row['summary']?.toString(),
+          lines: lines,
+          expenses: expenses,
+          attachments: attachments,
+        ),
+      );
     }
     return list;
   }
 
-  Future<List<LocationWithdrawalForPeriodModel>> getLocationWithdrawalsForPeriod({
+  Future<List<LocationWithdrawalForPeriodModel>>
+  getLocationWithdrawalsForPeriod({
     required DateTime dateFrom,
     required DateTime dateTo,
     int? projectId,
@@ -1638,16 +2201,17 @@ class DatabaseService {
           unit: l['unit'] as String? ?? '',
         );
       }).toList();
-      out.add(LocationWithdrawalForPeriodModel(
-        locationId: row['location_id'] as int,
-        userId: row['user_id'] as int,
-        userName: row['user_name'] as String? ?? '',
-        createdAt: dt,
-        projectId: pid,
-        materials: materials,
-      ));
+      out.add(
+        LocationWithdrawalForPeriodModel(
+          locationId: row['location_id'] as int,
+          userId: row['user_id'] as int,
+          userName: row['user_name'] as String? ?? '',
+          createdAt: dt,
+          projectId: pid,
+          materials: materials,
+        ),
+      );
     }
     return out;
   }
-
 }

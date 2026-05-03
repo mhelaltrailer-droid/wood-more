@@ -6,6 +6,7 @@ import 'firebase_options.dart';
 import 'models/user_model.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/animated_logo_splash_screen.dart';
 import 'services/api_storage_service.dart';
 import 'services/auth_persistence.dart';
 import 'services/local_cache_service.dart';
@@ -18,9 +19,14 @@ void main() async {
   // تأكد من إضافة هذين السطرين قبل runApp
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    // لا نمنع تشغيل التطبيق بالكامل عند فشل Firebase على بعض أجهزة release.
+    debugPrint('Firebase init failed: $e');
+  }
 
   await LocalCacheService.init();
   await initStorage();
@@ -43,12 +49,9 @@ class WoodAndMoreApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [
-        Locale('ar'),
-        Locale('en'),
-      ],
+      supportedLocales: const [Locale('ar'), Locale('en')],
       locale: const Locale('ar'),
-      home: const _AuthGate(),
+      home: const AnimatedLogoSplashScreen(child: _AuthGate()),
     );
   }
 }
@@ -84,9 +87,7 @@ class _AuthGate extends StatelessWidget {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
+            body: Center(child: CircularProgressIndicator()),
           );
         }
         final user = snapshot.data;
@@ -118,7 +119,9 @@ class _HomeWithRouteRestoreState extends State<_HomeWithRouteRestore> {
     getLastRoute().then((name) {
       if (!mounted) return;
       setState(() {
-        _routeToShow = (name != null && name.isNotEmpty && name != 'home') ? name : 'home';
+        _routeToShow = (name != null && name.isNotEmpty && name != 'home')
+            ? name
+            : 'home';
       });
     });
   }
@@ -126,9 +129,7 @@ class _HomeWithRouteRestoreState extends State<_HomeWithRouteRestore> {
   @override
   Widget build(BuildContext context) {
     if (_routeToShow == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_routeToShow == 'home') {
       return HomeScreen(currentUser: widget.user);
@@ -144,7 +145,9 @@ class _HomeWithRouteRestoreState extends State<_HomeWithRouteRestore> {
           await saveLastRoute('home');
           if (!mounted) return;
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => HomeScreen(currentUser: widget.user)),
+            MaterialPageRoute(
+              builder: (_) => HomeScreen(currentUser: widget.user),
+            ),
           );
         }
       },

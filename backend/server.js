@@ -6,6 +6,7 @@ const { Pool } = require('pg');
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+const PRIMARY_APP_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 
 async function ensureActivityLogsTable() {
   try {
@@ -224,6 +225,55 @@ async function ensureSystemLockTable() {
   }
 }
 
+async function ensureHomeIconsVisibilitySetting() {
+  try {
+    const defaultConfig = {
+      site_engineer: {
+        attendance: true,
+        today_work_plan: true,
+        tomorrow_work_plan: true,
+        engineer_withdraw_materials: true,
+        engineer_finances: true,
+        operation_reports: true,
+        detailed_report: true,
+        engineer_projects: true,
+      },
+      accountant: {
+        accountant_custody: true,
+        accountant_finance: true,
+      },
+      site_engineer_manager: {
+        attendance_reports: true,
+        work_plan_tracking_report: true,
+        new_icon: true,
+        operation_reports_tracking: true,
+        aggregated_detailed_daily: true,
+        contractor_report: true,
+      },
+      app_admin: {
+        attendance_reports: true,
+        work_plan_tracking_report: true,
+        new_icon: true,
+        operation_reports_tracking: true,
+        daily_movement: true,
+        reports: true,
+        aggregated_detailed_daily: true,
+        contractor_report: true,
+        admin_project_structure: true,
+        admin_dashboard: true,
+        activity_logs: true,
+        dashboard: true,
+      },
+    };
+    await pool.query(
+      `INSERT INTO app_settings (key, value) VALUES ('home_icons_visibility', $1) ON CONFLICT (key) DO NOTHING`,
+      [JSON.stringify(defaultConfig)]
+    );
+  } catch (e) {
+    console.warn('ensureHomeIconsVisibilitySetting:', e.message);
+  }
+}
+
 // إنشاء جداول التقرير المفصل تلقائياً إذا لم تكن موجودة (لتجنب خطأ relation "detailed_reports" does not exist)
 async function ensureDetailedReportsTables() {
   try {
@@ -267,7 +317,7 @@ async function ensureDetailedReportsTables() {
         building_id INTEGER REFERENCES buildings(id),
         location_id INTEGER REFERENCES project_locations(id),
         phase_id INTEGER NOT NULL REFERENCES work_phases(id),
-        workers_count INTEGER NOT NULL CHECK (workers_count >= 1)
+        workers_count INTEGER NOT NULL CHECK (workers_count >= 0)
       )
     `);
     await pool.query(`ALTER TABLE detailed_reports ADD COLUMN IF NOT EXISTS project_name TEXT`);
@@ -282,10 +332,24 @@ async function ensureDetailedReportsTables() {
     try {
       await pool.query(`ALTER TABLE detailed_report_lines ALTER COLUMN contractor_id DROP NOT NULL`);
     } catch (_) {}
+    // السماح بقيمة 0 في عدد العمال (بدلاً من 1 كحد أدنى).
+    try {
+      await pool.query(`ALTER TABLE detailed_report_lines DROP CONSTRAINT IF EXISTS detailed_report_lines_workers_count_check`);
+      await pool.query(`ALTER TABLE detailed_report_lines ADD CONSTRAINT detailed_report_lines_workers_count_check CHECK (workers_count >= 0)`);
+    } catch (_) {}
     // تأكيد وجود مراحل العمل القياسية (5 مراحل) دائماً.
     // ملاحظة: قد توجد مراحل قديمة إضافية في بعض قواعد البيانات؛ لا نحذفها هنا لتجنب كسر بيانات قديمة،
     // لكن واجهة التطبيق ستعرض فقط المراحل القياسية عبر مسار /work-phases.
-    const standardPhases = ['تركيب اكسسوارات', 'تقطيع WPC', 'تركيب WPC', 'معالجة', 'دهان'];
+    const standardPhases = [
+      'تركيب اكسسوارات',
+      'تقطيع WPC',
+      'تركيب WPC',
+      'معالجة',
+      'دهان',
+      'تشوين',
+      'تركيب ارضيات',
+      'تركيب Q.round + وزر',
+    ];
     const existing = await pool.query('SELECT name FROM work_phases');
     const existingNames = new Set(existing.rows.map(r => String(r.name)));
     for (const name of standardPhases) {
@@ -388,6 +452,59 @@ app.put('/system-lock', async (req, res) => {
   }
 });
 
+app.get('/home-icons-visibility', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT value FROM app_settings WHERE key = 'home_icons_visibility' LIMIT 1`);
+    if (r.rows.length === 0) return res.json({});
+    const raw = String(r.rows[0].value || '').trim();
+    if (!raw) return res.json({});
+    try {
+      return res.json(JSON.parse(raw));
+    } catch (_) {
+      return res.json({});
+    }
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.put('/home-icons-visibility/:role', async (req, res) => {
+  try {
+    const role = String(req.params.role || '').trim();
+    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'app_admin', 'accountant']);
+    if (!allowedRoles.has(role)) return res.status(400).json({ error: 'invalid role' });
+
+    const requesterEmail = String(req.body?.requesterEmail || '').trim().toLowerCase();
+    if (requesterEmail !== 'mouhammedhelal@gmail.com') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const icons = req.body?.icons;
+    if (!icons || typeof icons !== 'object' || Array.isArray(icons)) {
+      return res.status(400).json({ error: 'icons map required' });
+    }
+
+    const r = await pool.query(`SELECT value FROM app_settings WHERE key = 'home_icons_visibility' LIMIT 1`);
+    let all = {};
+    if (r.rows.length > 0) {
+      try {
+        all = JSON.parse(String(r.rows[0].value || '{}')) || {};
+      } catch (_) {}
+    }
+    all[role] = {};
+    for (const [key, value] of Object.entries(icons)) {
+      all[role][String(key)] = value === true;
+    }
+    await pool.query(
+      `INSERT INTO app_settings (key, value) VALUES ('home_icons_visibility', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [JSON.stringify(all)]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 // ——— Users ———
 app.get('/users/by-email', async (req, res) => {
   try {
@@ -403,8 +520,12 @@ app.get('/users/by-email', async (req, res) => {
 
 app.get('/users', async (req, res) => {
   try {
+    const requesterEmail = String(req.query.requesterEmail || '').trim().toLowerCase();
     const r = await pool.query('SELECT id, name, email, role FROM users ORDER BY name');
-    res.json(r.rows.map(row => ({ id: parseInt(row.id), name: row.name, email: row.email, role: row.role })));
+    const out = r.rows
+      .map(row => ({ id: parseInt(row.id), name: row.name, email: row.email, role: row.role }))
+      .filter((u) => requesterEmail === PRIMARY_APP_ADMIN_EMAIL || String(u.email).trim().toLowerCase() !== PRIMARY_APP_ADMIN_EMAIL);
+    res.json(out);
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -435,9 +556,20 @@ app.post('/users', async (req, res) => {
 
 app.put('/users/:id', async (req, res) => {
   try {
+    const requesterEmail = String(req.body?.requesterEmail || '').trim().toLowerCase();
+    const target = await pool.query('SELECT email FROM users WHERE id = $1', [req.params.id]);
+    if (target.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const targetEmail = String(target.rows[0].email || '').trim().toLowerCase();
+    if (targetEmail === PRIMARY_APP_ADMIN_EMAIL && requesterEmail !== PRIMARY_APP_ADMIN_EMAIL) {
+      return res.status(403).json({ error: 'forbidden_primary_admin' });
+    }
     const { name, email, role, password } = req.body;
+    const nextEmail = String(email || '').trim().toLowerCase();
+    if (nextEmail === PRIMARY_APP_ADMIN_EMAIL && requesterEmail !== PRIMARY_APP_ADMIN_EMAIL) {
+      return res.status(403).json({ error: 'forbidden_primary_admin' });
+    }
     const updates = ['name = $1', 'email = $2', 'role = $3'];
-    const params = [name, (email || '').trim().toLowerCase(), role];
+    const params = [name, nextEmail, role];
     let i = 4;
     if (password != null && String(password).trim() !== '') {
       updates.push(`password = $${i}`);
@@ -454,6 +586,13 @@ app.put('/users/:id', async (req, res) => {
 
 app.delete('/users/:id', async (req, res) => {
   try {
+    const requesterEmail = String(req.query.requesterEmail || req.body?.requesterEmail || '').trim().toLowerCase();
+    const target = await pool.query('SELECT email FROM users WHERE id = $1', [req.params.id]);
+    if (target.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const targetEmail = String(target.rows[0].email || '').trim().toLowerCase();
+    if (targetEmail === PRIMARY_APP_ADMIN_EMAIL && requesterEmail !== PRIMARY_APP_ADMIN_EMAIL) {
+      return res.status(403).json({ error: 'forbidden_primary_admin' });
+    }
     await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) {
@@ -473,7 +612,15 @@ app.get('/projects', async (req, res) => {
 
 app.post('/projects', async (req, res) => {
   try {
-    const r = await pool.query('INSERT INTO projects (name) VALUES ($1) RETURNING id', [req.body.name]);
+    const name = String(req.body?.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'name required' });
+    const r = await pool.query(
+      `INSERT INTO projects (name)
+       VALUES ($1)
+       ON CONFLICT ((lower(btrim(name)))) DO UPDATE SET name = EXCLUDED.name
+       RETURNING id`,
+      [name]
+    );
     res.json(parseInt(r.rows[0].id));
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -963,7 +1110,16 @@ app.delete('/contractors/:id', async (req, res) => {
 app.get('/work-phases', async (req, res) => {
   try {
     // نُرجع فقط المراحل القياسية الخمس وبترتيب ثابت (حتى لو كانت القاعدة تحتوي مراحل قديمة أخرى).
-    const names = ['تركيب اكسسوارات', 'تقطيع WPC', 'تركيب WPC', 'معالجة', 'دهان'];
+    const names = [
+      'تركيب اكسسوارات',
+      'تقطيع WPC',
+      'تركيب WPC',
+      'معالجة',
+      'دهان',
+      'تشوين',
+      'تركيب ارضيات',
+      'تركيب Q.round + وزر',
+    ];
     const r = await pool.query(
       `SELECT id, name
        FROM work_phases
@@ -974,7 +1130,10 @@ app.get('/work-phases', async (req, res) => {
          WHEN 'تركيب WPC' THEN 3
          WHEN 'معالجة' THEN 4
          WHEN 'دهان' THEN 5
-         ELSE 99
+         WHEN 'تشوين' THEN 6
+         WHEN 'تركيب ارضيات' THEN 7
+         WHEN 'تركيب Q.round + وزر' THEN 8
+         ELSE 999
        END, id`,
       [names]
     );
@@ -1171,6 +1330,63 @@ app.put('/detailed-reports/:id/expenses', async (req, res) => {
       id,
     ]);
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.put('/detailed-reports/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+  try {
+    const exists = await pool.query('SELECT id FROM detailed_reports WHERE id = $1', [id]);
+    if (exists.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const b = req.body || {};
+    const summary = (b.summary != null && String(b.summary).trim() !== '') ? String(b.summary).trim() : null;
+    const projectId = b.projectId != null ? parseInt(b.projectId, 10) : null;
+    const projectName = (b.projectName != null && String(b.projectName).trim() !== '') ? String(b.projectName).trim() : null;
+    const expensesJson = (b.expenses != null && Array.isArray(b.expenses) && b.expenses.length > 0)
+      ? JSON.stringify(b.expenses) : null;
+    const attachmentsJson = (b.attachments != null && Array.isArray(b.attachments) && b.attachments.length > 0)
+      ? JSON.stringify(b.attachments) : null;
+    await pool.query('BEGIN');
+    try {
+      await pool.query('DELETE FROM detailed_report_lines WHERE detailed_report_id = $1', [id]);
+      await pool.query(
+        `UPDATE detailed_reports SET
+          user_id = $1, user_name = $2, report_datetime = $3, project_id = $4, project_name = $5,
+          supervisor_id = $6, summary = $7, expenses_json = $8, attachments_json = $9
+         WHERE id = $10`,
+        [
+          b.userId,
+          b.userName,
+          b.reportDatetime || new Date().toISOString(),
+          projectId,
+          projectName,
+          b.supervisorId || null,
+          summary,
+          expensesJson,
+          attachmentsJson,
+          id,
+        ]
+      );
+      const lines = Array.isArray(b.lines) ? b.lines : [];
+      for (const line of lines) {
+        const locationId = line.locationId != null ? parseInt(line.locationId, 10) : null;
+        const zoneId = line.zoneId != null ? parseInt(line.zoneId, 10) : null;
+        const buildingId = line.buildingId != null ? parseInt(line.buildingId, 10) : null;
+        const contractorId = line.contractorId != null ? parseInt(line.contractorId, 10) : null;
+        await pool.query(
+          'INSERT INTO detailed_report_lines (detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, phase_id, workers_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+          [id, contractorId, line.contractorWorkersCount ?? 0, line.selfWorkersCount ?? 0, zoneId, buildingId, locationId, line.phaseId, line.workersCount]
+        );
+      }
+      await pool.query('COMMIT');
+      res.json({ ok: true });
+    } catch (err) {
+      await pool.query('ROLLBACK');
+      throw err;
+    }
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -1876,6 +2092,66 @@ app.get('/executed-plans/daily-summary', async (req, res) => {
   }
 });
 
+// تقرير المقاول من خطط اليوم المنفذة فقط:
+// المصدر الوحيد: executed_plans (confirmed / confirmed_edited) مع تجاهل postponed.
+app.get('/executed-plans/contractor-report', async (req, res) => {
+  try {
+    const contractorName = String(req.query.contractorName || '').trim();
+    const dateFromRaw = String(req.query.dateFrom || '').trim();
+    const dateToRaw = String(req.query.dateTo || '').trim();
+    if (!contractorName) return res.status(400).json({ error: 'contractorName required' });
+    if (!dateFromRaw || !dateToRaw) return res.status(400).json({ error: 'dateFrom and dateTo required' });
+
+    const fromDay = dateFromRaw.slice(0, 10);
+    const toDay = dateToRaw.slice(0, 10);
+    const c = await pool.query('SELECT id FROM contractors WHERE name = $1 LIMIT 1', [contractorName]);
+    if (c.rows.length === 0) return res.json([]);
+    const contractorId = parseInt(c.rows[0].id, 10);
+
+    const rows = await pool.query(
+      `SELECT id, user_id, user_name, project_id, project_name, plan_date, status, plan_json
+       FROM executed_plans
+       WHERE status IN ('confirmed', 'confirmed_edited')
+         AND substring(plan_date from 1 for 10) >= $1
+         AND substring(plan_date from 1 for 10) <= $2
+       ORDER BY plan_date DESC, id DESC`,
+      [fromDay, toDay]
+    );
+
+    const out = [];
+    for (const row of rows.rows) {
+      let plan = null;
+      try {
+        plan = row.plan_json ? JSON.parse(row.plan_json) : null;
+      } catch (_) {
+        plan = null;
+      }
+      const lines = Array.isArray(plan?.lines) ? plan.lines : [];
+      let workersTotal = 0;
+      for (const line of lines) {
+        const cid = line?.contractorId != null ? parseInt(line.contractorId, 10) : null;
+        if (cid == null || Number.isNaN(cid) || cid !== contractorId) continue;
+        const w = parseInt(String(line.workersCount ?? line.contractorWorkersCount ?? 0), 10);
+        workersTotal += Number.isNaN(w) ? 0 : w;
+      }
+      if (workersTotal <= 0) continue;
+      out.push({
+        executed_plan_id: parseInt(row.id, 10),
+        project_id: row.project_id != null ? parseInt(row.project_id, 10) : null,
+        project_name: row.project_name ?? (plan?.projectName ?? null),
+        user_id: parseInt(row.user_id, 10),
+        user_name: row.user_name,
+        plan_date: row.plan_date,
+        status: row.status,
+        workers_count: workersTotal,
+      });
+    }
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 app.get('/postpone-reasons', async (req, res) => {
   try {
     const r = await pool.query(
@@ -1899,6 +2175,7 @@ app.get('/postpone-reasons', async (req, res) => {
 const PORT = parseInt(process.env.PORT || '3000', 10);
 ensurePasswordColumn()
   .then(() => ensureSystemLockTable())
+  .then(() => ensureHomeIconsVisibilitySetting())
   .then(() => ensureDetailedReportsTables())
   .then(() => ensureLocationMaterialsTables())
   .then(() => ensureActivityLogsTable())

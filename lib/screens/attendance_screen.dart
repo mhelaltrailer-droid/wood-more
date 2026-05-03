@@ -6,6 +6,7 @@ import '../models/attendance_record_model.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import '../services/location_service.dart';
+import '../services/last_project_persistence.dart';
 import 'home_screen.dart';
 
 /// شاشة تسجيل الحضور والانصراف للمهندس
@@ -41,7 +42,29 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   Future<void> _loadProjects() async {
     final projects = await _db.getProjects();
-    setState(() => _projects = projects);
+    final last = await getLastAttendanceProjectForUser(widget.currentUser.id);
+    ProjectModel? defaultProject;
+    if (last != null) {
+      for (final p in projects) {
+        if (last.projectId != null && p.id == last.projectId) {
+          defaultProject = p;
+          break;
+        }
+      }
+      if (defaultProject == null) {
+        for (final p in projects) {
+          if (p.name.trim() == last.projectName) {
+            defaultProject = p;
+            break;
+          }
+        }
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _projects = projects;
+      _selectedProject = defaultProject;
+    });
   }
 
   bool get _canSubmit => _selectedProject != null && _selectedType != null;
@@ -82,7 +105,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       if (!LocationService.looksLikeCoordinates(location)) {
         if (mounted) {
           setState(() {
-            _errorMessage = 'الموقع مطلوب لتسجيل الحضور والانصراف. يرجى السماح بالوصول للموقع ثم المحاولة مرة أخرى.';
+            _errorMessage =
+                'الموقع مطلوب لتسجيل الحضور والانصراف. يرجى السماح بالوصول للموقع ثم المحاولة مرة أخرى.';
             _isLoading = false;
           });
         }
@@ -98,10 +122,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         location: location,
         projectId: _selectedProject?.id,
         projectName: _selectedProject?.name,
-        notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+        notes: _notesController.text.trim().isEmpty
+            ? null
+            : _notesController.text.trim(),
       );
 
       await _db.addAttendanceRecord(record);
+      await saveLastAttendanceProjectForUser(
+        userId: widget.currentUser.id,
+        projectId: _selectedProject?.id,
+        projectName: _selectedProject?.name ?? '',
+      );
 
       if (!mounted) return;
 
@@ -115,7 +146,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       await saveLastRoute('home');
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => HomeScreen(currentUser: widget.currentUser)),
+        MaterialPageRoute(
+          builder: (_) => HomeScreen(currentUser: widget.currentUser),
+        ),
         (route) => false,
       );
     } catch (e) {
@@ -163,10 +196,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('المهندس', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        const Text(
+                          'المهندس',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
                         Text(
                           widget.currentUser.name,
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
@@ -186,7 +225,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 border: OutlineInputBorder(),
               ),
               items: _projects
-                  .map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis)))
+                  .map(
+                    (p) => DropdownMenuItem(
+                      value: p,
+                      child: Text(p.name, overflow: TextOverflow.ellipsis),
+                    ),
+                  )
                   .toList(),
               onChanged: (p) => setState(() => _selectedProject = p),
             ),
@@ -199,7 +243,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             const SizedBox(height: 24),
 
             // اختيار نوع التسجيل: حضور أو انصراف
-            const Text('نوع التسجيل', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              'نوع التسجيل',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -239,9 +286,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             const SizedBox(height: 24),
 
             // التاريخ والوقت والموقع
-            _ReadOnlyField(label: 'التاريخ', value: dateStr, icon: Icons.calendar_today),
+            _ReadOnlyField(
+              label: 'التاريخ',
+              value: dateStr,
+              icon: Icons.calendar_today,
+            ),
             const SizedBox(height: 12),
-            _ReadOnlyField(label: 'الوقت', value: timeStr, icon: Icons.access_time),
+            _ReadOnlyField(
+              label: 'الوقت',
+              value: timeStr,
+              icon: Icons.access_time,
+            ),
             const SizedBox(height: 24),
 
             // الملاحظات
@@ -266,7 +321,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : const Icon(Icons.check_circle),
                 label: Text(_isLoading ? 'جاري الحفظ...' : 'تأكيد / حفظ'),
@@ -289,7 +347,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   children: [
                     Icon(Icons.error_outline, color: Colors.red.shade700),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(_errorMessage!, style: TextStyle(color: Colors.red.shade700))),
+                    Expanded(
+                      child: Text(
+                        _errorMessage!,
+                        style: TextStyle(color: Colors.red.shade700),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -306,7 +369,11 @@ class _ReadOnlyField extends StatelessWidget {
   final String value;
   final IconData icon;
 
-  const _ReadOnlyField({required this.label, required this.value, required this.icon});
+  const _ReadOnlyField({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -325,8 +392,17 @@ class _ReadOnlyField extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                Text(
+                  label,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ],
             ),
           ),

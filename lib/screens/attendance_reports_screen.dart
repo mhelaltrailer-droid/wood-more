@@ -31,9 +31,18 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
   DateTime? _reportDateFrom;
   DateTime? _reportDateTo;
 
+  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  void _setFilterToDay(DateTime day) {
+    final d = _dateOnly(day);
+    _reportDateFrom = d;
+    _reportDateTo = d;
+  }
+
   @override
   void initState() {
     super.initState();
+    _setFilterToDay(DateTime.now());
     _loadRecords();
   }
 
@@ -48,9 +57,30 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
 
   List<AttendanceRecordModel> get _displayRecords {
     if (_reportDateFrom == null || _reportDateTo == null) return _records;
-    final from = DateTime(_reportDateFrom!.year, _reportDateFrom!.month, _reportDateFrom!.day);
+    final from = _dateOnly(_reportDateFrom!);
     final to = DateTime(_reportDateTo!.year, _reportDateTo!.month, _reportDateTo!.day, 23, 59, 59, 999);
     return _records.where((r) => !r.dateTime.isBefore(from) && !r.dateTime.isAfter(to)).toList();
+  }
+
+  bool get _filterIsSingleDay {
+    if (_reportDateFrom == null || _reportDateTo == null) return false;
+    return _dateOnly(_reportDateFrom!) == _dateOnly(_reportDateTo!);
+  }
+
+  Future<void> _pickReportDay() async {
+    final initial = _reportDateFrom ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _setFilterToDay(picked));
+  }
+
+  void _resetToToday() {
+    setState(() => _setFilterToDay(DateTime.now()));
   }
 
   void _showCreateReportDialog() {
@@ -301,106 +331,126 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _records.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.assignment_outlined, size: 64, color: Colors.grey.shade400),
-                      const SizedBox(height: 16),
-                      Text(
-                        'لا توجد سجلات حضور حتى الآن',
-                        style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Card(
+              color: const Color(0xFF1B5E20).withOpacity(0.08),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      _reportDateFrom != null && _reportDateTo != null
+                          ? (_filterIsSingleDay
+                              ? 'سجلات يوم ${DateFormat('yyyy/MM/dd', 'ar').format(_reportDateFrom!)} — الافتراضي عند الفتح: اليوم'
+                              : 'من ${DateFormat('yyyy/MM/dd', 'ar').format(_reportDateFrom!)} إلى ${DateFormat('yyyy/MM/dd', 'ar').format(_reportDateTo!)}')
+                          : 'جميع سجلات الحضور والانصراف (بدون فلتر تاريخ)',
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _isLoading ? null : _pickReportDay,
+                            icon: const Icon(Icons.calendar_today, size: 18),
+                            label: const Text('اختيار تاريخ'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: _isLoading ? null : _resetToToday,
+                          child: const Text('اليوم'),
+                        ),
+                      ],
+                    ),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: TextButton.icon(
+                        onPressed: _isLoading ? null : _showCreateReportDialog,
+                        icon: const Icon(Icons.date_range, size: 18),
+                        label: const Text('فترة مخصصة (من — إلى)'),
                       ),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _loadRecords,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      if (_reportDateFrom != null && _reportDateTo != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: Card(
-                            color: const Color(0xFF1B5E20).withOpacity(0.08),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Row(
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _records.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.assignment_outlined, size: 64, color: Colors.grey.shade400),
+                            const SizedBox(height: 16),
+                            Text(
+                              'لا توجد سجلات حضور في النظام حتى الآن',
+                              style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _loadRecords,
+                        child: ListView(
+                          padding: const EdgeInsets.all(16),
+                          children: [
+                            if (_displayRecords.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 32),
+                                child: Center(
+                                  child: Text(
+                                    'لا توجد سجلات في اليوم أو الفترة المحددة',
+                                    style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              )
+                            else
+                              ...List.generate(_displayRecords.length, (index) {
+                                final r = _displayRecords[index];
+                                return _RecordCard(
+                                  record: r,
+                                  canDelete: canEditDeleteAttendance(widget.currentUser),
+                                  onDelete: () => _deleteRecord(r),
+                                );
+                              }),
+                            const SizedBox(height: 16),
+                            Center(
+                              child: Column(
                                 children: [
-                                  Icon(Icons.date_range, color: const Color(0xFF1B5E20)),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      'تقرير من ${DateFormat('yyyy/MM/dd', 'ar').format(_reportDateFrom!)} إلى ${DateFormat('yyyy/MM/dd', 'ar').format(_reportDateTo!)}',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
+                                  FilledButton.icon(
+                                    onPressed: _displayRecords.isEmpty ? null : _exportPdf,
+                                    icon: const Icon(Icons.picture_as_pdf),
+                                    label: const Text('تصدير PDF'),
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const Color(0xFF1B5E20),
+                                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                                     ),
+                                  ),
+                                  TextButton(
+                                    onPressed: _clearReportRange,
+                                    child: const Text('عرض كل السجلات'),
                                   ),
                                 ],
                               ),
                             ),
-                          ),
+                            const SizedBox(height: 32),
+                          ],
                         ),
-                      if (_displayRecords.isEmpty && _reportDateFrom != null)
-                        Center(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 24),
-                            child: Text(
-                              'لا توجد سجلات في المدة المحددة',
-                              style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-                            ),
-                          ),
-                        )
-                      else
-                        ...List.generate(_displayRecords.length, (index) {
-                          final r = _displayRecords[index];
-                          return _RecordCard(
-                            record: r,
-                            canDelete: canEditDeleteAttendance(widget.currentUser),
-                            onDelete: () => _deleteRecord(r),
-                          );
-                        }),
-                      const SizedBox(height: 16),
-                      if (_reportDateFrom == null || _reportDateTo == null)
-                        Center(
-                          child: FilledButton.icon(
-                            onPressed: _showCreateReportDialog,
-                            icon: const Icon(Icons.summarize),
-                            label: const Text('إنشاء تقرير'),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF1B5E20),
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                            ),
-                          ),
-                        )
-                      else
-                        Center(
-                          child: Column(
-                            children: [
-                              FilledButton.icon(
-                                onPressed: _displayRecords.isEmpty ? null : _exportPdf,
-                                icon: const Icon(Icons.picture_as_pdf),
-                                label: const Text('تصدير PDF'),
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: const Color(0xFF1B5E20),
-                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              TextButton(
-                                onPressed: _clearReportRange,
-                                child: const Text('عرض الكل'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      const SizedBox(height: 32),
-                    ],
-                  ),
-                ),
+                      ),
+          ),
+        ],
+      ),
     );
   }
 }

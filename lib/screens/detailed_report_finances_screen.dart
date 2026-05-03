@@ -8,8 +8,9 @@ import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
-/// التقرير المفصل - الماليات: نسخة طبق الأصل من الخطوة الثالثة للتقرير اليومي.
-/// إدخال بنود الصرف (4) وخصم المبالغ من رصيد مهندس الموقع (مستخدم كاتب التقرير)، ثم حفظ التقرير.
+const int _kMaxExpenseItems = 4;
+
+/// التقرير المفصل - الماليات: بنود صرف تُضاف تباعاً (حتى 4) وخصم الرصيد كما سابقاً.
 class DetailedReportFinancesScreen extends StatefulWidget {
   final UserModel user;
   final DetailedReportModel report;
@@ -25,20 +26,39 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
   bool _saving = false;
   late List<ExpenseItem> _expenses;
 
+  static bool _expenseHasContent(ExpenseItem e) {
+    final a = double.tryParse(e.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+    return e.description.trim().isNotEmpty || a != 0 || (e.imagePath != null && e.imagePath!.trim().isNotEmpty);
+  }
+
   @override
   void initState() {
     super.initState();
-    final existing = widget.report.expenses;
-    _expenses = List.generate(4, (i) {
-      if (i < existing.length) {
-        final e = existing[i];
-        return ExpenseItem(description: e.description, amount: e.amount, imagePath: e.imagePath);
-      }
-      return ExpenseItem();
-    });
+    final existing = widget.report.expenses.where(_expenseHasContent).take(_kMaxExpenseItems).toList();
+    if (existing.isEmpty) {
+      _expenses = [ExpenseItem()];
+    } else {
+      _expenses = existing
+          .map((e) => ExpenseItem(description: e.description, amount: e.amount, imagePath: e.imagePath))
+          .toList();
+    }
+  }
+
+  List<ExpenseItem> _collectForSave() {
+    return _expenses.where(_expenseHasContent).toList();
   }
 
   Future<void> _save() async {
+    final toSave = _collectForSave();
+    if (toSave.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('أضف بند صرف واحداً على الأقل (بيان أو مبلغ أو مرفق)'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
       final existingId = widget.report.id;
@@ -46,7 +66,7 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
         await _db.patchDetailedReportExpenses(
           reportId: existingId,
           userId: widget.report.userId,
-          expenses: _expenses,
+          expenses: toSave,
         );
       } else {
         final reportWithExpenses = DetailedReportModel(
@@ -59,7 +79,7 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
           createdAt: widget.report.createdAt,
           summary: widget.report.summary,
           lines: widget.report.lines,
-          expenses: _expenses,
+          expenses: toSave,
           attachments: widget.report.attachments,
         );
         await _db.addDetailedReport(reportWithExpenses);
@@ -67,7 +87,7 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(existingId != null ? 'تم حفظ بنود الصرف بنجاح' : 'تم حفظ التقرير المفصل بنجاح'),
+          content: Text(existingId != null ? 'تم حفظ التقرير المالي بنجاح' : 'تم حفظ التقرير المفصل بنجاح'),
           backgroundColor: Colors.green,
         ),
       );
@@ -87,6 +107,16 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
     }
   }
 
+  void _addRow() {
+    if (_expenses.length >= _kMaxExpenseItems) return;
+    setState(() => _expenses.add(ExpenseItem()));
+  }
+
+  void _removeRow(int index) {
+    if (_expenses.length <= 1) return;
+    setState(() => _expenses.removeAt(index));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -99,15 +129,27 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
         padding: const EdgeInsets.all(20),
         children: [
           const Text(
-            'بيان الصرف وقيمة المبلغ وإرفاق صورة إن وجد (4 بنود)',
+            'أدخل بند الصرف ثم أضف المزيد عند الحاجة (حتى $_kMaxExpenseItems بنود). بيان المبلغ وإرفاق صورة اختياري لكل بند.',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
-          ...List.generate(4, (i) => _ExpenseRow(
-                index: i + 1,
-                item: _expenses[i],
-                onChanged: () => setState(() {}),
-              )),
+          ...List.generate(_expenses.length, (i) {
+            return _ExpenseRow(
+              index: i + 1,
+              item: _expenses[i],
+              canRemove: _expenses.length > 1,
+              onRemove: () => _removeRow(i),
+              onChanged: () => setState(() {}),
+            );
+          }),
+          if (_expenses.length < _kMaxExpenseItems) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _addRow,
+              icon: const Icon(Icons.add),
+              label: const Text('إضافة بند صرف'),
+            ),
+          ],
           const SizedBox(height: 32),
           FilledButton(
             onPressed: _saving ? null : _save,
@@ -117,7 +159,7 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
             ),
             child: _saving
                 ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Text('حفظ التقرير'),
+                : const Text('حفظ التقرير المالي'),
           ),
         ],
       ),
@@ -128,17 +170,29 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
 class _ExpenseRow extends StatelessWidget {
   final int index;
   final ExpenseItem item;
+  final bool canRemove;
+  final VoidCallback onRemove;
   final VoidCallback onChanged;
 
-  const _ExpenseRow({required this.index, required this.item, required this.onChanged});
+  const _ExpenseRow({
+    required this.index,
+    required this.item,
+    required this.canRemove,
+    required this.onRemove,
+    required this.onChanged,
+  });
 
   static String _mimeFromExtension(String? path) {
     final ext = path?.split('.').last.toLowerCase() ?? '';
     switch (ext) {
-      case 'png': return 'image/png';
-      case 'gif': return 'image/gif';
-      case 'webp': return 'image/webp';
-      default: return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      default:
+        return 'image/jpeg';
     }
   }
 
@@ -175,7 +229,17 @@ class _ExpenseRow extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('بيان الصرف رقم $index', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                Expanded(child: Text('بند الصرف $index', style: const TextStyle(fontWeight: FontWeight.bold))),
+                if (canRemove)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    onPressed: onRemove,
+                    tooltip: 'حذف البند',
+                  ),
+              ],
+            ),
             const SizedBox(height: 8),
             TextFormField(
               initialValue: item.description,
@@ -219,7 +283,7 @@ class _ExpenseRow extends StatelessWidget {
                         width: 64,
                         height: 64,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const Icon(Icons.image, size: 64),
+                        errorBuilder: (_, _, _) => const Icon(Icons.image, size: 64),
                       ),
                     ),
                   const SizedBox(width: 8),

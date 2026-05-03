@@ -25,6 +25,14 @@ class UserModel {
   bool get canViewActivityLogs =>
       isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
 
+  /// حذف/تعديل أي خطة عمل اليوم أو الغد (تقارير مفصّلة) — لهذا البريد فقط.
+  bool get canManageAnySiteWorkPlan =>
+      email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+
+  /// التحكم في إظهار/إخفاء أيقونات الواجهة — لهذا البريد فقط.
+  bool get canManageIconsControl =>
+      email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,

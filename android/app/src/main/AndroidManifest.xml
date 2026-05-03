@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- الإنترنت مطلوب للاتصال بـ API عبر ngrok -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- أذونات الموقع لتسجيل الحضور -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
