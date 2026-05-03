@@ -8,6 +8,8 @@ This guide explains how [Render](https://render.com) fits **this** project (Flut
 
 Render **Static Site** build images are a small **Ubuntu + Node** (or similar) stack. They do **not** include the **Flutter SDK**, so any build command that runs `flutter` will fail—this is expected, not a misconfiguration on your side.
 
+Setting **Publish directory** to `build/web` or removing a stray **`$`** from the build line does **not** fix this: the builder still has no `flutter` binary.
+
 **Fix:** do **not** use a Static Site for this repo’s main web build. Use one of these instead:
 
 1. **Web Service (Docker)** — **New +** → **Web Service** → **Docker** → root directory empty → **Dockerfile path** `Dockerfile`. This uses the repo’s root `Dockerfile` (Flutter inside the image), same idea as the `app` service in Docker Compose.
@@ -32,7 +34,7 @@ After switching to Docker for the frontend, update **`web/config.json`** with yo
 | Render product | Use for this application |
 |----------------|---------------------------|
 | **Web Service** | Run the **Node API** (`backend/server.js`). Render runs your server, assigns an HTTPS URL, and scales/restarts on failure. Build can use **Docker** (`backend/Dockerfile`) or **Native Node** (`npm install` + `npm start`). |
-| **Static Site** | Host the **built Flutter web** output (`build/web`) after `flutter build web`. Fast CDN, custom domain. You must point the app at your API’s public URL (see **Frontend API URL** below). |
+| **Static Site** | Host **pre-built** static files only. Render’s builder **cannot** run `flutter`; use only if `build/web` is produced elsewhere (CI/local). Fast CDN, custom domain; set **`apiBaseUrl`** for your API (see section 6). |
 | **Web Service (Docker)** | Alternative: deploy the **root Dockerfile** (Flutter build + nginx) as one container so the SPA and nginx live together; still configure nginx/API routing carefully. |
 | **PostgreSQL** | Optional **managed Postgres** if you do *not* want Neon. You would create a Render Postgres instance and set `DATABASE_URL` on the API to Render’s internal or external connection string. Your repo already supports `DATABASE_URL` with SSL. |
 | **Environment groups** | Share the same env vars (e.g. `DATABASE_URL`) across multiple services if you split API and worker later. |
@@ -144,13 +146,34 @@ If the browser calls the API from another origin (static site on `*.onrender.com
 - **Environment:** Edit env vars and **restart** the service to apply.
 - **Alerts:** Configure notifications for deploy failures or downtime.
 
+### Branch (e.g. `main` vs `feature/render`)
+
+Under the service **Settings** → **Build** (or equivalent), **Branch** controls which Git ref is cloned for each deploy. Your team can deploy from **`feature/render`** until you merge; Docker Web Services and Blueprints use the same branch setting. After merge, switch the branch to **`main`** (or your release branch) so production tracks stable code.
+
+### Auto-deploy and deploy hooks
+
+- **Auto-Deploy:** Usually **On commit**—every push to the connected branch triggers a build. You can disable it and deploy only from the dashboard when you need tighter control.
+- **Deploy Hook:** A secret URL you can call from **GitHub Actions**, scripts, or another CI system to trigger a deploy without relying on a git push.
+
+### Build filters
+
+**Included paths** / **Ignored paths** limit which file changes trigger a deploy. Useful to **ignore** paths such as `RENDER.MD`, `README.md`, or docs-only edits so documentation changes do not queue a full Flutter Docker build.
+
+### Custom domains and Render URL
+
+**Custom Domains** adds your own hostname; the **Render subdomain** (e.g. `https://wood-more-static.onrender.com`) stays available unless you turn it off. For production, prefer a **Docker Web Service** hostname for the app and a separate one for the API.
+
+### PR previews
+
+**PR Previews** can spin up temporary instances for pull requests (automatic or only when the PR title contains a marker such as `[render preview]`). Optional; turn on when you want review apps. Preview environments can clone a **group** of services (e.g. API + DB) per PR—see [Render docs](https://render.com/docs) for workspace limits.
+
 ---
 
 ## 10. Summary
 
 - **Sign up** at Render and connect Git.
 - Use a **Web Service** for **`backend/`** with `DATABASE_URL` pointing at Neon or Render Postgres.
-- Use a **Static Site** or **Docker Web Service** for the Flutter web build; set **`apiBaseUrl`** to your live API URL.
+- Use a **Docker Web Service** (or Blueprint **`render.yaml`**) for the Flutter web build; use a **Static Site** only with **pre-built** `build/web`. Set **`apiBaseUrl`** in **`web/config.json`** to your live API URL.
 - Manage secrets only in the dashboard or your CI secrets—never commit production `DATABASE_URL` to the repo.
 
 For official, up-to-date UI steps, refer to [Render Documentation](https://render.com/docs).
