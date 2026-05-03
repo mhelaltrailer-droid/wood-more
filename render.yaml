@@ -1,0 +1,27 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# Static Site + "flutter build" on Render fails: native builders do not ship Flutter.
+# Use Docker Web Services instead (same Dockerfiles as local Docker Compose).
+#
+# Apply: Dashboard → New → Blueprint → select this repo → apply. Set DATABASE_URL when prompted.
+# Or create each service manually (see RENDER.MD).
+
+services:
+  - type: web
+    name: wood-more-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+
+  - type: web
+    name: wood-more-web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /

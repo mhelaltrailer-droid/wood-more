@@ -16,7 +16,11 @@ FROM nginx:alpine
 RUN rm -rf /usr/share/nginx/html/*
 # Copy built Flutter web app
 COPY --from=builder /app/build/web /usr/share/nginx/html
-# SPA routing: fallback to index.html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# nginx.compose.conf: proxy /api/ → api:3000 (Docker Compose). standalone: no proxy (Render).
+COPY nginx.conf /etc/nginx/nginx.compose.conf
+COPY nginx.standalone.conf /etc/nginx/nginx.standalone.conf
+COPY docker-entrypoint-web.sh /docker-entrypoint-web.sh
+RUN chmod +x /docker-entrypoint-web.sh
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+# Entrypoint: listen on $PORT for Render; skip api upstream when "api" host missing
+CMD ["/docker-entrypoint-web.sh"]
