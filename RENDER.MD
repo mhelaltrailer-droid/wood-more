@@ -16,7 +16,11 @@ Setting **Publish directory** to `build/web` or removing a stray **`$`** from th
 2. **Blueprint** — Commit and push the repo’s **`render.yaml`**, then in Render: **New +** → **Blueprint** → connect the repo. You will get two Docker web services (`wood-more-api`, `wood-more-web`). Set **`DATABASE_URL`** on the API when Render prompts.
 3. **CI-built Static Site** — Build `flutter build web` in **GitHub Actions** (or locally), commit or upload only **`build/web`**, and point a Static Site at a folder that does not need `flutter` on Render (advanced; still need correct `apiBaseUrl` in `config.json`).
 
-After switching to Docker for the frontend, update **`web/config.json`** with your real **`wood-more-api` URL** before deploying, or the app will not reach the API (see section 6). On Render, `/api/` in nginx still targets hostname `api`, which only exists in Compose—in production the Flutter app should call the **public API URL** via `apiBaseUrl`, not rely on nginx `proxy_pass` to `api`.
+After switching to Docker for the frontend, update **`web/config.json`** with your real **`wood-more-api` URL** before deploying, or the app will not reach the API (see section 6). On Render, the container uses a config **without** the Compose-only **`/api/`** nginx proxy; the browser must use **`apiBaseUrl`** to reach the API.
+
+### Troubleshooting: image builds then **Exited with status 1** on deploy
+
+Common causes for the **Flutter + nginx** Docker service were: (1) Render injects **`PORT`** and forwards traffic to that port, while nginx only listened on **80**; (2) nginx referenced **`proxy_pass http://api:3000`**, but the hostname **`api`** does not exist outside Docker Compose, so nginx could fail to start. The repo **`Dockerfile`** uses an entrypoint that listens on **`$PORT`** (default **80**) and drops the **`/api/`** proxy block when **`api`** is not resolvable. Push the latest **`Dockerfile`**, **`docker-entrypoint-web.sh`**, and **`nginx*.conf`** files, then redeploy.
 
 ---
 
@@ -88,7 +92,7 @@ Render’s default build machines for **Static Site** do **not** ship with the F
 3. **Root directory:** leave **empty** if `pubspec.yaml` is at the repository root; if the app lives in a subfolder, set that folder here.
 4. **Runtime:** **Docker**.
 5. **Dockerfile path:** `Dockerfile` (repo root).
-6. In the service **Settings**, set **Docker / Instance** details as Render prompts; ensure the service listens on the port Render expects (often **80** for this nginx image—confirm **Health Check Path** if you add one, e.g. `/`).
+6. **Health check path:** `/` is fine. The image entrypoint makes nginx listen on Render’s **`PORT`** (and omits the Compose-only **`/api/`** proxy when the **`api`** hostname is missing).
 7. Before building the image, set **`web/config.json`** `apiBaseUrl` to your live API URL (see section 6). On web, the app loads **`/config.json`** from the same origin as the site; `docker-compose` uses a bind mount of `config.api.json` over `config.json`, but the root **`Dockerfile`** does not—production URL must be in **`web/config.json`** (or you extend the Dockerfile to copy a Render-specific config).
 
 This path matches “build like Docker Compose’s `app` service” without needing Flutter on a Static Site builder.
