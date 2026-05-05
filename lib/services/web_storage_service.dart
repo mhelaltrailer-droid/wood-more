@@ -19,6 +19,7 @@ import '../models/project_location_model.dart';
 import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
+import '../models/notification_item_model.dart';
 import '../data/default_materials.dart';
 import 'icon_visibility_service.dart';
 
@@ -45,6 +46,7 @@ class WebStorageService {
   static const _engineerCustodyKey = 'wood_engineer_custody';
   static const _systemLockedKey = 'wood_system_locked';
   static const _homeIconsVisibilityKey = 'wood_home_icons_visibility';
+  static const _notificationsKey = 'wood_notifications';
 
   Future<SharedPreferences> get _prefs async =>
       await SharedPreferences.getInstance();
@@ -275,6 +277,9 @@ class WebStorageService {
           .map((e) => {'id': e.key + 1, 'name': e.value})
           .toList();
       await prefs.setString(_projectsKey, jsonEncode(projects));
+    }
+    if (prefs.getString(_notificationsKey) == null) {
+      await prefs.setString(_notificationsKey, jsonEncode(<Map<String, dynamic>>[]));
     }
     if (prefs.getString(_attendanceKey) == null) {
       await prefs.setString(_attendanceKey, jsonEncode([]));
@@ -681,6 +686,86 @@ class WebStorageService {
     };
     list.insert(0, map);
     await prefs.setString(_attendanceKey, jsonEncode(list));
+    await _notifySiteEngineerManagersOnAttendance(record);
+  }
+
+  Future<void> _notifySiteEngineerManagersOnAttendance(
+    AttendanceRecordModel record,
+  ) async {
+    final users = await getUsers();
+    final managers = users
+        .where((u) => u.role == 'site_engineer_manager')
+        .toList(growable: false);
+    if (managers.isEmpty) return;
+    final prefs = await _prefs;
+    final raw = prefs.getString(_notificationsKey) ?? '[]';
+    final list = jsonDecode(raw) as List;
+    var nextId = list.isEmpty
+        ? 1
+        : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final isCheckIn = record.type == 'check_in';
+    final actionLabel = isCheckIn ? 'الحضور' : 'الانصراف';
+    final projectName = (record.projectName ?? '').trim().isEmpty
+        ? 'بدون مشروع'
+        : record.projectName!.trim();
+    final body =
+        'قام "${record.userName}" بتسجيل $actionLabel بمشروع "$projectName"';
+    final now = DateTime.now().toIso8601String();
+    for (final manager in managers) {
+      list.add({
+        'id': nextId++,
+        'recipient_user_id': manager.id,
+        'recipient_role': manager.role,
+        'title': 'تنبيه حضور/انصراف',
+        'body': body,
+        'event_type': 'attendance_${record.type}',
+        'actor_user_id': record.userId,
+        'actor_user_name': record.userName,
+        'project_name': record.projectName,
+        'created_at': now,
+        'is_read': 0,
+        'read_at': null,
+      });
+    }
+    await prefs.setString(_notificationsKey, jsonEncode(list));
+  }
+
+  Future<List<NotificationItemModel>> getNotificationsForUser(int userId) async {
+    await _initData();
+    final prefs = await _prefs;
+    final raw = prefs.getString(_notificationsKey) ?? '[]';
+    final list = jsonDecode(raw) as List;
+    final result = list
+        .map((e) => NotificationItemModel.fromMap(Map<String, dynamic>.from(e as Map)))
+        .where((n) => n.recipientUserId == userId)
+        .toList();
+    result.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return result;
+  }
+
+  Future<int> getUnreadNotificationsCount(int userId) async {
+    final list = await getNotificationsForUser(userId);
+    return list.where((n) => !n.isRead).length;
+  }
+
+  Future<void> markNotificationRead({
+    required int notificationId,
+    required int userId,
+  }) async {
+    await _initData();
+    final prefs = await _prefs;
+    final raw = prefs.getString(_notificationsKey) ?? '[]';
+    final list = jsonDecode(raw) as List;
+    for (var i = 0; i < list.length; i++) {
+      final map = Map<String, dynamic>.from(list[i] as Map);
+      if (map['id'] != notificationId) continue;
+      if (map['recipient_user_id'] != userId) continue;
+      map['is_read'] = 1;
+      map['read_at'] = DateTime.now().toIso8601String();
+      list[i] = map;
+      break;
+    }
+    await prefs.setString(_notificationsKey, jsonEncode(list));
   }
 
   Future<List<AttendanceRecordModel>> getAllAttendanceRecords() async {

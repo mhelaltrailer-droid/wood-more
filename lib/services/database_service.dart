@@ -20,6 +20,7 @@ import '../models/project_location_model.dart';
 import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
+import '../models/notification_item_model.dart';
 import '../data/default_materials.dart';
 import 'icon_visibility_service.dart';
 
@@ -43,7 +44,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 22,
+      version: 23,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -84,6 +85,8 @@ class DatabaseService {
         FOREIGN KEY (user_id) REFERENCES users (id)
       )
     ''');
+
+    await _createNotificationsTable(db);
 
     // إدخال بيانات تجريبية
     await _seedData(db);
@@ -248,6 +251,9 @@ class DatabaseService {
     if (oldVersion < 22) {
       await _createSystemSettingsTable(db);
     }
+    if (oldVersion < 23) {
+      await _createNotificationsTable(db);
+    }
     if (oldVersion < 20) {
       try {
         await db.execute('''
@@ -347,6 +353,25 @@ class DatabaseService {
       'key': 'system_locked',
       'value': '0',
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<void> _createNotificationsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recipient_user_id INTEGER NOT NULL,
+        recipient_role TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        actor_user_id INTEGER,
+        actor_user_name TEXT,
+        project_name TEXT,
+        created_at TEXT NOT NULL,
+        is_read INTEGER NOT NULL DEFAULT 0,
+        read_at TEXT
+      )
+    ''');
   }
 
   Future<void> _createStoreAndUnitsTables(Database db) async {
@@ -809,7 +834,7 @@ class DatabaseService {
   /// إضافة سجل حضور
   Future<int> addAttendanceRecord(AttendanceRecordModel record) async {
     final db = await database;
-    return db.insert('attendance_records', {
+    final id = await db.insert('attendance_records', {
       'user_id': record.userId,
       'user_name': record.userName,
       'type': record.type,
@@ -819,6 +844,78 @@ class DatabaseService {
       'project_name': record.projectName,
       'notes': record.notes,
     });
+    await _notifySiteEngineerManagersOnAttendance(db, record);
+    return id;
+  }
+
+  Future<void> _notifySiteEngineerManagersOnAttendance(
+    Database db,
+    AttendanceRecordModel record,
+  ) async {
+    final managers = await db.query(
+      'users',
+      columns: ['id', 'role'],
+      where: 'role = ?',
+      whereArgs: ['site_engineer_manager'],
+    );
+    if (managers.isEmpty) return;
+    final isCheckIn = record.type == 'check_in';
+    final actionLabel = isCheckIn ? 'الحضور' : 'الانصراف';
+    final projectName = (record.projectName ?? '').trim().isEmpty
+        ? 'بدون مشروع'
+        : record.projectName!.trim();
+    final body =
+        'قام "${record.userName}" بتسجيل $actionLabel بمشروع "$projectName"';
+    final now = DateTime.now().toIso8601String();
+    for (final manager in managers) {
+      await db.insert('notifications', {
+        'recipient_user_id': manager['id'],
+        'recipient_role': 'site_engineer_manager',
+        'title': 'تنبيه حضور/انصراف',
+        'body': body,
+        'event_type': 'attendance_${record.type}',
+        'actor_user_id': record.userId,
+        'actor_user_name': record.userName,
+        'project_name': record.projectName,
+        'created_at': now,
+        'is_read': 0,
+      });
+    }
+  }
+
+  Future<List<NotificationItemModel>> getNotificationsForUser(int userId) async {
+    final db = await database;
+    final maps = await db.query(
+      'notifications',
+      where: 'recipient_user_id = ?',
+      whereArgs: [userId],
+      orderBy: 'created_at DESC',
+    );
+    return maps.map((m) => NotificationItemModel.fromMap(m)).toList();
+  }
+
+  Future<int> getUnreadNotificationsCount(int userId) async {
+    final db = await database;
+    final v = Sqflite.firstIntValue(
+      await db.rawQuery(
+        'SELECT COUNT(*) FROM notifications WHERE recipient_user_id = ? AND is_read = 0',
+        [userId],
+      ),
+    );
+    return v ?? 0;
+  }
+
+  Future<void> markNotificationRead({
+    required int notificationId,
+    required int userId,
+  }) async {
+    final db = await database;
+    await db.update(
+      'notifications',
+      {'is_read': 1, 'read_at': DateTime.now().toIso8601String()},
+      where: 'id = ? AND recipient_user_id = ?',
+      whereArgs: [notificationId, userId],
+    );
   }
 
   /// الحصول على جميع سجلات الحضور (للمدير)

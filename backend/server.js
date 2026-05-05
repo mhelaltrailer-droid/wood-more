@@ -104,6 +104,32 @@ async function ensurePostponeReasonsTable() {
   }
 }
 
+async function ensureNotificationsTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        recipient_role TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        actor_user_id INTEGER,
+        actor_user_name TEXT,
+        project_name TEXT,
+        created_at TEXT NOT NULL,
+        is_read BOOLEAN NOT NULL DEFAULT FALSE,
+        read_at TEXT
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created ON notifications(recipient_user_id, created_at DESC)').catch(() => {});
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_notifications_recipient_unread ON notifications(recipient_user_id, is_read)').catch(() => {});
+    console.log('ensureNotificationsTable: ok');
+  } catch (e) {
+    console.warn('ensureNotificationsTable:', e.message);
+  }
+}
+
 function _extractUserContext(req) {
   const body = req.body || {};
   const query = req.query || {};
@@ -801,7 +827,95 @@ app.post('/attendance', async (req, res) => {
       'INSERT INTO attendance_records (user_id, user_name, type, date_time, location, project_id, project_name, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
       [b.userId, b.userName, b.type, b.dateTime, b.location || '', b.projectId || null, b.projectName || null, b.notes || null]
     );
+    const isCheckIn = String(b.type || '') === 'check_in';
+    const actionLabel = isCheckIn ? 'الحضور' : 'الانصراف';
+    const projectName = String(b.projectName || '').trim() || 'بدون مشروع';
+    const body = `قام "${String(b.userName || '')}" بتسجيل ${actionLabel} بمشروع "${projectName}"`;
+    await pool.query(
+      `INSERT INTO notifications (
+        recipient_user_id, recipient_role, title, body, event_type,
+        actor_user_id, actor_user_name, project_name, created_at, is_read
+      )
+      SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE
+      FROM users
+      WHERE role = 'site_engineer_manager'`,
+      [
+        'تنبيه حضور/انصراف',
+        body,
+        `attendance_${String(b.type || '')}`,
+        b.userId || null,
+        b.userName || null,
+        b.projectName || null,
+        new Date().toISOString(),
+      ]
+    );
     res.json(parseInt(r.rows[0].id));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/notifications', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId || ''), 10);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    const r = await pool.query(
+      `SELECT * FROM notifications
+       WHERE recipient_user_id = $1
+       ORDER BY created_at DESC`,
+      [userId]
+    );
+    res.json(
+      r.rows.map((row) => ({
+        id: parseInt(row.id),
+        recipient_user_id: parseInt(row.recipient_user_id),
+        recipient_role: row.recipient_role,
+        title: row.title,
+        body: row.body,
+        event_type: row.event_type,
+        actor_user_id: row.actor_user_id != null ? parseInt(row.actor_user_id) : null,
+        actor_user_name: row.actor_user_name,
+        project_name: row.project_name,
+        created_at: row.created_at,
+        is_read: row.is_read === true,
+        read_at: row.read_at,
+      }))
+    );
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/notifications/unread-count', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId || ''), 10);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    const r = await pool.query(
+      'SELECT COUNT(*)::int AS count FROM notifications WHERE recipient_user_id = $1 AND is_read = FALSE',
+      [userId]
+    );
+    res.json({ count: parseInt(r.rows[0]?.count || '0') });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.put('/notifications/:id/read', async (req, res) => {
+  try {
+    const notificationId = parseInt(String(req.params.id || ''), 10);
+    const userId = parseInt(String(req.body?.userId || req.query?.userId || ''), 10);
+    if (!Number.isInteger(notificationId) || !Number.isInteger(userId)) {
+      return res.status(400).json({ error: 'notification id and userId are required' });
+    }
+    await pool.query(
+      'UPDATE notifications SET is_read = TRUE, read_at = $1 WHERE id = $2 AND recipient_user_id = $3',
+      [new Date().toISOString(), notificationId, userId]
+    );
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -2181,6 +2295,7 @@ ensurePasswordColumn()
   .then(() => ensureActivityLogsTable())
   .then(() => ensureExecutedPlansTable())
   .then(() => ensurePostponeReasonsTable())
+  .then(() => ensureNotificationsTable())
   .then(() => {
     app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));
   })

@@ -20,6 +20,7 @@ import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../models/activity_log_model.dart';
+import '../models/notification_item_model.dart';
 import 'icon_visibility_service.dart';
 
 /// Storage implementation that uses the REST API (PostgreSQL backend).
@@ -408,6 +409,31 @@ class ApiStorageService {
 
   Future<void> deleteAttendanceRecord(int id) async {
     await _delete('attendance/$id');
+  }
+
+  Future<List<NotificationItemModel>> getNotificationsForUser(int userId) async {
+    final list = await _getList('notifications?userId=$userId');
+    return list
+        .map(
+          (e) => NotificationItemModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<int> getUnreadNotificationsCount(int userId) async {
+    final data = await _get('notifications/unread-count?userId=$userId');
+    final value = data['count'];
+    if (value is int) return value;
+    return int.tryParse('${value ?? 0}') ?? 0;
+  }
+
+  Future<void> markNotificationRead({
+    required int notificationId,
+    required int userId,
+  }) async {
+    await _put('notifications/$notificationId/read', {'userId': userId});
   }
 
   Future<List<String>> getMaterials() async {

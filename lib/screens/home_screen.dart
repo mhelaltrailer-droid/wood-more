@@ -31,6 +31,7 @@ import 'operation_reports_tracking_screen.dart';
 import 'work_plan_tracking_report_screen.dart';
 import 'icons_control_screen.dart';
 import 'login_screen.dart';
+import 'notifications_screen.dart';
 
 /// الصفحة الرئيسية - تختلف حسب دور المستخدم
 class HomeScreen extends StatefulWidget {
@@ -45,6 +46,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with RouteAware {
   bool _subscribed = false;
   Map<String, bool>? _iconConfig;
+  int _unreadNotificationsCount = 0;
 
   @override
   void didChangeDependencies() {
@@ -67,12 +69,14 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   void didPopNext() {
     saveLastRoute('home');
     _loadIconsConfig();
+    _loadUnreadNotificationsCount();
   }
 
   @override
   void initState() {
     super.initState();
     _loadIconsConfig();
+    _loadUnreadNotificationsCount();
   }
 
   Future<void> _loadIconsConfig() async {
@@ -93,6 +97,25 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
           widget.currentUser.role,
         );
       });
+    }
+  }
+
+  Future<void> _loadUnreadNotificationsCount() async {
+    if (widget.currentUser.role != 'site_engineer_manager') {
+      if (!mounted) return;
+      setState(() => _unreadNotificationsCount = 0);
+      return;
+    }
+    try {
+      final storage = getStorage();
+      final count = storage is ApiStorageService
+          ? await storage.getUnreadNotificationsCount(widget.currentUser.id)
+          : await storage.getUnreadNotificationsCount(widget.currentUser.id);
+      if (!mounted) return;
+      setState(() => _unreadNotificationsCount = count);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _unreadNotificationsCount = 0);
     }
   }
 
@@ -121,6 +144,51 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
         actions: [
+          if (currentUser.role == 'site_engineer_manager')
+            IconButton(
+              tooltip: 'الإشعارات',
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => NotificationsScreen(currentUser: currentUser),
+                  ),
+                );
+                await _loadUnreadNotificationsCount();
+              },
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.notifications),
+                  if (_unreadNotificationsCount > 0)
+                    Positioned(
+                      right: -6,
+                      top: -6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(minWidth: 18),
+                        child: Text(
+                          _unreadNotificationsCount > 99
+                              ? '99+'
+                              : '$_unreadNotificationsCount',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {

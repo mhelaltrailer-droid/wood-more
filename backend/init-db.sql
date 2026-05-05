@@ -60,6 +60,27 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   notes TEXT
 );
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id SERIAL PRIMARY KEY,
+  recipient_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  recipient_role TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  actor_user_id INTEGER,
+  actor_user_name TEXT,
+  project_name TEXT,
+  created_at TEXT NOT NULL,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  read_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created
+  ON notifications(recipient_user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient_unread
+  ON notifications(recipient_user_id, is_read);
+
 CREATE TABLE IF NOT EXISTS materials (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL
