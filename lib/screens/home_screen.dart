@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../services/auth_persistence.dart';
@@ -47,6 +48,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   bool _subscribed = false;
   Map<String, bool>? _iconConfig;
   int _unreadNotificationsCount = 0;
+  Timer? _notificationsPollTimer;
 
   @override
   void didChangeDependencies() {
@@ -61,6 +63,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
 
   @override
   void dispose() {
+    _notificationsPollTimer?.cancel();
     RouteObserverProvider.routeObserver.unsubscribe(this);
     super.dispose();
   }
@@ -77,6 +80,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     super.initState();
     _loadIconsConfig();
     _loadUnreadNotificationsCount();
+    _startNotificationsPollingIfManager();
   }
 
   Future<void> _loadIconsConfig() async {
@@ -107,16 +111,34 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       return;
     }
     try {
+      final prevCount = _unreadNotificationsCount;
       final storage = getStorage();
       final count = storage is ApiStorageService
           ? await storage.getUnreadNotificationsCount(widget.currentUser.id)
           : await storage.getUnreadNotificationsCount(widget.currentUser.id);
       if (!mounted) return;
       setState(() => _unreadNotificationsCount = count);
+      if (count > prevCount && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('لديك ${count - prevCount} إشعار جديد'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() => _unreadNotificationsCount = 0);
     }
+  }
+
+  void _startNotificationsPollingIfManager() {
+    if (widget.currentUser.role != 'site_engineer_manager') return;
+    _notificationsPollTimer?.cancel();
+    _notificationsPollTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _loadUnreadNotificationsCount(),
+    );
   }
 
   @override

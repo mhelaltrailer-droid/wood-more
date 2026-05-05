@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/user_model.dart';
@@ -18,11 +19,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   List<NotificationItemModel> _items = const [];
   bool _isLoading = true;
   String? _error;
+  Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
     _loadNotifications();
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _refreshSilently(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadNotifications() async {
@@ -47,6 +59,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         _error = '$e';
       });
     }
+  }
+
+  Future<void> _refreshSilently() async {
+    try {
+      final storage = getStorage();
+      final items = storage is ApiStorageService
+          ? await storage.getNotificationsForUser(widget.currentUser.id)
+          : await storage.getNotificationsForUser(widget.currentUser.id);
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _error = null;
+      });
+    } catch (_) {}
   }
 
   Future<void> _markAsRead(NotificationItemModel item) async {
