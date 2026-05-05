@@ -1,0 +1,33 @@
+# Runs backend/init-db.sql against your PostgreSQL instance (e.g. Render external URL).
+#
+# Triggers: push to main (includes merges into main), or manual run.
+#
+# Required GitHub secret:
+#   DATABASE_URL — Render “External Database URL” (postgresql://…)
+
+name: Initialize PostgreSQL schema
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  init-db:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Apply init-db.sql
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          : "${DATABASE_URL:?Set the DATABASE_URL repository secret}"
+          export PGSSLMODE="${PGSSLMODE:-require}"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/init-db.sql
