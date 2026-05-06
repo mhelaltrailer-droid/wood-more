@@ -130,6 +130,7 @@ async function ensureNotificationsTable() {
   }
 }
 
+
 function _extractUserContext(req) {
   const body = req.body || {};
   const query = req.query || {};
@@ -2233,6 +2234,36 @@ app.get('/executed-plans/contractor-report', async (req, res) => {
     );
 
     const out = [];
+    const locationsCache = new Map();
+    async function getLocationsMap(projectId) {
+      if (projectId == null || Number.isNaN(projectId)) return new Map();
+      if (locationsCache.has(projectId)) return locationsCache.get(projectId);
+      const lr = await pool.query(
+        'SELECT id, parent_id, name FROM project_locations WHERE project_id = $1',
+        [projectId]
+      );
+      const map = new Map();
+      for (const l of lr.rows) {
+        map.set(parseInt(l.id, 10), {
+          id: parseInt(l.id, 10),
+          parentId: l.parent_id != null ? parseInt(l.parent_id, 10) : null,
+          name: String(l.name || '').trim(),
+        });
+      }
+      locationsCache.set(projectId, map);
+      return map;
+    }
+
+    function formatLocation(projectLocations, locationId) {
+      if (locationId == null || Number.isNaN(locationId)) return '—';
+      const node = projectLocations.get(locationId);
+      if (!node || !node.name) return '—';
+      if (node.parentId == null) return node.name;
+      const parent = projectLocations.get(node.parentId);
+      if (!parent || !parent.name) return node.name;
+      return `${parent.name} (${node.name})`;
+    }
+
     for (const row of rows.rows) {
       let plan = null;
       try {
@@ -2241,24 +2272,53 @@ app.get('/executed-plans/contractor-report', async (req, res) => {
         plan = null;
       }
       const lines = Array.isArray(plan?.lines) ? plan.lines : [];
-      let workersTotal = 0;
+      const byLocation = new Map();
       for (const line of lines) {
         const cid = line?.contractorId != null ? parseInt(line.contractorId, 10) : null;
         if (cid == null || Number.isNaN(cid) || cid !== contractorId) continue;
-        const w = parseInt(String(line.workersCount ?? line.contractorWorkersCount ?? 0), 10);
-        workersTotal += Number.isNaN(w) ? 0 : w;
+        const locationId = line?.locationId != null ? parseInt(line.locationId, 10) : null;
+        const key = Number.isNaN(locationId) || locationId == null ? 'none' : String(locationId);
+        const craftsman = parseInt(String(line.contractorWorkersCount ?? 0), 10);
+        const assistant = parseInt(String(line.selfWorkersCount ?? 0), 10);
+        let workers = parseInt(String(line.workersCount ?? 0), 10);
+        const craftsmanSafe = Number.isNaN(craftsman) ? 0 : craftsman;
+        const assistantSafe = Number.isNaN(assistant) ? 0 : assistant;
+        if (Number.isNaN(workers) || workers <= 0) {
+          workers = craftsmanSafe + assistantSafe;
+        }
+        const prev = byLocation.get(key) || {
+          locationId: key === 'none' ? null : parseInt(key, 10),
+          craftsmanCount: 0,
+          assistantCount: 0,
+          workersCount: 0,
+        };
+        prev.craftsmanCount += craftsmanSafe;
+        prev.assistantCount += assistantSafe;
+        prev.workersCount += Number.isNaN(workers) ? 0 : workers;
+        byLocation.set(key, prev);
       }
-      if (workersTotal <= 0) continue;
-      out.push({
-        executed_plan_id: parseInt(row.id, 10),
-        project_id: row.project_id != null ? parseInt(row.project_id, 10) : null,
-        project_name: row.project_name ?? (plan?.projectName ?? null),
-        user_id: parseInt(row.user_id, 10),
-        user_name: row.user_name,
-        plan_date: row.plan_date,
-        status: row.status,
-        workers_count: workersTotal,
-      });
+      if (byLocation.size === 0) continue;
+      const projectId = row.project_id != null ? parseInt(row.project_id, 10) : null;
+      const projectLocations = await getLocationsMap(projectId);
+      for (const g of byLocation.values()) {
+        if (g.workersCount <= 0 && g.craftsmanCount <= 0 && g.assistantCount <= 0) {
+          continue;
+        }
+        out.push({
+          executed_plan_id: parseInt(row.id, 10),
+          project_id: projectId,
+          project_name: row.project_name ?? (plan?.projectName ?? null),
+          user_id: parseInt(row.user_id, 10),
+          user_name: row.user_name,
+          contractor_name: contractorName,
+          plan_date: row.plan_date,
+          status: row.status,
+          work_place: formatLocation(projectLocations, g.locationId),
+          craftsman_count: g.craftsmanCount,
+          assistant_count: g.assistantCount,
+          workers_count: g.workersCount,
+        });
+      }
     }
     res.json(out);
   } catch (e) {

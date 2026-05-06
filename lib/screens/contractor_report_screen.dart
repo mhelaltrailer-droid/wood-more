@@ -5,8 +5,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/user_model.dart';
-import '../models/daily_report_model.dart';
 import '../services/storage_service.dart';
+import '../services/api_storage_service.dart';
 
 /// تقرير المقاول: اسم المقاول + مدة → المشاريع وعدد العمال في كل تقرير
 /// قائمة المقاولين من التخزين (نفس مصدر التقرير اليومي والتقرير المفصل)
@@ -25,7 +25,7 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
   String? _selectedContractor;
   DateTime _dateFrom = DateTime.now();
   DateTime _dateTo = DateTime.now();
-  List<DailyReportData> _reports = [];
+  List<_ContractorReportRow> _rows = [];
   bool _loading = false;
 
   @override
@@ -56,18 +56,33 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اختر المقاول')));
       return;
     }
+    if (_db is! ApiStorageService) {
+      if (!mounted) return;
+      setState(() => _rows = []);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('هذا التقرير متاح في وضع API فقط'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
     setState(() => _loading = true);
-    final list = await _db.getDailyReports(dateFrom: _dateFrom, dateTo: _dateTo);
-    final filtered = list.where((r) => r.contractorName == _selectedContractor).toList();
+    final list = await (_db as ApiStorageService).getContractorReportFromExecutedPlans(
+      contractorName: _selectedContractor!,
+      dateFrom: _dateFrom,
+      dateTo: _dateTo,
+    );
+    final rows = list.map(_ContractorReportRow.fromMap).toList();
     if (!mounted) return;
     setState(() {
-      _reports = filtered;
+      _rows = rows;
       _loading = false;
     });
   }
 
   Future<void> _exportPdf() async {
-    if (_reports.isEmpty) return;
+    if (_rows.isEmpty) return;
     final dateFormat = DateFormat('yyyy/MM/dd', 'ar');
     final fontBase = await PdfGoogleFonts.tajawalRegular();
     final fontBold = await PdfGoogleFonts.tajawalBold();
@@ -100,21 +115,37 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
               pw.SizedBox(height: 12),
               pw.Table(
                 border: pw.TableBorder.all(width: 0.5),
-                columnWidths: {0: const pw.FlexColumnWidth(2), 1: const pw.FlexColumnWidth(1), 2: const pw.FlexColumnWidth(1.2)},
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(1.4),
+                  1: const pw.FlexColumnWidth(1.2),
+                  2: const pw.FlexColumnWidth(1.2),
+                  3: const pw.FlexColumnWidth(1.6),
+                  4: const pw.FlexColumnWidth(1),
+                  5: const pw.FlexColumnWidth(1),
+                  6: const pw.FlexColumnWidth(1),
+                },
                 children: [
                   pw.TableRow(
                     decoration: const pw.BoxDecoration(color: PdfColors.grey300),
                     children: [
+                      _cell('المقاول', true),
+                      _cell('المهندس', true),
                       _cell('المشروع', true),
-                      _cell('عدد العمال', true),
-                      _cell('التاريخ / المهندس', true),
+                      _cell('مكان العمل', true),
+                      _cell('صنايعي', true),
+                      _cell('مساعد', true),
+                      _cell('عمال', true),
                     ],
                   ),
-                  ..._reports.map((r) => pw.TableRow(
+                  ..._rows.map((r) => pw.TableRow(
                         children: [
-                          _cell(r.projectName ?? '—', false),
-                          _cell(r.workersCount.isEmpty ? '—' : r.workersCount, false),
-                          _cell('${dateFormat.format(r.reportDate)}\n${r.userName}', false),
+                          _cell(r.contractorName, false),
+                          _cell(r.engineerName, false),
+                          _cell(r.projectName, false),
+                          _cell(r.workPlace, false),
+                          _cell('${r.craftsmanCount}', false),
+                          _cell('${r.assistantCount}', false),
+                          _cell('${r.workersCount}', false),
                         ],
                       )),
                 ],
@@ -162,15 +193,19 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
           }),
           const SizedBox(height: 16),
           FilledButton.icon(onPressed: _loading ? null : _run, icon: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.search), label: const Text('عرض التقرير'), style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1B5E20))),
-          if (_reports.isNotEmpty) ...[
+          if (_rows.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Text('النتائج (${_reports.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('النتائج (${_rows.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            ..._reports.map((r) => Card(
+            ..._rows.map((r) => Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
-                    title: Text(r.projectName ?? '—'),
-                    subtitle: Text('عدد العمال: ${r.workersCount} • ${dateFormat.format(r.reportDate)} • ${r.userName}'),
+                    title: Text('${r.contractorName} • ${r.engineerName}'),
+                    subtitle: Text(
+                      '${r.projectName} • ${r.workPlace}\n'
+                      'صنايعي: ${r.craftsmanCount} • مساعد: ${r.assistantCount} • عمال: ${r.workersCount}',
+                    ),
+                    isThreeLine: true,
                   ),
                 )),
             const SizedBox(height: 12),
@@ -178,6 +213,39 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _ContractorReportRow {
+  final String contractorName;
+  final String engineerName;
+  final String projectName;
+  final String workPlace;
+  final int craftsmanCount;
+  final int assistantCount;
+  final int workersCount;
+
+  const _ContractorReportRow({
+    required this.contractorName,
+    required this.engineerName,
+    required this.projectName,
+    required this.workPlace,
+    required this.craftsmanCount,
+    required this.assistantCount,
+    required this.workersCount,
+  });
+
+  factory _ContractorReportRow.fromMap(Map<String, dynamic> m) {
+    int parse(dynamic v) => int.tryParse('${v ?? 0}') ?? 0;
+    return _ContractorReportRow(
+      contractorName: (m['contractor_name'] ?? '—').toString(),
+      engineerName: (m['user_name'] ?? '—').toString(),
+      projectName: (m['project_name'] ?? '—').toString(),
+      workPlace: (m['work_place'] ?? '—').toString(),
+      craftsmanCount: parse(m['craftsman_count']),
+      assistantCount: parse(m['assistant_count']),
+      workersCount: parse(m['workers_count']),
     );
   }
 }
