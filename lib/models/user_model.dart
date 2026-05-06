@@ -33,6 +33,11 @@ class UserModel {
   bool get canManageIconsControl =>
       email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
 
+  bool get canUsePrivateAdminManagerChat {
+    final e = email.trim().toLowerCase();
+    return e == 'islam.shams2050@gmail.com' || e == 'mouhammedhelal@gmail.com';
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,

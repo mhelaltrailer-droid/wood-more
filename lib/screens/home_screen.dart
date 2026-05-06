@@ -33,6 +33,7 @@ import 'work_plan_tracking_report_screen.dart';
 import 'icons_control_screen.dart';
 import 'login_screen.dart';
 import 'notifications_screen.dart';
+import 'private_chat_screen.dart';
 
 /// الصفحة الرئيسية - تختلف حسب دور المستخدم
 class HomeScreen extends StatefulWidget {
@@ -49,6 +50,10 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   Map<String, bool>? _iconConfig;
   int _unreadNotificationsCount = 0;
   Timer? _notificationsPollTimer;
+
+  bool get _canUseNotifications =>
+      widget.currentUser.role == 'site_engineer_manager' ||
+      widget.currentUser.role == 'app_admin';
 
   @override
   void didChangeDependencies() {
@@ -105,7 +110,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   }
 
   Future<void> _loadUnreadNotificationsCount() async {
-    if (widget.currentUser.role != 'site_engineer_manager') {
+    if (!_canUseNotifications) {
       if (!mounted) return;
       setState(() => _unreadNotificationsCount = 0);
       return;
@@ -133,7 +138,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   }
 
   void _startNotificationsPollingIfManager() {
-    if (widget.currentUser.role != 'site_engineer_manager') return;
+    if (!_canUseNotifications) return;
     _notificationsPollTimer?.cancel();
     _notificationsPollTimer = Timer.periodic(
       const Duration(seconds: 8),
@@ -160,13 +165,34 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
               ),
               const SizedBox(width: 12),
               const Text('Wood & More'),
+              if (currentUser.canUsePrivateAdminManagerChat) ...[
+                const SizedBox(width: 8),
+                InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => PrivateChatScreen(currentUser: currentUser),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(Icons.chat_bubble_outline, size: 16),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
         actions: [
-          if (currentUser.role == 'site_engineer_manager')
+          if (_canUseNotifications)
             IconButton(
               tooltip: 'الإشعارات',
               onPressed: () async {

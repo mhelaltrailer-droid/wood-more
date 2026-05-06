@@ -21,6 +21,7 @@ import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../models/activity_log_model.dart';
 import '../models/notification_item_model.dart';
+import '../models/private_chat_message_model.dart';
 import 'icon_visibility_service.dart';
 
 /// Storage implementation that uses the REST API (PostgreSQL backend).
@@ -434,6 +435,41 @@ class ApiStorageService {
     required int userId,
   }) async {
     await _put('notifications/$notificationId/read', {'userId': userId});
+  }
+
+  Future<List<PrivateChatMessageModel>> getPrivateChatMessages({
+    required String requesterEmail,
+  }) async {
+    final uri = Uri.parse(_path('private-chat/messages')).replace(
+      queryParameters: {
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
+      },
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final decoded = jsonDecode(r.body);
+    if (decoded == null || decoded is! List) return [];
+    return decoded
+        .map(
+          (e) => PrivateChatMessageModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<int> sendPrivateChatMessage({
+    required String senderEmail,
+    required String senderName,
+    required String receiverEmail,
+    required String body,
+  }) async {
+    return _post('private-chat/messages', {
+      'senderEmail': senderEmail.trim().toLowerCase(),
+      'senderName': senderName,
+      'receiverEmail': receiverEmail.trim().toLowerCase(),
+      'body': body,
+    });
   }
 
   Future<List<String>> getMaterials() async {

@@ -130,6 +130,35 @@ async function ensureNotificationsTable() {
   }
 }
 
+async function ensurePrivateChatMessagesTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS private_chat_messages (
+        id SERIAL PRIMARY KEY,
+        sender_email TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        receiver_email TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_private_chat_created ON private_chat_messages(created_at)',
+    ).catch(() => {});
+    console.log('ensurePrivateChatMessagesTable: ok');
+  } catch (e) {
+    console.warn('ensurePrivateChatMessagesTable:', e.message);
+  }
+}
+
+function _isAllowedPrivatePair(a, b) {
+  const x = String(a || '').trim().toLowerCase();
+  const y = String(b || '').trim().toLowerCase();
+  const manager = 'islam.shams2050@gmail.com';
+  const admin = 'mouhammedhelal@gmail.com';
+  return (x === manager && y === admin) || (x === admin && y === manager);
+}
+
 
 function _extractUserContext(req) {
   const body = req.body || {};
@@ -839,7 +868,7 @@ app.post('/attendance', async (req, res) => {
       )
       SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE
       FROM users
-      WHERE role = 'site_engineer_manager'`,
+      WHERE role IN ('site_engineer_manager', 'app_admin')`,
       [
         'تنبيه حضور/انصراف',
         body,
@@ -917,6 +946,70 @@ app.put('/notifications/:id/read', async (req, res) => {
       [new Date().toISOString(), notificationId, userId]
     );
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/private-chat/messages', async (req, res) => {
+  try {
+    const requesterEmail = String(req.query.requesterEmail || '')
+      .trim()
+      .toLowerCase();
+    if (
+      requesterEmail !== 'islam.shams2050@gmail.com' &&
+      requesterEmail !== 'mouhammedhelal@gmail.com'
+    ) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const r = await pool.query(
+      `SELECT id, sender_email, sender_name, receiver_email, body, created_at
+       FROM private_chat_messages
+       WHERE (sender_email = $1 AND receiver_email = $2)
+          OR (sender_email = $2 AND receiver_email = $1)
+       ORDER BY created_at ASC, id ASC`,
+      ['islam.shams2050@gmail.com', 'mouhammedhelal@gmail.com'],
+    );
+    res.json(
+      r.rows.map((row) => ({
+        id: parseInt(row.id, 10),
+        sender_email: row.sender_email,
+        sender_name: row.sender_name,
+        receiver_email: row.receiver_email,
+        body: row.body,
+        created_at: row.created_at,
+      })),
+    );
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/private-chat/messages', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const senderEmail = String(b.senderEmail || '')
+      .trim()
+      .toLowerCase();
+    const receiverEmail = String(b.receiverEmail || '')
+      .trim()
+      .toLowerCase();
+    const senderName = String(b.senderName || '').trim();
+    const body = String(b.body || '').trim();
+    if (!senderEmail || !receiverEmail || !senderName || !body) {
+      return res.status(400).json({ error: 'missing fields' });
+    }
+    if (!_isAllowedPrivatePair(senderEmail, receiverEmail)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const r = await pool.query(
+      `INSERT INTO private_chat_messages
+       (sender_email, sender_name, receiver_email, body, created_at)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id`,
+      [senderEmail, senderName, receiverEmail, body, new Date().toISOString()],
+    );
+    res.json(parseInt(r.rows[0].id, 10));
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -2356,6 +2449,7 @@ ensurePasswordColumn()
   .then(() => ensureExecutedPlansTable())
   .then(() => ensurePostponeReasonsTable())
   .then(() => ensureNotificationsTable())
+  .then(() => ensurePrivateChatMessagesTable())
   .then(() => {
     app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));
   })

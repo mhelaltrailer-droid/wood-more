@@ -20,6 +20,7 @@ import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../models/notification_item_model.dart';
+import '../models/private_chat_message_model.dart';
 import '../data/default_materials.dart';
 import 'icon_visibility_service.dart';
 
@@ -47,6 +48,7 @@ class WebStorageService {
   static const _systemLockedKey = 'wood_system_locked';
   static const _homeIconsVisibilityKey = 'wood_home_icons_visibility';
   static const _notificationsKey = 'wood_notifications';
+  static const _privateChatMessagesKey = 'wood_private_chat_messages';
 
   Future<SharedPreferences> get _prefs async =>
       await SharedPreferences.getInstance();
@@ -280,6 +282,12 @@ class WebStorageService {
     }
     if (prefs.getString(_notificationsKey) == null) {
       await prefs.setString(_notificationsKey, jsonEncode(<Map<String, dynamic>>[]));
+    }
+    if (prefs.getString(_privateChatMessagesKey) == null) {
+      await prefs.setString(
+        _privateChatMessagesKey,
+        jsonEncode(<Map<String, dynamic>>[]),
+      );
     }
     if (prefs.getString(_attendanceKey) == null) {
       await prefs.setString(_attendanceKey, jsonEncode([]));
@@ -693,10 +701,12 @@ class WebStorageService {
     AttendanceRecordModel record,
   ) async {
     final users = await getUsers();
-    final managers = users
-        .where((u) => u.role == 'site_engineer_manager')
+    final recipients = users
+        .where(
+          (u) => u.role == 'site_engineer_manager' || u.role == 'app_admin',
+        )
         .toList(growable: false);
-    if (managers.isEmpty) return;
+    if (recipients.isEmpty) return;
     final prefs = await _prefs;
     final raw = prefs.getString(_notificationsKey) ?? '[]';
     final list = jsonDecode(raw) as List;
@@ -711,11 +721,11 @@ class WebStorageService {
     final body =
         'قام "${record.userName}" بتسجيل $actionLabel بمشروع "$projectName"';
     final now = DateTime.now().toIso8601String();
-    for (final manager in managers) {
+    for (final recipient in recipients) {
       list.add({
         'id': nextId++,
-        'recipient_user_id': manager.id,
-        'recipient_role': manager.role,
+        'recipient_user_id': recipient.id,
+        'recipient_role': recipient.role,
         'title': 'تنبيه حضور/انصراف',
         'body': body,
         'event_type': 'attendance_${record.type}',
@@ -766,6 +776,63 @@ class WebStorageService {
       break;
     }
     await prefs.setString(_notificationsKey, jsonEncode(list));
+  }
+
+  bool _isAllowedPrivatePair(String a, String b) {
+    final x = a.trim().toLowerCase();
+    final y = b.trim().toLowerCase();
+    const m = 'islam.shams2050@gmail.com';
+    const a1 = 'mouhammedhelal@gmail.com';
+    return (x == m && y == a1) || (x == a1 && y == m);
+  }
+
+  Future<List<PrivateChatMessageModel>> getPrivateChatMessages({
+    required String requesterEmail,
+  }) async {
+    await _initData();
+    final me = requesterEmail.trim().toLowerCase();
+    const m = 'islam.shams2050@gmail.com';
+    const a1 = 'mouhammedhelal@gmail.com';
+    if (me != m && me != a1) return [];
+    final prefs = await _prefs;
+    final raw = prefs.getString(_privateChatMessagesKey) ?? '[]';
+    final list = jsonDecode(raw) as List;
+    final out = list
+        .map((e) => PrivateChatMessageModel.fromMap(Map<String, dynamic>.from(e as Map)))
+        .where(
+          (msg) => _isAllowedPrivatePair(msg.senderEmail, msg.receiverEmail),
+        )
+        .toList();
+    out.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return out;
+  }
+
+  Future<int> sendPrivateChatMessage({
+    required String senderEmail,
+    required String senderName,
+    required String receiverEmail,
+    required String body,
+  }) async {
+    await _initData();
+    if (!_isAllowedPrivatePair(senderEmail, receiverEmail)) {
+      throw Exception('forbidden');
+    }
+    final prefs = await _prefs;
+    final raw = prefs.getString(_privateChatMessagesKey) ?? '[]';
+    final list = jsonDecode(raw) as List;
+    final nextId = list.isEmpty
+        ? 1
+        : (list.map((e) => (e as Map)['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    list.add({
+      'id': nextId,
+      'sender_email': senderEmail.trim().toLowerCase(),
+      'sender_name': senderName,
+      'receiver_email': receiverEmail.trim().toLowerCase(),
+      'body': body.trim(),
+      'created_at': DateTime.now().toIso8601String(),
+    });
+    await prefs.setString(_privateChatMessagesKey, jsonEncode(list));
+    return nextId;
   }
 
   Future<List<AttendanceRecordModel>> getAllAttendanceRecords() async {

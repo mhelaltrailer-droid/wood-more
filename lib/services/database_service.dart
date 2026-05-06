@@ -21,6 +21,7 @@ import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../models/notification_item_model.dart';
+import '../models/private_chat_message_model.dart';
 import '../data/default_materials.dart';
 import 'icon_visibility_service.dart';
 
@@ -44,7 +45,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 23,
+      version: 24,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -87,6 +88,7 @@ class DatabaseService {
     ''');
 
     await _createNotificationsTable(db);
+    await _createPrivateChatMessagesTable(db);
 
     // إدخال بيانات تجريبية
     await _seedData(db);
@@ -254,6 +256,9 @@ class DatabaseService {
     if (oldVersion < 23) {
       await _createNotificationsTable(db);
     }
+    if (oldVersion < 24) {
+      await _createPrivateChatMessagesTable(db);
+    }
     if (oldVersion < 20) {
       try {
         await db.execute('''
@@ -370,6 +375,19 @@ class DatabaseService {
         created_at TEXT NOT NULL,
         is_read INTEGER NOT NULL DEFAULT 0,
         read_at TEXT
+      )
+    ''');
+  }
+
+  Future<void> _createPrivateChatMessagesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS private_chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender_email TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        receiver_email TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL
       )
     ''');
   }
@@ -852,13 +870,13 @@ class DatabaseService {
     Database db,
     AttendanceRecordModel record,
   ) async {
-    final managers = await db.query(
+    final recipients = await db.query(
       'users',
       columns: ['id', 'role'],
-      where: 'role = ?',
-      whereArgs: ['site_engineer_manager'],
+      where: 'role IN (?, ?)',
+      whereArgs: ['site_engineer_manager', 'app_admin'],
     );
-    if (managers.isEmpty) return;
+    if (recipients.isEmpty) return;
     final isCheckIn = record.type == 'check_in';
     final actionLabel = isCheckIn ? 'الحضور' : 'الانصراف';
     final projectName = (record.projectName ?? '').trim().isEmpty
@@ -867,10 +885,10 @@ class DatabaseService {
     final body =
         'قام "${record.userName}" بتسجيل $actionLabel بمشروع "$projectName"';
     final now = DateTime.now().toIso8601String();
-    for (final manager in managers) {
+    for (final recipient in recipients) {
       await db.insert('notifications', {
-        'recipient_user_id': manager['id'],
-        'recipient_role': 'site_engineer_manager',
+        'recipient_user_id': recipient['id'],
+        'recipient_role': recipient['role'],
         'title': 'تنبيه حضور/انصراف',
         'body': body,
         'event_type': 'attendance_${record.type}',
@@ -916,6 +934,51 @@ class DatabaseService {
       where: 'id = ? AND recipient_user_id = ?',
       whereArgs: [notificationId, userId],
     );
+  }
+
+  bool _isAllowedPrivatePair(String a, String b) {
+    final x = a.trim().toLowerCase();
+    final y = b.trim().toLowerCase();
+    const m = 'islam.shams2050@gmail.com';
+    const a1 = 'mouhammedhelal@gmail.com';
+    return (x == m && y == a1) || (x == a1 && y == m);
+  }
+
+  Future<List<PrivateChatMessageModel>> getPrivateChatMessages({
+    required String requesterEmail,
+  }) async {
+    final me = requesterEmail.trim().toLowerCase();
+    const m = 'islam.shams2050@gmail.com';
+    const a1 = 'mouhammedhelal@gmail.com';
+    if (me != m && me != a1) return [];
+    final db = await database;
+    final maps = await db.query(
+      'private_chat_messages',
+      where:
+          '(sender_email = ? AND receiver_email = ?) OR (sender_email = ? AND receiver_email = ?)',
+      whereArgs: [m, a1, a1, m],
+      orderBy: 'created_at ASC',
+    );
+    return maps.map((m) => PrivateChatMessageModel.fromMap(m)).toList();
+  }
+
+  Future<int> sendPrivateChatMessage({
+    required String senderEmail,
+    required String senderName,
+    required String receiverEmail,
+    required String body,
+  }) async {
+    if (!_isAllowedPrivatePair(senderEmail, receiverEmail)) {
+      throw Exception('forbidden');
+    }
+    final db = await database;
+    return db.insert('private_chat_messages', {
+      'sender_email': senderEmail.trim().toLowerCase(),
+      'sender_name': senderName,
+      'receiver_email': receiverEmail.trim().toLowerCase(),
+      'body': body.trim(),
+      'created_at': DateTime.now().toIso8601String(),
+    });
   }
 
   /// الحصول على جميع سجلات الحضور (للمدير)

@@ -81,6 +81,18 @@ CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_unread
   ON notifications(recipient_user_id, is_read);
 
+CREATE TABLE IF NOT EXISTS private_chat_messages (
+  id SERIAL PRIMARY KEY,
+  sender_email TEXT NOT NULL,
+  sender_name TEXT NOT NULL,
+  receiver_email TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_private_chat_created
+  ON private_chat_messages(created_at);
+
 CREATE TABLE IF NOT EXISTS materials (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL
