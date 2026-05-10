@@ -543,6 +543,26 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_executed_plans_plan_date ON executed_plans(plan_date);
 CREATE INDEX IF NOT EXISTS idx_executed_plans_user_id ON executed_plans(user_id);
 
+-- IR / MIR: مرفقات مهندسي المواقع (MIR أو IR حسب هيكلة المشروع)
+CREATE TABLE IF NOT EXISTS ir_mir_uploads (
+  id SERIAL PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('mir', 'ir')),
+  mir_name TEXT,
+  location_id INTEGER REFERENCES project_locations(id) ON DELETE CASCADE,
+  phase TEXT,
+  file_name TEXT NOT NULL,
+  file_mime TEXT NOT NULL,
+  file_data TEXT NOT NULL,
+  notes TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ir_mir_project_kind ON ir_mir_uploads(project_id, kind);
+CREATE INDEX IF NOT EXISTS idx_ir_mir_location_phase ON ir_mir_uploads(location_id, phase);
+
 -- بيانات تجريبية للتقرير المفصل: فيلات D1–D5 وبرجولات shed01, shed02 لمشروع Cairo gate_ACC_W
 DO $$
 DECLARE

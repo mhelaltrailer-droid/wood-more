@@ -16,6 +16,8 @@ import 'admin_dashboard_screen.dart';
 import 'admin_project_structure_screen.dart';
 import 'contractor_report_screen.dart';
 import 'engineer_projects_screen.dart';
+import 'ir_mir_screen.dart';
+import 'warehouses_view_screen.dart';
 import 'engineer_withdraw_materials_screen.dart';
 import 'detailed_report_screen.dart';
 import 'site_engineer_finances_entry_screen.dart';
@@ -723,6 +725,57 @@ class _EngineerHome extends StatelessWidget {
                 ),
               ),
             ),
+          if (IconVisibilityService.isVisible(iconConfig, 'engineer_projects'))
+            const SizedBox(height: 24),
+          if (IconVisibilityService.isVisible(iconConfig, 'ir_mir'))
+            InkWell(
+              onTap: () async {
+                await _openAfterAttendanceCheck(
+                  context: context,
+                  routeName: 'ir-mir',
+                  screen: IrMirScreen(currentUser: user),
+                );
+              },
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding: const EdgeInsets.all(28),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: const Color(0xFF1B5E20).withOpacity(0.3),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.folder_special,
+                      size: 56,
+                      color: Color(0xFF1B5E20),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'IR-MIR',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1B5E20),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'رفع مستندات MIR أو IR حسب هيكلة المشروع',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: const Color(0xFF1B5E20).withOpacity(0.9),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
           const SizedBox(height: 32),
           Text(
             'مهندس موقع',
@@ -1387,12 +1440,125 @@ class _ManagerHome extends StatelessWidget {
                 ),
               ),
             ),
+          if (IconVisibilityService.isVisible(iconConfig, 'contractor_report'))
+            const SizedBox(height: 20),
+          if (IconVisibilityService.isVisible(iconConfig, 'ir_mir'))
+            InkWell(
+              onTap: () async {
+                await pushAndSaveRoute(
+                  context,
+                  'ir-mir',
+                  IrMirScreen(currentUser: user),
+                );
+              },
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding: const EdgeInsets.all(32),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: const Color(0xFF1B5E20).withOpacity(0.3),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.folder_shared,
+                      size: 64,
+                      color: Color(0xFF1B5E20),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'IR-MIR',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1B5E20),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'عرض مرفقات MIR و IR من مهندسي المواقع',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: const Color(0xFF1B5E20).withOpacity(0.9),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (IconVisibilityService.isVisible(iconConfig, 'ir_mir'))
+            const SizedBox(height: 20),
+          if (IconVisibilityService.isVisible(iconConfig, 'warehouses_view'))
+            InkWell(
+              onTap: () async {
+                await pushAndSaveRoute(
+                  context,
+                  'warehouses-view',
+                  WarehousesViewScreen(currentUser: user),
+                );
+              },
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                padding: const EdgeInsets.all(32),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: const Color(0xFF1B5E20).withOpacity(0.3),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.warehouse,
+                      size: 64,
+                      color: Color(0xFF1B5E20),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'المخازن',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1B5E20),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'عرض الخامات وأذون الصرف والتسليم بعد السحب (قراءة فقط)',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: const Color(0xFF1B5E20).withOpacity(0.9),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (IconVisibilityService.isVisible(iconConfig, 'warehouses_view'))
+            const SizedBox(height: 20),
           if (user.isAdmin) ...[
-            if (IconVisibilityService.isVisible(
-              iconConfig,
-              'contractor_report',
-            ))
-              const SizedBox(height: 20),
             if (IconVisibilityService.isVisible(
               iconConfig,
               'admin_project_structure',

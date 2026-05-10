@@ -22,6 +22,7 @@ import '../models/location_withdrawal_for_period_model.dart';
 import '../models/activity_log_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
+import '../models/ir_mir_upload_model.dart';
 import 'icon_visibility_service.dart';
 
 /// Storage implementation that uses the REST API (PostgreSQL backend).
@@ -921,7 +922,7 @@ class ApiStorageService {
   Future<List<LocationMaterialModel>> getLocationMaterials(
     int locationId, {
     String phase = LocationMaterialModel.phaseFirstFix,
-  ) async {
+  }) async {
     final list = await _getList(
       'location-materials?locationId=$locationId&phase=${Uri.encodeQueryComponent(phase)}',
     );
@@ -1215,5 +1216,58 @@ class ApiStorageService {
           ),
         )
         .toList();
+  }
+
+  Future<List<IrMirUploadModel>> listIrMirUploads({
+    required int projectId,
+    String? kind,
+    String? mirName,
+    int? locationId,
+    String? phase,
+  }) async {
+    final params = <String, String>{'projectId': projectId.toString()};
+    if (kind != null && kind.isNotEmpty) params['kind'] = kind;
+    if (mirName != null && mirName.trim().isNotEmpty) {
+      params['mirName'] = mirName.trim();
+    }
+    if (locationId != null) params['locationId'] = locationId.toString();
+    if (phase != null && phase.trim().isNotEmpty) params['phase'] = phase.trim();
+    final uri = Uri.parse(_path('ir-mir/uploads')).replace(queryParameters: params);
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) => IrMirUploadModel.fromMap(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+  }
+
+  Future<int> addIrMirUpload({
+    required int projectId,
+    required int userId,
+    required String userName,
+    required String kind,
+    String? mirName,
+    int? locationId,
+    String? phase,
+    required String fileName,
+    required String fileMime,
+    required String fileData,
+    String? notes,
+  }) async {
+    return _post('ir-mir/uploads', {
+      'projectId': projectId,
+      'userId': userId,
+      'userName': userName,
+      'kind': kind,
+      'mirName': mirName,
+      'locationId': locationId,
+      'phase': phase,
+      'fileName': fileName,
+      'fileMime': fileMime,
+      'fileData': fileData,
+      'notes': notes,
+    });
   }
 }

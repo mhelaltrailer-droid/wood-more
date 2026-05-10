@@ -21,6 +21,7 @@ import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
+import '../models/ir_mir_upload_model.dart';
 import '../data/default_materials.dart';
 import 'icon_visibility_service.dart';
 
@@ -49,6 +50,7 @@ class WebStorageService {
   static const _homeIconsVisibilityKey = 'wood_home_icons_visibility';
   static const _notificationsKey = 'wood_notifications';
   static const _privateChatMessagesKey = 'wood_private_chat_messages';
+  static const _irMirUploadsKey = 'wood_ir_mir_uploads';
 
   Future<SharedPreferences> get _prefs async =>
       await SharedPreferences.getInstance();
@@ -288,6 +290,9 @@ class WebStorageService {
         _privateChatMessagesKey,
         jsonEncode(<Map<String, dynamic>>[]),
       );
+    }
+    if (prefs.getString(_irMirUploadsKey) == null) {
+      await prefs.setString(_irMirUploadsKey, jsonEncode(<Map<String, dynamic>>[]));
     }
     if (prefs.getString(_attendanceKey) == null) {
       await prefs.setString(_attendanceKey, jsonEncode([]));
@@ -2091,5 +2096,93 @@ class WebStorageService {
     int? projectId,
   }) async {
     return [];
+  }
+
+  Future<List<IrMirUploadModel>> listIrMirUploads({
+    required int projectId,
+    String? kind,
+    String? mirName,
+    int? locationId,
+    String? phase,
+  }) async {
+    final prefs = await _prefs;
+    final raw = prefs.getString(_irMirUploadsKey) ?? '[]';
+    final list = jsonDecode(raw) as List<dynamic>;
+    Iterable<Map<String, dynamic>> rows = list.map((e) => Map<String, dynamic>.from(e as Map)).where((m) {
+      final pid = m['project_id'];
+      final p = pid is int ? pid : int.tryParse(pid?.toString() ?? '');
+      return p == projectId;
+    });
+    if (kind == IrMirUploadModel.kindMir || kind == IrMirUploadModel.kindIr) {
+      rows = rows.where((m) => m['kind'] == kind);
+    }
+    if (mirName != null && mirName.trim().isNotEmpty) {
+      final t = mirName.trim().toLowerCase();
+      rows = rows.where(
+        (m) => (m['mir_name']?.toString().trim().toLowerCase() ?? '') == t,
+      );
+    }
+    if (locationId != null) {
+      rows = rows.where((m) {
+        final lid = m['location_id'];
+        final l = lid == null ? null : (lid is int ? lid : int.tryParse(lid.toString()));
+        return l == locationId;
+      });
+    }
+    if (phase != null && phase.trim().isNotEmpty) {
+      final p = phase.trim().toLowerCase();
+      rows = rows.where(
+        (m) => (m['phase']?.toString().trim().toLowerCase() ?? '') == p,
+      );
+    }
+    final out = rows.map(IrMirUploadModel.fromMap).toList();
+    out.sort((a, b) {
+      final c = b.createdAt.compareTo(a.createdAt);
+      if (c != 0) return c;
+      return b.id.compareTo(a.id);
+    });
+    return out;
+  }
+
+  Future<int> addIrMirUpload({
+    required int projectId,
+    required int userId,
+    required String userName,
+    required String kind,
+    String? mirName,
+    int? locationId,
+    String? phase,
+    required String fileName,
+    required String fileMime,
+    required String fileData,
+    String? notes,
+  }) async {
+    final prefs = await _prefs;
+    final raw = prefs.getString(_irMirUploadsKey) ?? '[]';
+    final list = jsonDecode(raw) as List<dynamic>;
+    var nextId = 1;
+    if (list.isNotEmpty) {
+      nextId = (list
+                  .map((e) => (e as Map)['id'] as int)
+                  .reduce((a, b) => a > b ? a : b) +
+              1);
+    }
+    list.add({
+      'id': nextId,
+      'project_id': projectId,
+      'user_id': userId,
+      'user_name': userName,
+      'kind': kind,
+      'mir_name': mirName,
+      'location_id': locationId,
+      'phase': phase,
+      'file_name': fileName,
+      'file_mime': fileMime,
+      'file_data': fileData,
+      'notes': notes,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+    await prefs.setString(_irMirUploadsKey, jsonEncode(list));
+    return nextId;
   }
 }

@@ -22,6 +22,7 @@ import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
+import '../models/ir_mir_upload_model.dart';
 import '../data/default_materials.dart';
 import 'icon_visibility_service.dart';
 
@@ -45,7 +46,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 25,
+      version: 26,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -360,6 +361,9 @@ class DatabaseService {
           FOREIGN KEY (project_id) REFERENCES projects (id)
         )
       ''');
+    }
+    if (oldVersion < 26) {
+      await _createIrMirUploadsTable(db);
     }
   }
 
@@ -710,7 +714,31 @@ class DatabaseService {
         UNIQUE(location_id, phase)
       )
     ''');
+    await _createIrMirUploadsTable(db);
     await _seedWorkPhases(db);
+  }
+
+  Future<void> _createIrMirUploadsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ir_mir_uploads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        user_name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        mir_name TEXT,
+        location_id INTEGER,
+        phase TEXT,
+        file_name TEXT NOT NULL,
+        file_mime TEXT NOT NULL,
+        file_data TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects (id),
+        FOREIGN KEY (user_id) REFERENCES users (id),
+        FOREIGN KEY (location_id) REFERENCES project_locations (id)
+      )
+    ''');
   }
 
   Future<void> _seedWorkPhases(Database db) async {
@@ -2429,5 +2457,70 @@ class DatabaseService {
       );
     }
     return out;
+  }
+
+  Future<List<IrMirUploadModel>> listIrMirUploads({
+    required int projectId,
+    String? kind,
+    String? mirName,
+    int? locationId,
+    String? phase,
+  }) async {
+    final db = await database;
+    final where = <String>['project_id = ?'];
+    final args = <dynamic>[projectId];
+    if (kind == IrMirUploadModel.kindMir || kind == IrMirUploadModel.kindIr) {
+      where.add('kind = ?');
+      args.add(kind);
+    }
+    if (mirName != null && mirName.trim().isNotEmpty) {
+      where.add('LOWER(TRIM(mir_name)) = LOWER(TRIM(?))');
+      args.add(mirName.trim());
+    }
+    if (locationId != null) {
+      where.add('location_id = ?');
+      args.add(locationId);
+    }
+    if (phase != null && phase.trim().isNotEmpty) {
+      where.add('LOWER(TRIM(COALESCE(phase, \'\'))) = LOWER(TRIM(?))');
+      args.add(phase.trim());
+    }
+    final maps = await db.query(
+      'ir_mir_uploads',
+      where: where.join(' AND '),
+      whereArgs: args,
+      orderBy: 'created_at DESC, id DESC',
+    );
+    return maps.map((m) => IrMirUploadModel.fromMap(m)).toList();
+  }
+
+  Future<int> addIrMirUpload({
+    required int projectId,
+    required int userId,
+    required String userName,
+    required String kind,
+    String? mirName,
+    int? locationId,
+    String? phase,
+    required String fileName,
+    required String fileMime,
+    required String fileData,
+    String? notes,
+  }) async {
+    final db = await database;
+    return db.insert('ir_mir_uploads', {
+      'project_id': projectId,
+      'user_id': userId,
+      'user_name': userName,
+      'kind': kind,
+      'mir_name': mirName,
+      'location_id': locationId,
+      'phase': phase,
+      'file_name': fileName,
+      'file_mime': fileMime,
+      'file_data': fileData,
+      'notes': notes,
+      'created_at': DateTime.now().toIso8601String(),
+    });
   }
 }

@@ -33,6 +33,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'operation_reports', label: 'تقارير التشغيل'),
       HomeIconItem(id: 'detailed_report', label: 'التقرير اليومي'),
       HomeIconItem(id: 'engineer_projects', label: 'المشروعات'),
+      HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
     ],
     roleAccountant: [
       HomeIconItem(id: 'accountant_custody', label: 'العهدة'),
@@ -54,6 +55,8 @@ class IconVisibilityService {
         label: 'التقرير اليومي المجمع',
       ),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
+      HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
+      HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
     ],
     roleOperationManager: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -71,6 +74,8 @@ class IconVisibilityService {
         label: 'التقرير اليومي المجمع',
       ),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
+      HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
+      HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -90,6 +95,8 @@ class IconVisibilityService {
         label: 'التقرير اليومي المجمع',
       ),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
+      HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
+      HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
       HomeIconItem(id: 'admin_project_structure', label: 'هيكلة المشروعات'),
       HomeIconItem(id: 'admin_dashboard', label: 'لوح التحكم'),
       HomeIconItem(id: 'activity_logs', label: 'سجل الحركة'),

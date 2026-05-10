@@ -25,6 +25,8 @@ import '../screens/operation_reports_screen.dart';
 import '../screens/operation_reports_tracking_screen.dart';
 import '../screens/work_plan_tracking_report_screen.dart';
 import '../screens/icons_control_screen.dart';
+import '../screens/ir_mir_screen.dart';
+import '../screens/warehouses_view_screen.dart';
 import 'route_persistence.dart';
 
 /// Build the screen for a given route name (for restore after refresh). Returns null if unknown.
@@ -83,6 +85,10 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return WorkPlanTrackingReportScreen(currentUser: user);
     case 'icons-control':
       return IconsControlScreen(currentUser: user);
+    case 'ir-mir':
+      return IrMirScreen(currentUser: user);
+    case 'warehouses-view':
+      return WarehousesViewScreen(currentUser: user);
     default:
       return null;
   }

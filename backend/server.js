@@ -151,6 +151,37 @@ async function ensurePrivateChatMessagesTable() {
   }
 }
 
+async function ensureIrMirUploadsTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ir_mir_uploads (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('mir', 'ir')),
+        mir_name TEXT,
+        location_id INTEGER REFERENCES project_locations(id) ON DELETE CASCADE,
+        phase TEXT,
+        file_name TEXT NOT NULL,
+        file_mime TEXT NOT NULL,
+        file_data TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_ir_mir_project_kind ON ir_mir_uploads(project_id, kind)',
+    ).catch(() => {});
+    await pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_ir_mir_location_phase ON ir_mir_uploads(location_id, phase)',
+    ).catch(() => {});
+    console.log('ensureIrMirUploadsTable: ok');
+  } catch (e) {
+    console.warn('ensureIrMirUploadsTable:', e.message);
+  }
+}
+
 function _isAllowedPrivatePair(a, b) {
   const x = String(a || '').trim().toLowerCase();
   const y = String(b || '').trim().toLowerCase();
@@ -293,6 +324,7 @@ async function ensureHomeIconsVisibilitySetting() {
         operation_reports: true,
         detailed_report: true,
         engineer_projects: true,
+        ir_mir: true,
       },
       accountant: {
         accountant_custody: true,
@@ -305,6 +337,8 @@ async function ensureHomeIconsVisibilitySetting() {
         operation_reports_tracking: true,
         aggregated_detailed_daily: true,
         contractor_report: true,
+        ir_mir: true,
+        warehouses_view: true,
       },
       operation_manager: {
         attendance_reports: true,
@@ -313,6 +347,8 @@ async function ensureHomeIconsVisibilitySetting() {
         operation_reports_tracking: true,
         aggregated_detailed_daily: true,
         contractor_report: true,
+        ir_mir: true,
+        warehouses_view: true,
       },
       app_admin: {
         attendance_reports: true,
@@ -327,6 +363,8 @@ async function ensureHomeIconsVisibilitySetting() {
         admin_dashboard: true,
         activity_logs: true,
         dashboard: true,
+        ir_mir: true,
+        warehouses_view: true,
       },
     };
     await pool.query(
@@ -1025,6 +1063,159 @@ app.post('/private-chat/messages', async (req, res) => {
       [senderEmail, senderName, receiverEmail, body, new Date().toISOString()],
     );
     res.json(parseInt(r.rows[0].id, 10));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/ir-mir/uploads', async (req, res) => {
+  try {
+    const projectId = parseInt(req.query.projectId ?? req.query.project_id ?? '', 10);
+    if (Number.isNaN(projectId)) {
+      return res.status(400).json({ error: 'projectId required' });
+    }
+    const kind = req.query.kind != null ? String(req.query.kind).trim().toLowerCase() : null;
+    const mirName = req.query.mirName != null ? String(req.query.mirName).trim() : null;
+    const locationIdRaw = req.query.locationId ?? req.query.location_id;
+    const locationId =
+      locationIdRaw != null && String(locationIdRaw).trim() !== ''
+        ? parseInt(locationIdRaw, 10)
+        : null;
+    const phase = req.query.phase != null ? String(req.query.phase).trim().toLowerCase() : null;
+
+    let sql =
+      `SELECT id, project_id, user_id, user_name, kind, mir_name, location_id, phase,
+              file_name, file_mime, file_data, notes, created_at
+       FROM ir_mir_uploads WHERE project_id = $1`;
+    const params = [projectId];
+    let i = 2;
+    if (kind === 'mir' || kind === 'ir') {
+      sql += ` AND kind = $${i}`;
+      params.push(kind);
+      i += 1;
+    }
+    if (mirName != null && mirName !== '') {
+      sql += ` AND LOWER(TRIM(COALESCE(mir_name,''))) = LOWER(TRIM($${i}))`;
+      params.push(mirName);
+      i += 1;
+    }
+    if (locationId != null && !Number.isNaN(locationId)) {
+      sql += ` AND location_id = $${i}`;
+      params.push(locationId);
+      i += 1;
+    }
+    if (phase != null && phase !== '') {
+      sql += ` AND LOWER(TRIM(COALESCE(phase,''))) = LOWER(TRIM($${i}))`;
+      params.push(phase);
+      i += 1;
+    }
+    sql += ' ORDER BY created_at DESC, id DESC';
+    const r = await pool.query(sql, params);
+    res.json(
+      r.rows.map((row) => ({
+        id: parseInt(row.id, 10),
+        project_id: parseInt(row.project_id, 10),
+        user_id: parseInt(row.user_id, 10),
+        user_name: row.user_name,
+        kind: row.kind,
+        mir_name: row.mir_name,
+        location_id: row.location_id != null ? parseInt(row.location_id, 10) : null,
+        phase: row.phase,
+        file_name: row.file_name,
+        file_mime: row.file_mime,
+        file_data: row.file_data,
+        notes: row.notes,
+        created_at: row.created_at,
+      })),
+    );
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/ir-mir/uploads', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const projectId = parseInt(b.projectId ?? b.project_id ?? '', 10);
+    const userId = parseInt(b.userId ?? b.user_id ?? '', 10);
+    const userName = String(b.userName ?? b.user_name ?? '').trim();
+    const kind = String(b.kind ?? '').trim().toLowerCase();
+    const fileName = String(b.fileName ?? b.file_name ?? '').trim();
+    const fileMime = String(b.fileMime ?? b.file_mime ?? '').trim();
+    let fileData = String(b.fileData ?? b.file_data ?? '').trim();
+    const notes = b.notes != null ? String(b.notes).trim() : null;
+
+    if (Number.isNaN(projectId) || Number.isNaN(userId) || !userName || !kind || !fileName || !fileMime || !fileData) {
+      return res.status(400).json({ error: 'missing required fields' });
+    }
+    if (kind !== 'mir' && kind !== 'ir') {
+      return res.status(400).json({ error: 'invalid kind' });
+    }
+
+    let mirName = b.mirName != null ? String(b.mirName).trim() : b.mir_name != null ? String(b.mir_name).trim() : null;
+    let locationId =
+      b.locationId != null ? parseInt(b.locationId, 10) : b.location_id != null ? parseInt(b.location_id, 10) : null;
+    let phase = b.phase != null ? String(b.phase).trim().toLowerCase() : null;
+
+    if (kind === 'mir') {
+      if (!mirName) return res.status(400).json({ error: 'mirName required for MIR' });
+      locationId = null;
+      phase = null;
+    } else {
+      mirName = null;
+      if (locationId == null || Number.isNaN(locationId)) {
+        return res.status(400).json({ error: 'locationId required for IR' });
+      }
+      const allowedPhase = new Set(['first_fix', 'second_fix', 'finish']);
+      if (!phase || !allowedPhase.has(phase)) {
+        return res.status(400).json({ error: 'invalid phase for IR' });
+      }
+      const loc = await pool.query(
+        'SELECT id, project_id, type FROM project_locations WHERE id = $1',
+        [locationId],
+      );
+      if (loc.rows.length === 0) {
+        return res.status(400).json({ error: 'location not found' });
+      }
+      if (parseInt(loc.rows[0].project_id, 10) !== projectId) {
+        return res.status(400).json({ error: 'location project mismatch' });
+      }
+      if (String(loc.rows[0].type) !== 'work_site') {
+        return res.status(400).json({ error: 'location must be work_site' });
+      }
+    }
+
+    const proj = await pool.query('SELECT id FROM projects WHERE id = $1', [projectId]);
+    if (proj.rows.length === 0) return res.status(400).json({ error: 'project not found' });
+    const usr = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (usr.rows.length === 0) return res.status(400).json({ error: 'user not found' });
+
+    if (!fileData.startsWith('data:')) {
+      fileData = `data:${fileMime};base64,${fileData}`;
+    }
+
+    const ins = await pool.query(
+      `INSERT INTO ir_mir_uploads (
+        project_id, user_id, user_name, kind, mir_name, location_id, phase,
+        file_name, file_mime, file_data, notes, created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      RETURNING id`,
+      [
+        projectId,
+        userId,
+        userName,
+        kind,
+        mirName,
+        locationId,
+        phase,
+        fileName,
+        fileMime,
+        fileData,
+        notes || null,
+        new Date().toISOString(),
+      ],
+    );
+    res.json(parseInt(ins.rows[0].id, 10));
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -2474,6 +2665,7 @@ ensurePasswordColumn()
   .then(() => ensurePostponeReasonsTable())
   .then(() => ensureNotificationsTable())
   .then(() => ensurePrivateChatMessagesTable())
+  .then(() => ensureIrMirUploadsTable())
   .then(() => {
     app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));
   })
