@@ -306,6 +306,14 @@ async function ensureHomeIconsVisibilitySetting() {
         aggregated_detailed_daily: true,
         contractor_report: true,
       },
+      operation_manager: {
+        attendance_reports: true,
+        work_plan_tracking_report: true,
+        new_icon: true,
+        operation_reports_tracking: true,
+        aggregated_detailed_daily: true,
+        contractor_report: true,
+      },
       app_admin: {
         attendance_reports: true,
         work_plan_tracking_report: true,
@@ -426,6 +434,7 @@ async function ensureLocationMaterialsTables() {
       CREATE TABLE IF NOT EXISTS location_materials (
         id SERIAL PRIMARY KEY,
         location_id INTEGER NOT NULL REFERENCES project_locations(id) ON DELETE CASCADE,
+        phase TEXT NOT NULL DEFAULT 'first_fix',
         material_name TEXT NOT NULL,
         quantity TEXT NOT NULL,
         unit TEXT NOT NULL DEFAULT ''
@@ -434,14 +443,20 @@ async function ensureLocationMaterialsTables() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS location_withdrawal (
         id SERIAL PRIMARY KEY,
-        location_id INTEGER NOT NULL UNIQUE REFERENCES project_locations(id) ON DELETE CASCADE,
+        location_id INTEGER NOT NULL REFERENCES project_locations(id) ON DELETE CASCADE,
+        phase TEXT NOT NULL DEFAULT 'first_fix',
         user_id INTEGER NOT NULL REFERENCES users(id),
         user_name TEXT NOT NULL,
         created_at TEXT NOT NULL,
         disbursement_permit_images_json TEXT,
-        delivery_permit_images_json TEXT
+        delivery_permit_images_json TEXT,
+        UNIQUE(location_id, phase)
       )
     `);
+    await pool.query(`ALTER TABLE location_materials ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'first_fix'`).catch(() => {});
+    await pool.query(`ALTER TABLE location_withdrawal ADD COLUMN IF NOT EXISTS phase TEXT NOT NULL DEFAULT 'first_fix'`).catch(() => {});
+    await pool.query(`ALTER TABLE location_withdrawal DROP CONSTRAINT IF EXISTS location_withdrawal_location_id_key`).catch(() => {});
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_location_withdrawal_location_phase_unique ON location_withdrawal(location_id, phase)`).catch(() => {});
     await pool.query('CREATE INDEX IF NOT EXISTS idx_location_materials_location_id ON location_materials(location_id)').catch(() => {});
     await pool.query('CREATE INDEX IF NOT EXISTS idx_location_withdrawal_location_id ON location_withdrawal(location_id)').catch(() => {});
     console.log('ensureLocationMaterialsTables: ok');
@@ -527,7 +542,7 @@ app.get('/home-icons-visibility', async (req, res) => {
 app.put('/home-icons-visibility/:role', async (req, res) => {
   try {
     const role = String(req.params.role || '').trim();
-    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'app_admin', 'accountant']);
+    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'operation_manager', 'app_admin', 'accountant']);
     if (!allowedRoles.has(role)) return res.status(400).json({ error: 'invalid role' });
 
     const requesterEmail = String(req.body?.requesterEmail || '').trim().toLowerCase();
@@ -868,7 +883,7 @@ app.post('/attendance', async (req, res) => {
       )
       SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE
       FROM users
-      WHERE role IN ('site_engineer_manager', 'app_admin')`,
+      WHERE role IN ('site_engineer_manager', 'operation_manager', 'app_admin')`,
       [
         'تنبيه حضور/انصراف',
         body,
@@ -1712,14 +1727,16 @@ app.get('/project-stock-ledger', async (req, res) => {
 app.get('/location-materials', async (req, res) => {
   try {
     const locationId = req.query.locationId;
+    const phase = String(req.query.phase || 'first_fix').trim().toLowerCase();
     if (!locationId) return res.status(400).json({ error: 'locationId required' });
     const r = await pool.query(
-      'SELECT id, location_id, material_name, quantity, unit FROM location_materials WHERE location_id = $1 ORDER BY material_name',
-      [locationId]
+      'SELECT id, location_id, phase, material_name, quantity, unit FROM location_materials WHERE location_id = $1 AND phase = $2 ORDER BY material_name',
+      [locationId, phase]
     );
     res.json(r.rows.map(row => ({
       id: parseInt(row.id),
       location_id: parseInt(row.location_id),
+      phase: row.phase || 'first_fix',
       material_name: row.material_name,
       quantity: row.quantity,
       unit: row.unit || ''
@@ -1732,9 +1749,10 @@ app.get('/location-materials', async (req, res) => {
 app.post('/location-materials', async (req, res) => {
   try {
     const { locationId, materialName, quantity, unit } = req.body;
+    const phase = String(req.body?.phase || 'first_fix').trim().toLowerCase();
     const r = await pool.query(
-      'INSERT INTO location_materials (location_id, material_name, quantity, unit) VALUES ($1, $2, $3, $4) RETURNING id',
-      [locationId, materialName, quantity || '0', unit || '']
+      'INSERT INTO location_materials (location_id, phase, material_name, quantity, unit) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [locationId, phase, materialName, quantity || '0', unit || '']
     );
     res.json(parseInt(r.rows[0].id));
   } catch (e) {
@@ -1745,9 +1763,10 @@ app.post('/location-materials', async (req, res) => {
 app.put('/location-materials/:id', async (req, res) => {
   try {
     const { materialName, quantity, unit } = req.body;
+    const phase = String(req.body?.phase || 'first_fix').trim().toLowerCase();
     await pool.query(
-      'UPDATE location_materials SET material_name = $1, quantity = $2, unit = $3 WHERE id = $4',
-      [materialName, quantity, unit, req.params.id]
+      'UPDATE location_materials SET phase = $1, material_name = $2, quantity = $3, unit = $4 WHERE id = $5',
+      [phase, materialName, quantity, unit, req.params.id]
     );
     res.json({ ok: true });
   } catch (e) {
@@ -1768,16 +1787,18 @@ app.delete('/location-materials/:id', async (req, res) => {
 app.get('/location-withdrawal', async (req, res) => {
   try {
     const locationId = req.query.locationId;
+    const phase = String(req.query.phase || 'first_fix').trim().toLowerCase();
     if (!locationId) return res.status(400).json({ error: 'locationId required' });
     const r = await pool.query(
-      'SELECT id, location_id, user_id, user_name, created_at, disbursement_permit_images_json, delivery_permit_images_json FROM location_withdrawal WHERE location_id = $1',
-      [locationId]
+      'SELECT id, location_id, phase, user_id, user_name, created_at, disbursement_permit_images_json, delivery_permit_images_json FROM location_withdrawal WHERE location_id = $1 AND phase = $2',
+      [locationId, phase]
     );
     if (r.rows.length === 0) return res.json(null);
     const row = r.rows[0];
     res.json({
       id: parseInt(row.id),
       location_id: parseInt(row.location_id),
+      phase: row.phase || 'first_fix',
       user_id: parseInt(row.user_id),
       user_name: row.user_name,
       created_at: row.created_at,
@@ -1797,7 +1818,7 @@ app.get('/location-withdrawals-for-period', async (req, res) => {
     const fromD = String(dateFrom).slice(0, 10);
     const toD = String(dateTo).slice(0, 10);
     let sql = `
-      SELECT lw.location_id, lw.user_id, lw.user_name, lw.created_at, pl.project_id
+      SELECT lw.location_id, lw.phase, lw.user_id, lw.user_name, lw.created_at, pl.project_id
       FROM location_withdrawal lw
       INNER JOIN project_locations pl ON pl.id = lw.location_id
       WHERE substring(lw.created_at from 1 for 10)::date >= $1::date
@@ -1829,6 +1850,7 @@ app.get('/location-withdrawals-for-period', async (req, res) => {
       });
       out.push({
         location_id: parseInt(row.location_id, 10),
+        phase: row.phase || 'first_fix',
         user_id: parseInt(row.user_id, 10),
         user_name: row.user_name,
         created_at: createdAt,
@@ -1845,18 +1867,19 @@ app.get('/location-withdrawals-for-period', async (req, res) => {
 app.post('/location-withdrawal', async (req, res) => {
   try {
     const { locationId, userId, userName, disbursementPermitImagesJson, deliveryPermitImagesJson } = req.body;
+    const phase = String(req.body?.phase || 'first_fix').trim().toLowerCase();
     const now = new Date().toISOString();
-    const existing = await pool.query('SELECT id FROM location_withdrawal WHERE location_id = $1', [locationId]);
+    const existing = await pool.query('SELECT id FROM location_withdrawal WHERE location_id = $1 AND phase = $2', [locationId, phase]);
     if (existing.rows.length > 0) {
       return res.status(400).json({ error: 'already_withdrawn', message: 'تم سحب الخامات من هذا المكان مسبقاً' });
     }
     const loc = await pool.query('SELECT project_id FROM project_locations WHERE id = $1', [locationId]);
     if (loc.rows.length === 0) return res.status(404).json({ error: 'location not found' });
     const projectId = loc.rows[0].project_id;
-    const materials = await pool.query('SELECT material_name, quantity, unit FROM location_materials WHERE location_id = $1', [locationId]);
+    const materials = await pool.query('SELECT material_name, quantity, unit FROM location_materials WHERE location_id = $1 AND phase = $2', [locationId, phase]);
     await pool.query(
-      'INSERT INTO location_withdrawal (location_id, user_id, user_name, created_at, disbursement_permit_images_json, delivery_permit_images_json) VALUES ($1, $2, $3, $4, $5, $6)',
-      [locationId, userId, userName, now, disbursementPermitImagesJson || null, deliveryPermitImagesJson || null]
+      'INSERT INTO location_withdrawal (location_id, phase, user_id, user_name, created_at, disbursement_permit_images_json, delivery_permit_images_json) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [locationId, phase, userId, userName, now, disbursementPermitImagesJson || null, deliveryPermitImagesJson || null]
     );
     for (const m of materials.rows) {
       const qtyNum = parseFloat(String(m.quantity).replace(/[^\d.]/g, '')) || 0;
@@ -1882,11 +1905,12 @@ app.post('/location-withdrawal', async (req, res) => {
 app.delete('/location-withdrawal', async (req, res) => {
   try {
     const locationId = parseInt(String(req.query.locationId || ''), 10);
+    const phase = String(req.query.phase || 'first_fix').trim().toLowerCase();
     if (!locationId) return res.status(400).json({ error: 'locationId required' });
 
     const wR = await pool.query(
-      'SELECT id, location_id, user_id, user_name, created_at FROM location_withdrawal WHERE location_id = $1',
-      [locationId]
+      'SELECT id, location_id, phase, user_id, user_name, created_at FROM location_withdrawal WHERE location_id = $1 AND phase = $2',
+      [locationId, phase]
     );
     if (wR.rows.length === 0) {
       return res.status(404).json({ error: 'not_found', message: 'لا يوجد سحب مسجل لهذا الموقع' });
@@ -1930,7 +1954,7 @@ app.delete('/location-withdrawal', async (req, res) => {
       );
     }
 
-    await pool.query('DELETE FROM location_withdrawal WHERE location_id = $1', [locationId]);
+    await pool.query('DELETE FROM location_withdrawal WHERE location_id = $1 AND phase = $2', [locationId, phase]);
     res.json({ ok: true, restoredLedgerRows: ledgers.rows.length });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });

@@ -26,6 +26,7 @@ class _AdminLocationMaterialsScreenState extends State<AdminLocationMaterialsScr
   List<LocationMaterialModel> _list = [];
   List<String> _materials = [];
   bool _loading = true;
+  String _selectedPhase = LocationMaterialModel.phaseFirstFix;
 
   @override
   void initState() {
@@ -36,7 +37,10 @@ class _AdminLocationMaterialsScreenState extends State<AdminLocationMaterialsScr
   Future<void> _load() async {
     setState(() => _loading = true);
     final materials = await _db.getMaterials();
-    final list = await _db.getLocationMaterials(widget.locationId);
+    final list = await _db.getLocationMaterials(
+      widget.locationId,
+      phase: _selectedPhase,
+    );
     if (!mounted) return;
     setState(() {
       _materials = materials;
@@ -109,6 +113,7 @@ class _AdminLocationMaterialsScreenState extends State<AdminLocationMaterialsScr
         await _db.addLocationMaterial(LocationMaterialModel(
           id: 0,
           locationId: widget.locationId,
+          phase: _selectedPhase,
           materialName: name,
           quantity: qty,
           unit: unitVal,
@@ -117,6 +122,7 @@ class _AdminLocationMaterialsScreenState extends State<AdminLocationMaterialsScr
         await _db.updateLocationMaterial(LocationMaterialModel(
           id: item.id,
           locationId: item.locationId,
+          phase: _selectedPhase,
           materialName: name,
           quantity: qty,
           unit: unitVal,
@@ -162,26 +168,79 @@ class _AdminLocationMaterialsScreenState extends State<AdminLocationMaterialsScr
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _list.length,
-              itemBuilder: (context, i) {
-                final m = _list[i];
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    title: Text(m.materialName, overflow: TextOverflow.ellipsis),
-                    subtitle: Text('${m.quantity} ${m.unit}'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(icon: const Icon(Icons.edit), onPressed: () => _showForm(m)),
-                        IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _delete(m)),
-                      ],
-                    ),
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Text('First-fix'),
+                          selected:
+                              _selectedPhase ==
+                              LocationMaterialModel.phaseFirstFix,
+                          onSelected: (_) {
+                            setState(
+                              () => _selectedPhase =
+                                  LocationMaterialModel.phaseFirstFix,
+                            );
+                            _load();
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Text('Second-fix'),
+                          selected:
+                              _selectedPhase ==
+                              LocationMaterialModel.phaseSecondFix,
+                          onSelected: (_) {
+                            setState(
+                              () => _selectedPhase =
+                                  LocationMaterialModel.phaseSecondFix,
+                            );
+                            _load();
+                          },
+                        ),
+                      ),
+                    ],
                   ),
-                );
-              },
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _list.length,
+                    itemBuilder: (context, i) {
+                      final m = _list[i];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          title: Text(
+                            m.materialName,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text('${m.quantity} ${m.unit}'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit),
+                                onPressed: () => _showForm(m),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () => _delete(m),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showForm(),

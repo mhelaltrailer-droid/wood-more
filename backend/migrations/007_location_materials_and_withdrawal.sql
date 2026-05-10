@@ -7,20 +7,23 @@
 CREATE TABLE IF NOT EXISTS location_materials (
   id SERIAL PRIMARY KEY,
   location_id INTEGER NOT NULL REFERENCES project_locations(id) ON DELETE CASCADE,
+  phase TEXT NOT NULL DEFAULT 'first_fix',
   material_name TEXT NOT NULL,
   quantity TEXT NOT NULL,
   unit TEXT NOT NULL DEFAULT ''
 );
 
--- سجل سحب الخامات لكل موقع (مرة واحدة فقط لكل location)
+-- سجل سحب الخامات لكل موقع/مرحلة (مرة واحدة فقط لكل location + phase)
 CREATE TABLE IF NOT EXISTS location_withdrawal (
   id SERIAL PRIMARY KEY,
-  location_id INTEGER NOT NULL UNIQUE REFERENCES project_locations(id) ON DELETE CASCADE,
+  location_id INTEGER NOT NULL REFERENCES project_locations(id) ON DELETE CASCADE,
+  phase TEXT NOT NULL DEFAULT 'first_fix',
   user_id INTEGER NOT NULL REFERENCES users(id),
   user_name TEXT NOT NULL,
   created_at TEXT NOT NULL,
   disbursement_permit_images_json TEXT,
-  delivery_permit_images_json TEXT
+  delivery_permit_images_json TEXT,
+  UNIQUE(location_id, phase)
 );
 
 CREATE INDEX IF NOT EXISTS idx_location_materials_location_id ON location_materials(location_id);

@@ -2,6 +2,7 @@
 class LocationWithdrawalModel {
   final int id;
   final int locationId;
+  final String phase;
   final int userId;
   final String userName;
   final DateTime createdAt;
@@ -11,6 +12,7 @@ class LocationWithdrawalModel {
   const LocationWithdrawalModel({
     required this.id,
     required this.locationId,
+    this.phase = 'first_fix',
     required this.userId,
     required this.userName,
     required this.createdAt,
@@ -33,6 +35,7 @@ class LocationWithdrawalModel {
     return LocationWithdrawalModel(
       id: _int(m['id']),
       locationId: _int(m['location_id'] ?? m['locationId']),
+      phase: ((m['phase'] ?? 'first_fix') as String).trim().toLowerCase(),
       userId: _int(m['user_id'] ?? m['userId']),
       userName: (m['user_name'] ?? m['userName'] ?? '') as String,
       createdAt: dt,

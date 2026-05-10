@@ -45,7 +45,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 24,
+      version: 25,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -259,6 +259,41 @@ class DatabaseService {
     if (oldVersion < 24) {
       await _createPrivateChatMessagesTable(db);
     }
+    if (oldVersion < 25) {
+      try {
+        await db.execute(
+          "ALTER TABLE location_materials ADD COLUMN phase TEXT NOT NULL DEFAULT 'first_fix'",
+        );
+      } catch (_) {}
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS location_withdrawal_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            location_id INTEGER NOT NULL REFERENCES project_locations(id) ON DELETE CASCADE,
+            phase TEXT NOT NULL DEFAULT 'first_fix',
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            user_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            disbursement_permit_images_json TEXT,
+            delivery_permit_images_json TEXT,
+            UNIQUE(location_id, phase)
+          )
+        ''');
+        await db.execute('''
+          INSERT INTO location_withdrawal_new (
+            id, location_id, phase, user_id, user_name, created_at,
+            disbursement_permit_images_json, delivery_permit_images_json
+          )
+          SELECT id, location_id, 'first_fix', user_id, user_name, created_at,
+                 disbursement_permit_images_json, delivery_permit_images_json
+          FROM location_withdrawal
+        ''');
+        await db.execute('DROP TABLE location_withdrawal');
+        await db.execute(
+          'ALTER TABLE location_withdrawal_new RENAME TO location_withdrawal',
+        );
+      } catch (_) {}
+    }
     if (oldVersion < 20) {
       try {
         await db.execute('''
@@ -290,6 +325,7 @@ class DatabaseService {
         CREATE TABLE IF NOT EXISTS location_materials (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           location_id INTEGER NOT NULL REFERENCES project_locations(id) ON DELETE CASCADE,
+          phase TEXT NOT NULL DEFAULT 'first_fix',
           material_name TEXT NOT NULL,
           quantity TEXT NOT NULL,
           unit TEXT NOT NULL DEFAULT ''
@@ -298,12 +334,14 @@ class DatabaseService {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS location_withdrawal (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          location_id INTEGER NOT NULL UNIQUE REFERENCES project_locations(id) ON DELETE CASCADE,
+          location_id INTEGER NOT NULL REFERENCES project_locations(id) ON DELETE CASCADE,
+          phase TEXT NOT NULL DEFAULT 'first_fix',
           user_id INTEGER NOT NULL REFERENCES users(id),
           user_name TEXT NOT NULL,
           created_at TEXT NOT NULL,
           disbursement_permit_images_json TEXT,
-          delivery_permit_images_json TEXT
+          delivery_permit_images_json TEXT,
+          UNIQUE(location_id, phase)
         )
       ''');
     }
@@ -653,6 +691,7 @@ class DatabaseService {
       CREATE TABLE IF NOT EXISTS location_materials (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         location_id INTEGER NOT NULL,
+        phase TEXT NOT NULL DEFAULT 'first_fix',
         material_name TEXT NOT NULL,
         quantity TEXT NOT NULL,
         unit TEXT NOT NULL DEFAULT ''
@@ -661,12 +700,14 @@ class DatabaseService {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS location_withdrawal (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        location_id INTEGER NOT NULL UNIQUE,
+        location_id INTEGER NOT NULL,
+        phase TEXT NOT NULL DEFAULT 'first_fix',
         user_id INTEGER NOT NULL,
         user_name TEXT NOT NULL,
         created_at TEXT NOT NULL,
         disbursement_permit_images_json TEXT,
-        delivery_permit_images_json TEXT
+        delivery_permit_images_json TEXT,
+        UNIQUE(location_id, phase)
       )
     ''');
     await _seedWorkPhases(db);
@@ -873,8 +914,8 @@ class DatabaseService {
     final recipients = await db.query(
       'users',
       columns: ['id', 'role'],
-      where: 'role IN (?, ?)',
-      whereArgs: ['site_engineer_manager', 'app_admin'],
+      where: 'role IN (?, ?, ?)',
+      whereArgs: ['site_engineer_manager', 'operation_manager', 'app_admin'],
     );
     if (recipients.isEmpty) return;
     final isCheckIn = record.type == 'check_in';
@@ -1406,13 +1447,14 @@ class DatabaseService {
 
   // ——— هيكلة المخازن: خامات لكل موقع فرعي ———
   Future<List<LocationMaterialModel>> getLocationMaterials(
-    int locationId,
-  ) async {
+    int locationId, {
+    String phase = LocationMaterialModel.phaseFirstFix,
+  }) async {
     final db = await database;
     final maps = await db.query(
       'location_materials',
-      where: 'location_id = ?',
-      whereArgs: [locationId],
+      where: 'location_id = ? AND phase = ?',
+      whereArgs: [locationId, phase],
       orderBy: 'material_name',
     );
     return maps.map((m) => LocationMaterialModel.fromMap(m)).toList();
@@ -1422,6 +1464,7 @@ class DatabaseService {
     final db = await database;
     return db.insert('location_materials', {
       'location_id': m.locationId,
+      'phase': m.phase,
       'material_name': m.materialName,
       'quantity': m.quantity,
       'unit': m.unit,
@@ -1432,7 +1475,12 @@ class DatabaseService {
     final db = await database;
     await db.update(
       'location_materials',
-      {'material_name': m.materialName, 'quantity': m.quantity, 'unit': m.unit},
+      {
+        'phase': m.phase,
+        'material_name': m.materialName,
+        'quantity': m.quantity,
+        'unit': m.unit,
+      },
       where: 'id = ?',
       whereArgs: [m.id],
     );
@@ -1443,12 +1491,15 @@ class DatabaseService {
     await db.delete('location_materials', where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<LocationWithdrawalModel?> getLocationWithdrawal(int locationId) async {
+  Future<LocationWithdrawalModel?> getLocationWithdrawal(
+    int locationId, {
+    String phase = LocationMaterialModel.phaseFirstFix,
+  }) async {
     final db = await database;
     final maps = await db.query(
       'location_withdrawal',
-      where: 'location_id = ?',
-      whereArgs: [locationId],
+      where: 'location_id = ? AND phase = ?',
+      whereArgs: [locationId, phase],
     );
     if (maps.isEmpty) return null;
     return LocationWithdrawalModel.fromMap(maps.first);
@@ -1456,6 +1507,7 @@ class DatabaseService {
 
   Future<void> createLocationWithdrawal({
     required int locationId,
+    String phase = LocationMaterialModel.phaseFirstFix,
     required int userId,
     required String userName,
     String? disbursementPermitImagesJson,
@@ -1469,7 +1521,7 @@ class DatabaseService {
     );
     if (locMaps.isEmpty) throw Exception('الموقع غير موجود');
     final projectId = locMaps.first['project_id'] as int;
-    final materials = await getLocationMaterials(locationId);
+    final materials = await getLocationMaterials(locationId, phase: phase);
     final now = DateTime.now();
     final nowStr = now.toIso8601String();
     for (final m in materials) {
@@ -1510,6 +1562,7 @@ class DatabaseService {
     }
     await db.insert('location_withdrawal', {
       'location_id': locationId,
+      'phase': phase,
       'user_id': userId,
       'user_name': userName,
       'created_at': nowStr,
@@ -1519,9 +1572,12 @@ class DatabaseService {
   }
 
   /// إلغاء سحب الخامات: حذف السجل واسترجاع أرصدة المشروع وحذف حركات withdraw_location المرتبطة.
-  Future<void> deleteLocationWithdrawal(int locationId) async {
+  Future<void> deleteLocationWithdrawal(
+    int locationId, {
+    String phase = LocationMaterialModel.phaseFirstFix,
+  }) async {
     final db = await database;
-    final withdrawal = await getLocationWithdrawal(locationId);
+    final withdrawal = await getLocationWithdrawal(locationId, phase: phase);
     if (withdrawal == null) return;
 
     final locMaps = await db.query(
@@ -1602,8 +1658,8 @@ class DatabaseService {
 
     await db.delete(
       'location_withdrawal',
-      where: 'location_id = ?',
-      whereArgs: [locationId],
+      where: 'location_id = ? AND phase = ?',
+      whereArgs: [locationId, phase],
     );
   }
 

@@ -85,6 +85,7 @@ class WithdrawalBalanceReviewScreen extends StatefulWidget {
   final int projectId;
   final String projectName;
   final int locationId;
+  final String phase;
   final int userId;
   final String userName;
   final String disbursementPermitImagesJson;
@@ -96,6 +97,7 @@ class WithdrawalBalanceReviewScreen extends StatefulWidget {
     required this.projectId,
     this.projectName = '',
     required this.locationId,
+    required this.phase,
     required this.userId,
     required this.userName,
     required this.disbursementPermitImagesJson,
@@ -139,6 +141,7 @@ class _WithdrawalBalanceReviewScreenState extends State<WithdrawalBalanceReviewS
     try {
       await _db.createLocationWithdrawal(
         locationId: widget.locationId,
+        phase: widget.phase,
         userId: widget.userId,
         userName: widget.userName,
         disbursementPermitImagesJson: widget.disbursementPermitImagesJson,

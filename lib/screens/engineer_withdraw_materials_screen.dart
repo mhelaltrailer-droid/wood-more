@@ -27,9 +27,11 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
   List<ProjectModel> _projects = [];
   ProjectModel? _selectedProject;
   List<ProjectLocationModel> _allLocations = [];
-  Map<int, List<LocationMaterialModel>> _materialsByLocation = {};
-  Map<int, LocationWithdrawalModel?> _withdrawalByLocation = {};
+  Map<String, List<LocationMaterialModel>> _materialsByLocationPhase = {};
+  Map<String, LocationWithdrawalModel?> _withdrawalByLocationPhase = {};
   bool _loading = false;
+
+  String _k(int locationId, String phase) => '${locationId}_$phase';
 
   @override
   void initState() {
@@ -47,28 +49,31 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     if (_selectedProject == null) {
       setState(() {
         _allLocations = [];
-        _materialsByLocation = {};
-        _withdrawalByLocation = {};
+        _materialsByLocationPhase = {};
+        _withdrawalByLocationPhase = {};
       });
       return;
     }
     setState(() => _loading = true);
     try {
       final locations = await _db.getProjectLocations(_selectedProject!.id);
-      final Map<int, List<LocationMaterialModel>> materialsByLoc = {};
-      final Map<int, LocationWithdrawalModel?> withdrawalByLoc = {};
+      final Map<String, List<LocationMaterialModel>> materialsByLocPhase = {};
+      final Map<String, LocationWithdrawalModel?> withdrawalByLocPhase = {};
       for (final loc in locations) {
-        final mats = await _db.getLocationMaterials(loc.id);
-        if (mats.isNotEmpty) {
-          materialsByLoc[loc.id] = mats;
-          withdrawalByLoc[loc.id] = await _db.getLocationWithdrawal(loc.id);
+        for (final phase in LocationMaterialModel.phases) {
+          final mats = await _db.getLocationMaterials(loc.id, phase: phase);
+          if (mats.isNotEmpty) {
+            materialsByLocPhase[_k(loc.id, phase)] = mats;
+          }
+          withdrawalByLocPhase[_k(loc.id, phase)] = await _db
+              .getLocationWithdrawal(loc.id, phase: phase);
         }
       }
       if (!mounted) return;
       setState(() {
         _allLocations = locations;
-        _materialsByLocation = materialsByLoc;
-        _withdrawalByLocation = withdrawalByLoc;
+        _materialsByLocationPhase = materialsByLocPhase;
+        _withdrawalByLocationPhase = withdrawalByLocPhase;
         _loading = false;
       });
     } catch (e) {
@@ -79,7 +84,13 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
   }
 
   List<ProjectLocationModel> _locationsWithMaterials() {
-    return _allLocations.where((loc) => (_materialsByLocation[loc.id] ?? []).isNotEmpty).toList();
+    return _allLocations
+        .where(
+          (loc) => LocationMaterialModel.phases.any(
+            (p) => (_materialsByLocationPhase[_k(loc.id, p)] ?? []).isNotEmpty,
+          ),
+        )
+        .toList();
   }
 
   String _locationPath(ProjectLocationModel loc) {
@@ -95,8 +106,8 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     return path.join(' / ');
   }
 
-  Future<void> _onWithdrawTap(ProjectLocationModel loc) async {
-    final withdrawal = _withdrawalByLocation[loc.id];
+  Future<void> _onWithdrawTap(ProjectLocationModel loc, String phase) async {
+    final withdrawal = _withdrawalByLocationPhase[_k(loc.id, phase)];
     if (withdrawal != null) {
       final dateStr = '${withdrawal.createdAt.year}/${withdrawal.createdAt.month.toString().padLeft(2, '0')}/${withdrawal.createdAt.day}';
       final timeStr = '${withdrawal.createdAt.hour.toString().padLeft(2, '0')}:${withdrawal.createdAt.minute.toString().padLeft(2, '0')}';
@@ -113,10 +124,10 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
       );
       return;
     }
-    await _showWithdrawDialog(loc);
+    await _showWithdrawDialog(loc, phase);
   }
 
-  Future<void> _showWithdrawDialog(ProjectLocationModel loc) async {
+  Future<void> _showWithdrawDialog(ProjectLocationModel loc, String phase) async {
     List<String> disbursementImages = [];
     List<String> deliveryImages = [];
 
@@ -221,7 +232,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
 
     setState(() => _loading = true);
     try {
-      final locationMaterials = _materialsByLocation[loc.id] ?? [];
+      final locationMaterials = _materialsByLocationPhase[_k(loc.id, phase)] ?? [];
       final projectStock = coerceProjectStockList(await _db.getProjectStock(loc.projectId));
       final previewRows = buildWithdrawalPreviewRows(
         locationMaterials: locationMaterials,
@@ -238,6 +249,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
             projectId: loc.projectId,
             projectName: _selectedProject?.name ?? '',
             locationId: loc.id,
+            phase: phase,
             userId: widget.user.id,
             userName: widget.user.name,
             disbursementPermitImagesJson: jsonEncode(disbursementImages),
@@ -403,8 +415,24 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
             )
           else if (_selectedProject != null)
             ...locationsWithMats.map((loc) {
-              final materials = _materialsByLocation[loc.id] ?? [];
-              final withdrawal = _withdrawalByLocation[loc.id];
+              final firstMats = _materialsByLocationPhase[_k(
+                    loc.id,
+                    LocationMaterialModel.phaseFirstFix,
+                  )] ??
+                  [];
+              final secondMats = _materialsByLocationPhase[_k(
+                    loc.id,
+                    LocationMaterialModel.phaseSecondFix,
+                  )] ??
+                  [];
+              final firstWithdrawal = _withdrawalByLocationPhase[_k(
+                loc.id,
+                LocationMaterialModel.phaseFirstFix,
+              )];
+              final secondWithdrawal = _withdrawalByLocationPhase[_k(
+                loc.id,
+                LocationMaterialModel.phaseSecondFix,
+              )];
               return Card(
                 margin: const EdgeInsets.only(bottom: 16),
                 child: Padding(
@@ -414,30 +442,27 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
                     children: [
                       Text(_locationPath(loc), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 12),
-                      const Text('الخامات المتاحة للسحب (غير قابلة للتعديل):', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      const Text('الخامات المتاحة للسحب حسب المرحلة:', style: TextStyle(fontSize: 12, color: Colors.grey)),
                       const SizedBox(height: 8),
-                      ...materials.map((m) => Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Row(
-                              children: [
-                                Expanded(child: Text(m.materialName, overflow: TextOverflow.ellipsis)),
-                                Text('${m.quantity} ${m.unit}', style: TextStyle(fontWeight: FontWeight.w500, color: Colors.grey[700])),
-                              ],
-                            ),
-                          )),
-                      const SizedBox(height: 12),
-                      if (withdrawal != null)
-                        Text(
-                          'تم السحب من طرف "${withdrawal.userName}" في ${withdrawal.createdAt.year}/${withdrawal.createdAt.month.toString().padLeft(2, '0')}/${withdrawal.createdAt.day} ${withdrawal.createdAt.hour.toString().padLeft(2, '0')}:${withdrawal.createdAt.minute.toString().padLeft(2, '0')}',
-                          style: TextStyle(fontSize: 12, color: Colors.orange[800]),
-                        )
-                      else
-                        FilledButton.icon(
-                          icon: const Icon(Icons.inventory_2),
-                          label: const Text('سحب الخامات'),
-                          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1B5E20)),
-                          onPressed: () => _onWithdrawTap(loc),
+                      _phaseBlock(
+                        label: 'First-fix',
+                        materials: firstMats,
+                        withdrawal: firstWithdrawal,
+                        onWithdraw: () => _onWithdrawTap(
+                          loc,
+                          LocationMaterialModel.phaseFirstFix,
                         ),
+                      ),
+                      const SizedBox(height: 8),
+                      _phaseBlock(
+                        label: 'Second-fix',
+                        materials: secondMats,
+                        withdrawal: secondWithdrawal,
+                        onWithdraw: () => _onWithdrawTap(
+                          loc,
+                          LocationMaterialModel.phaseSecondFix,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -456,6 +481,68 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _phaseBlock({
+    required String label,
+    required List<LocationMaterialModel> materials,
+    required LocationWithdrawalModel? withdrawal,
+    required VoidCallback onWithdraw,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 6),
+          if (materials.isEmpty)
+            const Text(
+              'لا توجد خامات لهذه المرحلة',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            )
+          else
+            ...materials.map(
+              (m) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(m.materialName, overflow: TextOverflow.ellipsis),
+                    ),
+                    Text(
+                      '${m.quantity} ${m.unit}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(height: 8),
+          if (withdrawal != null)
+            Text(
+              'تم سحب هذه المرحلة بواسطة "${withdrawal.userName}" في ${withdrawal.createdAt.year}/${withdrawal.createdAt.month.toString().padLeft(2, '0')}/${withdrawal.createdAt.day} ${withdrawal.createdAt.hour.toString().padLeft(2, '0')}:${withdrawal.createdAt.minute.toString().padLeft(2, '0')}',
+              style: TextStyle(fontSize: 12, color: Colors.orange[800]),
+            )
+          else if (materials.isNotEmpty)
+            FilledButton.icon(
+              icon: const Icon(Icons.inventory_2),
+              label: const Text('سحب الخامات'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+              ),
+              onPressed: onWithdraw,
+            ),
         ],
       ),
     );

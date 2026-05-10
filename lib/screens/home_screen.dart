@@ -53,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
 
   bool get _canUseNotifications =>
       widget.currentUser.role == 'site_engineer_manager' ||
+      widget.currentUser.role == 'operation_manager' ||
       widget.currentUser.role == 'app_admin';
 
   @override

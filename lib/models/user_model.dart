@@ -3,7 +3,7 @@ class UserModel {
   final int id;
   final String name;
   final String email;
-  final String role; // 'site_engineer' | 'site_engineer_manager' | 'app_admin' | 'accountant'
+  final String role; // 'site_engineer' | 'site_engineer_manager' | 'operation_manager' | 'app_admin' | 'accountant'
 
   const UserModel({
     required this.id,
@@ -13,7 +13,10 @@ class UserModel {
   });
 
   bool get isSiteEngineer => role == 'site_engineer';
-  bool get isManager => role == 'site_engineer_manager' || role == 'app_admin';
+  bool get isManager =>
+      role == 'site_engineer_manager' ||
+      role == 'operation_manager' ||
+      role == 'app_admin';
   bool get isAdmin => role == 'app_admin';
   bool get isAccountant => role == 'accountant';
 

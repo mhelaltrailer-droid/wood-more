@@ -703,7 +703,10 @@ class WebStorageService {
     final users = await getUsers();
     final recipients = users
         .where(
-          (u) => u.role == 'site_engineer_manager' || u.role == 'app_admin',
+          (u) =>
+              u.role == 'site_engineer_manager' ||
+              u.role == 'operation_manager' ||
+              u.role == 'app_admin',
         )
         .toList(growable: false);
     if (recipients.isEmpty) return;
@@ -1451,12 +1454,18 @@ class WebStorageService {
   }
 
   Future<List<LocationMaterialModel>> getLocationMaterials(
-    int locationId,
-  ) async {
+    int locationId, {
+    String phase = LocationMaterialModel.phaseFirstFix,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = (jsonDecode(prefs.getString(_locationMaterialsKey)!) as List)
-        .where((e) => (e as Map)['location_id'] == locationId)
+        .where(
+          (e) =>
+              (e as Map)['location_id'] == locationId &&
+              ((e['phase'] ?? LocationMaterialModel.phaseFirstFix) ==
+                  phase),
+        )
         .toList();
     return list
         .map(
@@ -1481,6 +1490,7 @@ class WebStorageService {
     list.add({
       'id': nextId,
       'location_id': m.locationId,
+      'phase': m.phase,
       'material_name': m.materialName,
       'quantity': m.quantity,
       'unit': m.unit,
@@ -1498,6 +1508,7 @@ class WebStorageService {
         list[i] = {
           'id': m.id,
           'location_id': m.locationId,
+          'phase': m.phase,
           'material_name': m.materialName,
           'quantity': m.quantity,
           'unit': m.unit,
@@ -1517,12 +1528,19 @@ class WebStorageService {
     await prefs.setString(_locationMaterialsKey, jsonEncode(list));
   }
 
-  Future<LocationWithdrawalModel?> getLocationWithdrawal(int locationId) async {
+  Future<LocationWithdrawalModel?> getLocationWithdrawal(
+    int locationId, {
+    String phase = LocationMaterialModel.phaseFirstFix,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
     final found = list
-        .where((e) => (e as Map)['location_id'] == locationId)
+        .where(
+          (e) =>
+              (e as Map)['location_id'] == locationId &&
+              ((e['phase'] ?? LocationMaterialModel.phaseFirstFix) == phase),
+        )
         .toList();
     if (found.isEmpty) return null;
     return LocationWithdrawalModel.fromMap(
@@ -1532,6 +1550,7 @@ class WebStorageService {
 
   Future<void> createLocationWithdrawal({
     required int locationId,
+    String phase = LocationMaterialModel.phaseFirstFix,
     required int userId,
     required String userName,
     String? disbursementPermitImagesJson,
@@ -1546,7 +1565,7 @@ class WebStorageService {
     );
     if (locMap == null) throw Exception('الموقع غير موجود');
     final projectId = (locMap as Map)['project_id'] as int;
-    final materials = await getLocationMaterials(locationId);
+    final materials = await getLocationMaterials(locationId, phase: phase);
     final now = DateTime.now();
     final nowStr = now.toIso8601String();
     final stockList = jsonDecode(prefs.getString(_projectStockKey)!) as List;
@@ -1584,7 +1603,11 @@ class WebStorageService {
     await prefs.setString(_projectStockKey, jsonEncode(stockList));
     final withdrawals =
         jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
-    if (withdrawals.any((e) => (e as Map)['location_id'] == locationId))
+    if (withdrawals.any(
+      (e) =>
+          (e as Map)['location_id'] == locationId &&
+          ((e['phase'] ?? LocationMaterialModel.phaseFirstFix) == phase),
+    ))
       throw Exception('تم سحب الخامات من هذا المكان مسبقاً');
     final nextId = withdrawals.isEmpty
         ? 1
@@ -1595,6 +1618,7 @@ class WebStorageService {
     withdrawals.add({
       'id': nextId,
       'location_id': locationId,
+      'phase': phase,
       'user_id': userId,
       'user_name': userName,
       'created_at': nowStr,
@@ -1605,14 +1629,22 @@ class WebStorageService {
   }
 
   /// إلغاء سحب الخامات واسترجاع رصيد المشروع (مسؤول التطبيق).
-  Future<void> deleteLocationWithdrawal(int locationId) async {
+  Future<void> deleteLocationWithdrawal(
+    int locationId, {
+    String phase = LocationMaterialModel.phaseFirstFix,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final withdrawalList =
         jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
     final found = withdrawalList
         .cast<Map?>()
-        .where((e) => e != null && (e as Map)['location_id'] == locationId)
+        .where(
+          (e) =>
+              e != null &&
+              (e as Map)['location_id'] == locationId &&
+              (((e)['phase'] ?? LocationMaterialModel.phaseFirstFix) == phase),
+        )
         .toList();
     if (found.isEmpty) return;
     final w = Map<String, dynamic>.from(found.first as Map);
@@ -1692,7 +1724,11 @@ class WebStorageService {
         .where((e) => !toRemoveIds.contains((e as Map)['id'] as int))
         .toList();
     final newWithdrawals = withdrawalList
-        .where((e) => (e as Map)['location_id'] != locationId)
+        .where(
+          (e) =>
+              (e as Map)['location_id'] != locationId ||
+              (((e)['phase'] ?? LocationMaterialModel.phaseFirstFix) != phase),
+        )
         .toList();
 
     await prefs.setString(_projectStockKey, jsonEncode(stockList));

@@ -21,6 +21,7 @@ class WithdrawalMaterialLine {
 
 class LocationWithdrawalForPeriodModel {
   final int locationId;
+  final String phase;
   final int userId;
   final String userName;
   final DateTime createdAt;
@@ -29,6 +30,7 @@ class LocationWithdrawalForPeriodModel {
 
   const LocationWithdrawalForPeriodModel({
     required this.locationId,
+    this.phase = 'first_fix',
     required this.userId,
     required this.userName,
     required this.createdAt,
@@ -48,6 +50,7 @@ class LocationWithdrawalForPeriodModel {
     int p(dynamic v) => v is int ? v : int.parse(v.toString());
     return LocationWithdrawalForPeriodModel(
       locationId: p(m['location_id'] ?? m['locationId']),
+      phase: ((m['phase'] ?? 'first_fix') as String).trim().toLowerCase(),
       userId: p(m['user_id'] ?? m['userId']),
       userName: (m['user_name'] ?? m['userName'] ?? '').toString(),
       createdAt: dt,

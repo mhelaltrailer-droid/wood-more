@@ -919,9 +919,12 @@ class ApiStorageService {
 
   // ——— هيكلة المخازن: خامات لكل موقع فرعي ———
   Future<List<LocationMaterialModel>> getLocationMaterials(
-    int locationId,
+    int locationId, {
+    String phase = LocationMaterialModel.phaseFirstFix,
   ) async {
-    final list = await _getList('location-materials?locationId=$locationId');
+    final list = await _getList(
+      'location-materials?locationId=$locationId&phase=${Uri.encodeQueryComponent(phase)}',
+    );
     return list
         .map(
           (e) => LocationMaterialModel.fromMap(
@@ -934,6 +937,7 @@ class ApiStorageService {
   Future<int> addLocationMaterial(LocationMaterialModel m) async {
     return _post('location-materials', {
       'locationId': m.locationId,
+      'phase': m.phase,
       'materialName': m.materialName,
       'quantity': m.quantity,
       'unit': m.unit,
@@ -1116,10 +1120,15 @@ class ApiStorageService {
         .toList();
   }
 
-  Future<LocationWithdrawalModel?> getLocationWithdrawal(int locationId) async {
+  Future<LocationWithdrawalModel?> getLocationWithdrawal(
+    int locationId, {
+    String phase = LocationMaterialModel.phaseFirstFix,
+  }) async {
     final uri = Uri.parse(
       _path('location-withdrawal'),
-    ).replace(queryParameters: {'locationId': locationId.toString()});
+    ).replace(
+      queryParameters: {'locationId': locationId.toString(), 'phase': phase},
+    );
     final r = await http.get(uri);
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
@@ -1131,6 +1140,7 @@ class ApiStorageService {
 
   Future<void> createLocationWithdrawal({
     required int locationId,
+    String phase = LocationMaterialModel.phaseFirstFix,
     required int userId,
     required String userName,
     String? disbursementPermitImagesJson,
@@ -1139,6 +1149,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('location-withdrawal'));
     final body = {
       'locationId': locationId,
+      'phase': phase,
       'userId': userId,
       'userName': userName,
       if (disbursementPermitImagesJson != null)
@@ -1160,10 +1171,15 @@ class ApiStorageService {
   }
 
   /// إلغاء سحب الخامات لموقع فرعي واسترجاع رصيد المخزن (مسؤول التطبيق).
-  Future<void> deleteLocationWithdrawal(int locationId) async {
+  Future<void> deleteLocationWithdrawal(
+    int locationId, {
+    String phase = LocationMaterialModel.phaseFirstFix,
+  }) async {
     final uri = Uri.parse(
       _path('location-withdrawal'),
-    ).replace(queryParameters: {'locationId': locationId.toString()});
+    ).replace(
+      queryParameters: {'locationId': locationId.toString(), 'phase': phase},
+    );
     final r = await http.delete(uri);
     if (r.statusCode >= 400) throw Exception(r.body);
   }
