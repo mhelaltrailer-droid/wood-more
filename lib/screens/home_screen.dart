@@ -36,6 +36,7 @@ import 'icons_control_screen.dart';
 import 'login_screen.dart';
 import 'notifications_screen.dart';
 import 'private_chat_screen.dart';
+import 'manager_withdrawal_requests_screen.dart';
 
 /// الصفحة الرئيسية - تختلف حسب دور المستخدم
 class HomeScreen extends StatefulWidget {
@@ -47,11 +48,14 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with RouteAware {
+class _HomeScreenState extends State<HomeScreen>
+    with RouteAware, SingleTickerProviderStateMixin {
   bool _subscribed = false;
   Map<String, bool>? _iconConfig;
   int _unreadNotificationsCount = 0;
+  int _pendingWithdrawalRequestsCount = 0;
   Timer? _notificationsPollTimer;
+  late final AnimationController _wrRotateController;
 
   bool get _canUseNotifications =>
       widget.currentUser.role == 'site_engineer_manager' ||
@@ -72,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   @override
   void dispose() {
     _notificationsPollTimer?.cancel();
+    _wrRotateController.dispose();
     RouteObserverProvider.routeObserver.unsubscribe(this);
     super.dispose();
   }
@@ -81,13 +86,19 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     saveLastRoute('home');
     _loadIconsConfig();
     _loadUnreadNotificationsCount();
+    _loadPendingWithdrawalActionsCount();
   }
 
   @override
   void initState() {
     super.initState();
+    _wrRotateController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
     _loadIconsConfig();
     _loadUnreadNotificationsCount();
+    _loadPendingWithdrawalActionsCount();
     _startNotificationsPollingIfManager();
   }
 
@@ -140,12 +151,48 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     }
   }
 
+  Future<void> _loadPendingWithdrawalActionsCount() async {
+    if (!widget.currentUser.canActOnWithdrawalRequests) {
+      if (mounted) {
+        setState(() => _pendingWithdrawalRequestsCount = 0);
+        _wrRotateController.stop();
+        _wrRotateController.reset();
+      }
+      return;
+    }
+    try {
+      final storage = getStorage();
+      final c = await storage.countPendingWithdrawalActionsForManager(
+        userId: widget.currentUser.id,
+        role: widget.currentUser.role,
+      );
+      if (!mounted) return;
+      setState(() => _pendingWithdrawalRequestsCount = c);
+      if (c > 0) {
+        if (!_wrRotateController.isAnimating) {
+          _wrRotateController.repeat();
+        }
+      } else {
+        _wrRotateController.stop();
+        _wrRotateController.reset();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _pendingWithdrawalRequestsCount = 0);
+      _wrRotateController.stop();
+      _wrRotateController.reset();
+    }
+  }
+
   void _startNotificationsPollingIfManager() {
     if (!_canUseNotifications) return;
     _notificationsPollTimer?.cancel();
     _notificationsPollTimer = Timer.periodic(
       const Duration(seconds: 8),
-      (_) => _loadUnreadNotificationsCount(),
+      (_) {
+        _loadUnreadNotificationsCount();
+        _loadPendingWithdrawalActionsCount();
+      },
     );
   }
 
@@ -195,6 +242,39 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
         actions: [
+          if (currentUser.canActOnWithdrawalRequests)
+            _pendingWithdrawalRequestsCount > 0
+                ? RotationTransition(
+                    turns: _wrRotateController,
+                    child: IconButton(
+                      tooltip: 'طلبات سحب خامات',
+                      onPressed: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => ManagerWithdrawalRequestsScreen(
+                              currentUser: currentUser,
+                            ),
+                          ),
+                        );
+                        await _loadPendingWithdrawalActionsCount();
+                      },
+                      icon: const Icon(Icons.inventory_2_outlined),
+                    ),
+                  )
+                : IconButton(
+                    tooltip: 'طلبات سحب خامات',
+                    onPressed: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ManagerWithdrawalRequestsScreen(
+                            currentUser: currentUser,
+                          ),
+                        ),
+                      );
+                      await _loadPendingWithdrawalActionsCount();
+                    },
+                    icon: const Icon(Icons.inventory_2_outlined),
+                  ),
           if (_canUseNotifications)
             IconButton(
               tooltip: 'الإشعارات',

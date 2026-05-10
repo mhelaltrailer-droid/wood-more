@@ -451,10 +451,22 @@ class _IrMirScreenState extends State<IrMirScreen> {
       itemCount: children.length,
       itemBuilder: (context, i) {
         final node = children[i];
+        void openIr() => _openIrUploadDialog(node);
         if (node.isFolder) {
           return ListTile(
             leading: const Icon(Icons.folder),
             title: Text(node.name),
+            subtitle: Text(
+              '${_locationPath(node)}\nاضغط للدخول للمستوى الأدنى، أو زر «إرفاق» لرفع IR لهذا المستوى (مثل فيلا أو شيد).',
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12),
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.attach_file),
+              tooltip: 'إرفاق IR لهذا المستوى',
+              onPressed: openIr,
+            ),
             onTap: () => setState(() => _folderPath.add(node.id)),
           );
         }
@@ -462,7 +474,12 @@ class _IrMirScreenState extends State<IrMirScreen> {
           leading: const Icon(Icons.location_on),
           title: Text(node.name),
           subtitle: Text(_locationPath(node), maxLines: 2, overflow: TextOverflow.ellipsis),
-          onTap: () => _openIrUploadDialog(node),
+          trailing: IconButton(
+            icon: const Icon(Icons.attach_file),
+            tooltip: 'إرفاق IR',
+            onPressed: openIr,
+          ),
+          onTap: openIr,
         );
       },
     );
@@ -561,6 +578,44 @@ class _IrMirScreenState extends State<IrMirScreen> {
     );
   }
 
+  Future<void> _confirmDeleteUpload(IrMirUploadModel u) async {
+    if (!widget.currentUser.canDeleteIrMirAttachments) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('حذف المرفق'),
+        content: Text(
+          'حذف «${u.fileName}» نهائياً؟\nلا يمكن التراجع.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _db.deleteIrMirUpload(
+        u.id,
+        requesterEmail: widget.currentUser.email,
+      );
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم حذف المرفق'), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر الحذف: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   Widget _uploadCard(IrMirUploadModel u) {
     final imageBytes =
         _isImageAttachment(u) ? _bytesFromDataUrl(u.fileData) : null;
@@ -581,7 +636,7 @@ class _IrMirScreenState extends State<IrMirScreen> {
                     imageBytes,
                     fit: BoxFit.cover,
                     gaplessPlayback: true,
-                    errorBuilder: (_, __, ___) => const Center(
+                    errorBuilder: (_, _, _) => const Center(
                       child: Icon(Icons.broken_image, size: 48),
                     ),
                   ),
@@ -598,10 +653,21 @@ class _IrMirScreenState extends State<IrMirScreen> {
             onTap: imageBytes != null
                 ? () => _showImagePreview(u, imageBytes)
                 : null,
-            trailing: IconButton(
-              tooltip: 'فتح خارج التطبيق',
-              icon: const Icon(Icons.open_in_new),
-              onPressed: () => _openAttachment(u),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.currentUser.canDeleteIrMirAttachments)
+                  IconButton(
+                    tooltip: 'حذف المرفق',
+                    icon: Icon(Icons.delete_outline, color: Colors.red.shade700),
+                    onPressed: () => _confirmDeleteUpload(u),
+                  ),
+                IconButton(
+                  tooltip: 'فتح خارج التطبيق',
+                  icon: const Icon(Icons.open_in_new),
+                  onPressed: () => _openAttachment(u),
+                ),
+              ],
             ),
           ),
         ],
@@ -665,10 +731,29 @@ class _IrMirScreenState extends State<IrMirScreen> {
       itemBuilder: (context, i) {
         final node = children[i];
         if (node.isFolder) {
-          return ListTile(
-            leading: const Icon(Icons.folder),
-            title: Text(node.name),
-            onTap: () => setState(() => _folderPath.add(node.id)),
+          return Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.folder),
+                  title: Text(node.name),
+                  subtitle: Text(
+                    '${_locationPath(node)}\nاضغط للدخول إلى المستويات الأدنى',
+                    maxLines: 3,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => setState(() => _folderPath.add(node.id)),
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  child: _viewerIrAtWorkSite(node),
+                ),
+              ],
+            ),
           );
         }
         return ExpansionTile(
@@ -702,7 +787,9 @@ class _IrMirScreenState extends State<IrMirScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    _viewerMode ? 'عرض المرفقات من مهندسي المواقع' : 'رفع MIR / IR',
+                    _viewerMode
+                        ? 'عرض المرفقات من مهندسي المواقع'
+                        : 'رفع MIR / IR (يمكن رفع IR لأي مستوى: فيلا، شيد، موقع عمل…)',
                     style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),

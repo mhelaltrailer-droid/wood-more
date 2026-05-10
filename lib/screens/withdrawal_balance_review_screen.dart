@@ -90,6 +90,8 @@ class WithdrawalBalanceReviewScreen extends StatefulWidget {
   final String userName;
   final String disbursementPermitImagesJson;
   final String deliveryPermitImagesJson;
+  /// عند إتمام السحب يُعلَّم الطلب كمُنجَز (بعد موافقة المديرين).
+  final int? withdrawalRequestId;
 
   const WithdrawalBalanceReviewScreen({
     super.key,
@@ -102,6 +104,7 @@ class WithdrawalBalanceReviewScreen extends StatefulWidget {
     required this.userName,
     required this.disbursementPermitImagesJson,
     required this.deliveryPermitImagesJson,
+    this.withdrawalRequestId,
   });
 
   @override
@@ -147,6 +150,15 @@ class _WithdrawalBalanceReviewScreenState extends State<WithdrawalBalanceReviewS
         disbursementPermitImagesJson: widget.disbursementPermitImagesJson,
         deliveryPermitImagesJson: widget.deliveryPermitImagesJson,
       );
+      final wrId = widget.withdrawalRequestId;
+      if (wrId != null) {
+        try {
+          await _db.fulfillWithdrawalRequest(
+            requestId: wrId,
+            engineerUserId: widget.userId,
+          );
+        } catch (_) {}
+      }
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {

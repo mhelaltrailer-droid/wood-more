@@ -151,6 +151,88 @@ async function ensurePrivateChatMessagesTable() {
   }
 }
 
+async function ensureWithdrawalRequestsTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS withdrawal_requests (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        location_id INTEGER NOT NULL REFERENCES project_locations(id),
+        phase TEXT NOT NULL DEFAULT 'first_fix',
+        engineer_user_id INTEGER NOT NULL REFERENCES users(id),
+        engineer_user_name TEXT NOT NULL,
+        location_path_label TEXT NOT NULL DEFAULT '',
+        sem_status TEXT NOT NULL DEFAULT 'pending',
+        om_status TEXT NOT NULL DEFAULT 'pending',
+        sem_reason TEXT,
+        om_reason TEXT,
+        sem_responded_at TEXT,
+        om_responded_at TEXT,
+        overall_status TEXT NOT NULL DEFAULT 'pending',
+        fulfilled_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_withdrawal_req_active_unique
+      ON withdrawal_requests (location_id, phase)
+      WHERE fulfilled_at IS NULL AND overall_status IN ('pending', 'approved')
+    `).catch(() => {});
+    console.log('ensureWithdrawalRequestsTable: ok');
+  } catch (e) {
+    console.warn('ensureWithdrawalRequestsTable:', e.message);
+  }
+}
+
+async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
+  const title = fields.title;
+  const body = fields.body;
+  const eventType = fields.eventType ?? fields.event_type;
+  const actorUserId = fields.actorUserId ?? fields.actor_user_id ?? null;
+  const actorUserName = fields.actorUserName ?? fields.actor_user_name ?? null;
+  const projectName = fields.projectName ?? fields.project_name ?? null;
+  const now = new Date().toISOString();
+  await pool.query(
+    `INSERT INTO notifications (
+      recipient_user_id, recipient_role, title, body, event_type,
+      actor_user_id, actor_user_name, project_name, created_at, is_read
+    )
+    SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE
+    FROM users
+    WHERE role = ANY($8::text[])`,
+    [title, body, eventType, actorUserId, actorUserName, projectName, now, roles]
+  );
+}
+
+async function withdrawalNotifyEngineer(pool, engineerUserId, fields) {
+  const u = await pool.query('SELECT role FROM users WHERE id = $1', [engineerUserId]);
+  const role = u.rows.length ? String(u.rows[0].role || 'site_engineer') : 'site_engineer';
+  const title = fields.title;
+  const body = fields.body;
+  const eventType = fields.eventType ?? fields.event_type;
+  const actorUserId = fields.actorUserId ?? fields.actor_user_id ?? null;
+  const actorUserName = fields.actorUserName ?? fields.actor_user_name ?? null;
+  const projectName = fields.projectName ?? fields.project_name ?? null;
+  await pool.query(
+    `INSERT INTO notifications (
+      recipient_user_id, recipient_role, title, body, event_type,
+      actor_user_id, actor_user_name, project_name, created_at, is_read
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE)`,
+    [
+      engineerUserId,
+      role,
+      title,
+      body,
+      eventType,
+      actorUserId,
+      actorUserName,
+      projectName,
+      new Date().toISOString(),
+    ]
+  );
+}
+
 async function ensureIrMirUploadsTable() {
   try {
     await pool.query(`
@@ -1180,8 +1262,9 @@ app.post('/ir-mir/uploads', async (req, res) => {
       if (parseInt(loc.rows[0].project_id, 10) !== projectId) {
         return res.status(400).json({ error: 'location project mismatch' });
       }
-      if (String(loc.rows[0].type) !== 'work_site') {
-        return res.status(400).json({ error: 'location must be work_site' });
+      const locType = String(loc.rows[0].type || '');
+      if (locType !== 'work_site' && locType !== 'folder') {
+        return res.status(400).json({ error: 'invalid location type' });
       }
     }
 
@@ -1216,6 +1299,28 @@ app.post('/ir-mir/uploads', async (req, res) => {
       ],
     );
     res.json(parseInt(ins.rows[0].id, 10));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.delete('/ir-mir/uploads/:id', async (req, res) => {
+  try {
+    const requesterEmail = String(
+      req.query.requesterEmail ?? req.body?.requesterEmail ?? '',
+    )
+      .trim()
+      .toLowerCase();
+    if (requesterEmail !== PRIMARY_APP_ADMIN_EMAIL.toLowerCase()) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+    const del = await pool.query('DELETE FROM ir_mir_uploads WHERE id = $1 RETURNING id', [
+      id,
+    ]);
+    if (del.rowCount === 0) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -2086,6 +2191,13 @@ app.post('/location-withdrawal', async (req, res) => {
         [projectId, m.material_name, m.unit || '', -qtyNum, 'withdraw_location', now, userId, userName]
       );
     }
+    await pool.query(
+      `UPDATE withdrawal_requests
+       SET fulfilled_at = $1, updated_at = $1
+       WHERE location_id = $2 AND phase = $3 AND engineer_user_id = $4
+         AND overall_status = 'approved' AND fulfilled_at IS NULL`,
+      [now, locationId, phase, userId]
+    );
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -2147,6 +2259,382 @@ app.delete('/location-withdrawal', async (req, res) => {
 
     await pool.query('DELETE FROM location_withdrawal WHERE location_id = $1 AND phase = $2', [locationId, phase]);
     res.json({ ok: true, restoredLedgerRows: ledgers.rows.length });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+function withdrawalRequestRowToJson(row) {
+  return {
+    id: parseInt(row.id, 10),
+    project_id: parseInt(row.project_id, 10),
+    location_id: parseInt(row.location_id, 10),
+    phase: row.phase || 'first_fix',
+    engineer_user_id: parseInt(row.engineer_user_id, 10),
+    engineer_user_name: row.engineer_user_name,
+    location_path_label: row.location_path_label || '',
+    sem_status: row.sem_status || 'pending',
+    om_status: row.om_status || 'pending',
+    sem_reason: row.sem_reason,
+    om_reason: row.om_reason,
+    sem_responded_at: row.sem_responded_at,
+    om_responded_at: row.om_responded_at,
+    overall_status: row.overall_status || 'pending',
+    fulfilled_at: row.fulfilled_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+app.post('/withdrawal-requests', async (req, res) => {
+  try {
+    const projectId = parseInt(String(req.body?.projectId ?? req.body?.project_id ?? ''), 10);
+    const locationId = parseInt(String(req.body?.locationId ?? req.body?.location_id ?? ''), 10);
+    const userId = parseInt(String(req.body?.userId ?? req.body?.user_id ?? ''), 10);
+    const userName = String(req.body?.userName ?? req.body?.user_name ?? '').trim();
+    const phase = String(req.body?.phase || 'first_fix').trim().toLowerCase();
+    const locationPathLabel = String(req.body?.locationPathLabel ?? req.body?.location_path_label ?? '').trim();
+    if (Number.isNaN(projectId) || Number.isNaN(locationId) || Number.isNaN(userId) || !userName) {
+      return res.status(400).json({ error: 'missing fields' });
+    }
+    const loc = await pool.query(
+      'SELECT id, project_id FROM project_locations WHERE id = $1',
+      [locationId]
+    );
+    if (loc.rows.length === 0) return res.status(404).json({ error: 'location not found' });
+    if (parseInt(loc.rows[0].project_id, 10) !== projectId) {
+      return res.status(400).json({ error: 'project mismatch' });
+    }
+    const ex = await pool.query(
+      `SELECT * FROM withdrawal_requests
+       WHERE location_id = $1 AND phase = $2
+         AND fulfilled_at IS NULL
+         AND overall_status IN ('pending', 'approved')`,
+      [locationId, phase]
+    );
+    if (ex.rows.length > 0) {
+      const r = ex.rows[0];
+      if (parseInt(r.engineer_user_id, 10) !== userId) {
+        return res.status(409).json({ error: 'existing_request_other_engineer' });
+      }
+      if (String(r.overall_status) === 'approved') {
+        return res.status(409).json({ error: 'already_approved_complete_flow' });
+      }
+      return res.json({ ...withdrawalRequestRowToJson(r), existing: true });
+    }
+    const now = new Date().toISOString();
+    const proj = await pool.query('SELECT name FROM projects WHERE id = $1', [projectId]);
+    const projectName = proj.rows.length ? proj.rows[0].name : '';
+    const ins = await pool.query(
+      `INSERT INTO withdrawal_requests (
+        project_id, location_id, phase, engineer_user_id, engineer_user_name,
+        location_path_label, sem_status, om_status, overall_status,
+        created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,'pending','pending','pending',$7,$7)
+      RETURNING *`,
+      [projectId, locationId, phase, userId, userName, locationPathLabel || '', now]
+    );
+    const row = ins.rows[0];
+    const idNum = parseInt(row.id, 10);
+    const bodyN =
+      `طلب من "${userName}" — مشروع "${projectName}" — موقع: ${locationPathLabel || '—'}\n` +
+      `رقم الطلب: ${idNum}`;
+    await withdrawalInsertNotificationsForRoles(
+      pool,
+      ['site_engineer_manager', 'operation_manager'],
+      {
+        title: 'طلب سحب خامات',
+        body: bodyN,
+        event_type: 'withdrawal_request_new',
+        actor_user_id: userId,
+        actor_user_name: userName,
+        project_name: projectName,
+      }
+    );
+    res.json({ ...withdrawalRequestRowToJson(row), existing: false });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/withdrawal-requests/for-engineer-project', async (req, res) => {
+  try {
+    const projectId = parseInt(String(req.query.projectId ?? ''), 10);
+    const engineerUserId = parseInt(String(req.query.engineerUserId ?? ''), 10);
+    if (Number.isNaN(projectId) || Number.isNaN(engineerUserId)) {
+      return res.status(400).json({ error: 'projectId and engineerUserId required' });
+    }
+    const r = await pool.query(
+      `SELECT * FROM withdrawal_requests
+       WHERE project_id = $1 AND engineer_user_id = $2 AND fulfilled_at IS NULL
+       ORDER BY id DESC`,
+      [projectId, engineerUserId]
+    );
+    res.json(r.rows.map(withdrawalRequestRowToJson));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/withdrawal-requests/open', async (req, res) => {
+  try {
+    const locationId = parseInt(String(req.query.locationId ?? ''), 10);
+    const phase = String(req.query.phase || 'first_fix').trim().toLowerCase();
+    if (Number.isNaN(locationId)) return res.status(400).json({ error: 'locationId required' });
+    const r = await pool.query(
+      `SELECT * FROM withdrawal_requests
+       WHERE location_id = $1 AND phase = $2
+         AND fulfilled_at IS NULL
+         AND overall_status IN ('pending', 'approved')`,
+      [locationId, phase]
+    );
+    if (r.rows.length === 0) return res.json(null);
+    res.json(withdrawalRequestRowToJson(r.rows[0]));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/withdrawal-requests/action-count', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId ?? ''), 10);
+    const role = String(req.query.role || '').trim();
+    if (Number.isNaN(userId) || !role) return res.status(400).json({ error: 'userId and role required' });
+    const u = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+    if (u.rows.length === 0 || String(u.rows[0].role) !== role) {
+      return res.json({ count: 0 });
+    }
+    let q;
+    if (role === 'site_engineer_manager') {
+      q = `SELECT COUNT(*)::int AS c FROM withdrawal_requests
+           WHERE overall_status = 'pending' AND sem_status = 'pending' AND fulfilled_at IS NULL`;
+    } else if (role === 'operation_manager') {
+      q = `SELECT COUNT(*)::int AS c FROM withdrawal_requests
+           WHERE overall_status = 'pending' AND om_status = 'pending' AND fulfilled_at IS NULL`;
+    } else {
+      return res.json({ count: 0 });
+    }
+    const c = await pool.query(q);
+    res.json({ count: parseInt(c.rows[0]?.c || '0', 10) });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/withdrawal-requests/pending-actions', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId ?? ''), 10);
+    const role = String(req.query.role || '').trim();
+    if (Number.isNaN(userId) || !role) return res.status(400).json({ error: 'userId and role required' });
+    const u = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+    if (u.rows.length === 0 || String(u.rows[0].role) !== role) {
+      return res.json([]);
+    }
+    let r;
+    if (role === 'site_engineer_manager') {
+      r = await pool.query(
+        `SELECT wr.*, p.name AS project_name FROM withdrawal_requests wr
+         INNER JOIN projects p ON p.id = wr.project_id
+         WHERE wr.overall_status = 'pending' AND wr.sem_status = 'pending' AND wr.fulfilled_at IS NULL
+         ORDER BY wr.id DESC`
+      );
+    } else if (role === 'operation_manager') {
+      r = await pool.query(
+        `SELECT wr.*, p.name AS project_name FROM withdrawal_requests wr
+         INNER JOIN projects p ON p.id = wr.project_id
+         WHERE wr.overall_status = 'pending' AND wr.om_status = 'pending' AND wr.fulfilled_at IS NULL
+         ORDER BY wr.id DESC`
+      );
+    } else {
+      return res.json([]);
+    }
+    res.json(
+      r.rows.map((row) => ({
+        ...withdrawalRequestRowToJson(row),
+        project_name: row.project_name,
+      }))
+    );
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.put('/withdrawal-requests/:id/respond', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id || ''), 10);
+    const userId = parseInt(String(req.body?.userId ?? req.body?.user_id ?? ''), 10);
+    const decision = String(req.body?.decision || '').trim().toLowerCase();
+    const reason = req.body?.reason != null ? String(req.body.reason).trim() : '';
+    if (Number.isNaN(id) || Number.isNaN(userId) || (decision !== 'approve' && decision !== 'reject')) {
+      return res.status(400).json({ error: 'invalid request' });
+    }
+    if (decision === 'reject' && !reason) {
+      return res.status(400).json({ error: 'reason_required' });
+    }
+    const actor = await pool.query('SELECT id, role, name FROM users WHERE id = $1', [userId]);
+    if (actor.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+    const actorRole = String(actor.rows[0].role || '');
+    if (actorRole !== 'site_engineer_manager' && actorRole !== 'operation_manager') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const rq = await pool.query('SELECT * FROM withdrawal_requests WHERE id = $1', [id]);
+    if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const row = rq.rows[0];
+    if (row.fulfilled_at != null || String(row.overall_status) === 'rejected') {
+      return res.status(400).json({ error: 'closed' });
+    }
+    if (String(row.overall_status) === 'approved') {
+      return res.status(400).json({ error: 'already_approved' });
+    }
+    const now = new Date().toISOString();
+    const proj = await pool.query('SELECT name FROM projects WHERE id = $1', [row.project_id]);
+    const projectName = proj.rows.length ? proj.rows[0].name : '';
+    const pathLabel = row.location_path_label || '';
+    const engId = parseInt(row.engineer_user_id, 10);
+    const engName = row.engineer_user_name;
+
+    if (actorRole === 'site_engineer_manager') {
+      if (String(row.sem_status) !== 'pending') {
+        return res.status(400).json({ error: 'already_responded' });
+      }
+      if (decision === 'reject') {
+        await pool.query(
+          `UPDATE withdrawal_requests SET sem_status = 'rejected', sem_reason = $1, sem_responded_at = $2,
+           overall_status = 'rejected', updated_at = $2 WHERE id = $3`,
+          [reason, now, id]
+        );
+        await withdrawalNotifyEngineer(pool, engId, {
+          title: 'رفض طلب سحب خامات',
+          body: `تم رفض طلبك بسبب: ${reason}`,
+          event_type: 'withdrawal_request_rejected',
+          actor_user_id: userId,
+          actor_user_name: actor.rows[0].name,
+          project_name: projectName,
+        });
+        await withdrawalInsertNotificationsForRoles(pool, ['operation_manager'], {
+          title: 'طلب سحب خامات — مرفوض',
+          body: `رُفض الطلب من مدير مهندسي المواقع. السبب: ${reason}\nالمهندس: ${engName} — ${pathLabel}`,
+          event_type: 'withdrawal_request_rejected_by_sem',
+          actor_user_id: userId,
+          actor_user_name: actor.rows[0].name,
+          project_name: projectName,
+        });
+        return res.json({ ok: true });
+      }
+      await pool.query(
+        `UPDATE withdrawal_requests SET sem_status = 'approved', sem_responded_at = $1, updated_at = $1 WHERE id = $2`,
+        [now, id]
+      );
+      if (String(row.om_status) === 'approved') {
+        await pool.query(
+          `UPDATE withdrawal_requests SET overall_status = 'approved', updated_at = $1 WHERE id = $2`,
+          [now, id]
+        );
+        await withdrawalNotifyEngineer(pool, engId, {
+          title: 'تمت الموافقة على طلب سحب الخامات',
+          body: `يمكنك الآن إكمال سحب الخامات من الموقع: ${pathLabel} — مشروع "${projectName}"`,
+          event_type: 'withdrawal_request_approved',
+          actor_user_id: userId,
+          actor_user_name: actor.rows[0].name,
+          project_name: projectName,
+        });
+      } else {
+        await withdrawalInsertNotificationsForRoles(pool, ['operation_manager'], {
+          title: 'بانتظار موافقتكم — طلب سحب خامات',
+          body: `وافق مدير مهندسي المواقع. بانتظار موافقة مدير التشغيل.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
+          event_type: 'withdrawal_request_waiting_om',
+          actor_user_id: engId,
+          actor_user_name: engName,
+          project_name: projectName,
+        });
+      }
+      return res.json({ ok: true });
+    }
+
+    if (actorRole === 'operation_manager') {
+      if (String(row.om_status) !== 'pending') {
+        return res.status(400).json({ error: 'already_responded' });
+      }
+      if (decision === 'reject') {
+        await pool.query(
+          `UPDATE withdrawal_requests SET om_status = 'rejected', om_reason = $1, om_responded_at = $2,
+           overall_status = 'rejected', updated_at = $2 WHERE id = $3`,
+          [reason, now, id]
+        );
+        await withdrawalNotifyEngineer(pool, engId, {
+          title: 'رفض طلب سحب خامات',
+          body: `تم رفض طلبك بسبب: ${reason}`,
+          event_type: 'withdrawal_request_rejected',
+          actor_user_id: userId,
+          actor_user_name: actor.rows[0].name,
+          project_name: projectName,
+        });
+        await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
+          title: 'طلب سحب خامات — مرفوض',
+          body: `رُفض الطلب من مدير التشغيل. السبب: ${reason}\nالمهندس: ${engName} — ${pathLabel}`,
+          event_type: 'withdrawal_request_rejected_by_om',
+          actor_user_id: userId,
+          actor_user_name: actor.rows[0].name,
+          project_name: projectName,
+        });
+        return res.json({ ok: true });
+      }
+      await pool.query(
+        `UPDATE withdrawal_requests SET om_status = 'approved', om_responded_at = $1, updated_at = $1 WHERE id = $2`,
+        [now, id]
+      );
+      if (String(row.sem_status) === 'approved') {
+        await pool.query(
+          `UPDATE withdrawal_requests SET overall_status = 'approved', updated_at = $1 WHERE id = $2`,
+          [now, id]
+        );
+        await withdrawalNotifyEngineer(pool, engId, {
+          title: 'تمت الموافقة على طلب سحب الخامات',
+          body: `يمكنك الآن إكمال سحب الخامات من الموقع: ${pathLabel} — مشروع "${projectName}"`,
+          event_type: 'withdrawal_request_approved',
+          actor_user_id: userId,
+          actor_user_name: actor.rows[0].name,
+          project_name: projectName,
+        });
+      } else {
+        await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
+          title: 'بانتظار موافقتكم — طلب سحب خامات',
+          body: `وافق مدير التشغيل. بانتظار موافقة مدير مهندسي المواقع.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
+          event_type: 'withdrawal_request_waiting_sem',
+          actor_user_id: engId,
+          actor_user_name: engName,
+          project_name: projectName,
+        });
+      }
+      return res.json({ ok: true });
+    }
+    return res.status(403).json({ error: 'forbidden' });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.put('/withdrawal-requests/:id/fulfill', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id || ''), 10);
+    const userId = parseInt(String(req.body?.userId ?? req.body?.user_id ?? ''), 10);
+    if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
+    const rq = await pool.query('SELECT * FROM withdrawal_requests WHERE id = $1', [id]);
+    if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const row = rq.rows[0];
+    if (parseInt(row.engineer_user_id, 10) !== userId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (String(row.overall_status) !== 'approved') {
+      return res.status(400).json({ error: 'not_approved' });
+    }
+    if (row.fulfilled_at != null) return res.json({ ok: true });
+    const now = new Date().toISOString();
+    await pool.query(
+      `UPDATE withdrawal_requests SET fulfilled_at = $1, updated_at = $1 WHERE id = $2`,
+      [now, id]
+    );
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -2666,6 +3154,7 @@ ensurePasswordColumn()
   .then(() => ensureNotificationsTable())
   .then(() => ensurePrivateChatMessagesTable())
   .then(() => ensureIrMirUploadsTable())
+  .then(() => ensureWithdrawalRequestsTable())
   .then(() => {
     app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));
   })

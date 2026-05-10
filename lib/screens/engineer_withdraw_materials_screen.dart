@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import '../models/project_location_model.dart';
 import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/project_stock_model.dart';
+import '../models/withdrawal_request_model.dart';
 import '../services/storage_service.dart';
 import '../services/route_persistence.dart';
 import 'home_screen.dart';
@@ -29,7 +31,9 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
   List<ProjectLocationModel> _allLocations = [];
   Map<String, List<LocationMaterialModel>> _materialsByLocationPhase = {};
   Map<String, LocationWithdrawalModel?> _withdrawalByLocationPhase = {};
+  Map<String, WithdrawalRequestModel> _withdrawalRequestByKey = {};
   bool _loading = false;
+  Timer? _pollTimer;
 
   String _k(int locationId, String phase) => '${locationId}_$phase';
 
@@ -37,6 +41,58 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
   void initState() {
     super.initState();
     _loadProjects();
+    _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+      if (_selectedProject != null && mounted) {
+        _refreshWithdrawalRequestsOnly();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  WithdrawalRequestModel? _requestFor(int locationId, String phase) =>
+      _withdrawalRequestByKey[_k(locationId, phase)];
+
+  Future<void> _refreshWithdrawalRequestsOnly() async {
+    if (_selectedProject == null) return;
+    try {
+      final reqs = await _db.getWithdrawalRequestsForEngineerProject(
+        projectId: _selectedProject!.id,
+        engineerUserId: widget.user.id,
+      );
+      final map = <String, WithdrawalRequestModel>{};
+      for (final r in reqs) {
+        final key = _k(r.locationId, r.phase);
+        final ex = map[key];
+        if (ex == null || r.id > ex.id) {
+          map[key] = r;
+        }
+      }
+      if (mounted) setState(() => _withdrawalRequestByKey = map);
+    } catch (_) {}
+  }
+
+  String _engineerRequestStatusLine(WithdrawalRequestModel r) {
+    if (r.isRejectedOverall) {
+      if (r.semStatus == WithdrawalRequestModel.statusRejected) {
+        return 'تم رفض طلبك من مدير مهندسي المواقع بسبب: ${r.semReason ?? '—'}';
+      }
+      return 'تم رفض طلبك من مدير التشغيل بسبب: ${r.omReason ?? '—'}';
+    }
+    if (r.isApprovedOverall) return '';
+    final lines = <String>['في انتظار الرد على طلبكم'];
+    if (r.semStatus == WithdrawalRequestModel.statusApproved &&
+        r.omStatus == WithdrawalRequestModel.statusPending) {
+      lines.add('تمت موافقة مدير مهندسي المواقع — بانتظار موافقة مدير التشغيل');
+    } else if (r.omStatus == WithdrawalRequestModel.statusApproved &&
+        r.semStatus == WithdrawalRequestModel.statusPending) {
+      lines.add('تمت موافقة مدير التشغيل — بانتظار موافقة مدير مهندسي المواقع');
+    }
+    return lines.join('\n');
   }
 
   Future<void> _loadProjects() async {
@@ -51,6 +107,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
         _allLocations = [];
         _materialsByLocationPhase = {};
         _withdrawalByLocationPhase = {};
+        _withdrawalRequestByKey = {};
       });
       return;
     }
@@ -69,11 +126,26 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
               .getLocationWithdrawal(loc.id, phase: phase);
         }
       }
+      final Map<String, WithdrawalRequestModel> reqMap = {};
+      try {
+        final reqs = await _db.getWithdrawalRequestsForEngineerProject(
+          projectId: _selectedProject!.id,
+          engineerUserId: widget.user.id,
+        );
+        for (final r in reqs) {
+          final key = _k(r.locationId, r.phase);
+          final ex = reqMap[key];
+          if (ex == null || r.id > ex.id) {
+            reqMap[key] = r;
+          }
+        }
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _allLocations = locations;
         _materialsByLocationPhase = materialsByLocPhase;
         _withdrawalByLocationPhase = withdrawalByLocPhase;
+        _withdrawalRequestByKey = reqMap;
         _loading = false;
       });
     } catch (e) {
@@ -106,28 +178,83 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     return path.join(' / ');
   }
 
-  Future<void> _onWithdrawTap(ProjectLocationModel loc, String phase) async {
-    final withdrawal = _withdrawalByLocationPhase[_k(loc.id, phase)];
-    if (withdrawal != null) {
-      final dateStr = '${withdrawal.createdAt.year}/${withdrawal.createdAt.month.toString().padLeft(2, '0')}/${withdrawal.createdAt.day}';
-      final timeStr = '${withdrawal.createdAt.hour.toString().padLeft(2, '0')}:${withdrawal.createdAt.minute.toString().padLeft(2, '0')}';
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('تم السحب مسبقاً'),
-          content: Text(
-            'لقد تم سحب الخامات بالفعل من طرف المستخدم "${withdrawal.userName}" في التاريخ $dateStr والوقت $timeStr.',
-          ),
-          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('حسناً'))],
-        ),
+  Future<void> _submitWithdrawalRequest(ProjectLocationModel loc, String phase) async {
+    try {
+      final open = await _db.getOpenWithdrawalRequestForLocationPhase(
+        locationId: loc.id,
+        phase: phase,
       );
-      return;
+      if (open != null && open.engineerUserId != widget.user.id) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('يوجد طلب سحب قيد المراجعة لهذا الموقع من مهندس آخر.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('طلب سحب خامات'),
+        content: Text(
+          'إرسال طلب إلى مدير التشغيل ومدير مهندسي المواقع للموافقة على السحب من:\n${_locationPath(loc)}\nالمرحلة: ${LocationMaterialModel.phaseLabel(phase)}',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('إرسال الطلب')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _db.createWithdrawalRequest(
+        projectId: loc.projectId,
+        locationId: loc.id,
+        phase: phase,
+        engineerUserId: widget.user.id,
+        engineerUserName: widget.user.name,
+        locationPathLabel: _locationPath(loc),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم إرسال الطلب'), backgroundColor: Colors.green),
+      );
+      await _loadLocationsAndMaterials();
+    } catch (e) {
+      final msg = '$e';
+      if (!mounted) return;
+      if (msg.contains('existing_request_other_engineer')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('يوجد طلب آخر قيد المراجعة لهذا الموقع.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      } else if (msg.contains('already_approved_complete_flow')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('طلبك معتمد — استخدم «إكمال سحب الخامات».'),
+            backgroundColor: Color(0xFF5D4037),
+          ),
+        );
+        await _loadLocationsAndMaterials();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر إرسال الطلب: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
-    await _showWithdrawDialog(loc, phase);
   }
 
-  Future<void> _showWithdrawDialog(ProjectLocationModel loc, String phase) async {
+  Future<void> _showWithdrawDialog(
+    ProjectLocationModel loc,
+    String phase, {
+    required int withdrawalRequestId,
+  }) async {
     List<String> disbursementImages = [];
     List<String> deliveryImages = [];
 
@@ -136,7 +263,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialog) => AlertDialog(
-          title: const Text('سحب الخامات'),
+          title: const Text('إكمال سحب الخامات'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -221,7 +348,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
                 }
                 Navigator.pop(ctx, true);
               },
-              child: const Text('تأكيد السحب'),
+              child: const Text('متابعة المراجعة والسحب'),
             ),
           ],
         ),
@@ -254,6 +381,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
             userName: widget.user.name,
             disbursementPermitImagesJson: jsonEncode(disbursementImages),
             deliveryPermitImagesJson: jsonEncode(deliveryImages),
+            withdrawalRequestId: withdrawalRequestId,
           ),
         ),
       );
@@ -386,6 +514,11 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('اسم المهندس: ${widget.user.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text(
+                    'السحب يتطلب موافقة مدير التشغيل ومدير مهندسي المواقع معاً. ابدأ بـ «طلب سحب خامات» ثم بعد الاعتماد استخدم «إكمال سحب الخامات».',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade800),
+                  ),
                 ],
               ),
             ),
@@ -433,6 +566,8 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
                 loc.id,
                 LocationMaterialModel.phaseSecondFix,
               )];
+              final firstWr = _requestFor(loc.id, LocationMaterialModel.phaseFirstFix);
+              final secondWr = _requestFor(loc.id, LocationMaterialModel.phaseSecondFix);
               return Card(
                 margin: const EdgeInsets.only(bottom: 16),
                 child: Padding(
@@ -448,20 +583,18 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
                         label: 'First-fix',
                         materials: firstMats,
                         withdrawal: firstWithdrawal,
-                        onWithdraw: () => _onWithdrawTap(
-                          loc,
-                          LocationMaterialModel.phaseFirstFix,
-                        ),
+                        wr: firstWr,
+                        loc: loc,
+                        phase: LocationMaterialModel.phaseFirstFix,
                       ),
                       const SizedBox(height: 8),
                       _phaseBlock(
                         label: 'Second-fix',
                         materials: secondMats,
                         withdrawal: secondWithdrawal,
-                        onWithdraw: () => _onWithdrawTap(
-                          loc,
-                          LocationMaterialModel.phaseSecondFix,
-                        ),
+                        wr: secondWr,
+                        loc: loc,
+                        phase: LocationMaterialModel.phaseSecondFix,
                       ),
                     ],
                   ),
@@ -490,7 +623,9 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     required String label,
     required List<LocationMaterialModel> materials,
     required LocationWithdrawalModel? withdrawal,
-    required VoidCallback onWithdraw,
+    required WithdrawalRequestModel? wr,
+    required ProjectLocationModel loc,
+    required String phase,
   }) {
     return Container(
       padding: const EdgeInsets.all(10),
@@ -534,15 +669,42 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
               'تم سحب هذه المرحلة بواسطة "${withdrawal.userName}" في ${withdrawal.createdAt.year}/${withdrawal.createdAt.month.toString().padLeft(2, '0')}/${withdrawal.createdAt.day} ${withdrawal.createdAt.hour.toString().padLeft(2, '0')}:${withdrawal.createdAt.minute.toString().padLeft(2, '0')}',
               style: TextStyle(fontSize: 12, color: Colors.orange[800]),
             )
-          else if (materials.isNotEmpty)
-            FilledButton.icon(
-              icon: const Icon(Icons.inventory_2),
-              label: const Text('سحب الخامات'),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF1B5E20),
+          else if (materials.isNotEmpty) ...[
+            if (wr != null && wr.isRejectedOverall)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  _engineerRequestStatusLine(wr),
+                  style: TextStyle(fontSize: 12, color: Colors.red.shade800),
+                ),
               ),
-              onPressed: onWithdraw,
-            ),
+            if (wr != null && wr.isPendingOverall)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  _engineerRequestStatusLine(wr),
+                  style: TextStyle(fontSize: 12, color: Colors.blueGrey.shade800),
+                ),
+              ),
+            if (wr == null || wr.isRejectedOverall)
+              FilledButton.icon(
+                icon: const Icon(Icons.send_outlined),
+                label: const Text('طلب سحب خامات'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B5E20),
+                ),
+                onPressed: () => _submitWithdrawalRequest(loc, phase),
+              ),
+            if (wr != null && wr.isApprovedOverall)
+              FilledButton.icon(
+                icon: const Icon(Icons.inventory_2),
+                label: const Text('إكمال سحب الخامات'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B5E20),
+                ),
+                onPressed: () => _showWithdrawDialog(loc, phase, withdrawalRequestId: wr.id),
+              ),
+          ],
         ],
       ),
     );

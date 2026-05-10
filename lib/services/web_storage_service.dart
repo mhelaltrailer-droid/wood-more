@@ -22,6 +22,7 @@ import '../models/location_withdrawal_for_period_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
+import '../models/withdrawal_request_model.dart';
 import '../data/default_materials.dart';
 import 'icon_visibility_service.dart';
 
@@ -2184,5 +2185,87 @@ class WebStorageService {
     });
     await prefs.setString(_irMirUploadsKey, jsonEncode(list));
     return nextId;
+  }
+
+  Future<void> deleteIrMirUpload(int id, {String? requesterEmail}) async {
+    final prefs = await _prefs;
+    final raw = prefs.getString(_irMirUploadsKey) ?? '[]';
+    final list = jsonDecode(raw) as List<dynamic>;
+    final next = <dynamic>[];
+    var found = false;
+    for (final e in list) {
+      final m = e as Map<String, dynamic>;
+      final eid = m['id'] is int
+          ? m['id'] as int
+          : int.tryParse(m['id']?.toString() ?? '') ?? 0;
+      if (eid == id) {
+        found = true;
+        continue;
+      }
+      next.add(e);
+    }
+    if (!found) throw Exception('المرفق غير موجود');
+    await prefs.setString(_irMirUploadsKey, jsonEncode(next));
+  }
+
+  Never _withdrawalRequestsUnsupported() {
+    throw UnsupportedError(
+      'طلبات سحب الخامات تتطلب الاتصال بخادم API (apiBaseUrl في الإعدادات).',
+    );
+  }
+
+  Future<WithdrawalRequestModel> createWithdrawalRequest({
+    required int projectId,
+    required int locationId,
+    required String phase,
+    required int engineerUserId,
+    required String engineerUserName,
+    required String locationPathLabel,
+  }) async {
+    _withdrawalRequestsUnsupported();
+  }
+
+  Future<List<WithdrawalRequestModel>> getWithdrawalRequestsForEngineerProject({
+    required int projectId,
+    required int engineerUserId,
+  }) async {
+    _withdrawalRequestsUnsupported();
+  }
+
+  Future<WithdrawalRequestModel?> getOpenWithdrawalRequestForLocationPhase({
+    required int locationId,
+    required String phase,
+  }) async {
+    _withdrawalRequestsUnsupported();
+  }
+
+  Future<int> countPendingWithdrawalActionsForManager({
+    required int userId,
+    required String role,
+  }) async {
+    return 0;
+  }
+
+  Future<List<WithdrawalRequestModel>> listPendingWithdrawalActionsForManager({
+    required int userId,
+    required String role,
+  }) async {
+    return [];
+  }
+
+  Future<void> respondWithdrawalRequest({
+    required int requestId,
+    required int managerUserId,
+    required bool approve,
+    String? reason,
+  }) async {
+    _withdrawalRequestsUnsupported();
+  }
+
+  Future<void> fulfillWithdrawalRequest({
+    required int requestId,
+    required int engineerUserId,
+  }) async {
+    _withdrawalRequestsUnsupported();
   }
 }

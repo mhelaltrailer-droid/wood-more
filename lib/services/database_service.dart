@@ -23,6 +23,7 @@ import '../models/location_withdrawal_for_period_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
+import '../models/withdrawal_request_model.dart';
 import '../data/default_materials.dart';
 import 'icon_visibility_service.dart';
 
@@ -46,7 +47,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 26,
+      version: 27,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -364,6 +365,9 @@ class DatabaseService {
     }
     if (oldVersion < 26) {
       await _createIrMirUploadsTable(db);
+    }
+    if (oldVersion < 27) {
+      await _createWithdrawalRequestsTable(db);
     }
   }
 
@@ -714,8 +718,41 @@ class DatabaseService {
         UNIQUE(location_id, phase)
       )
     ''');
+    await _createWithdrawalRequestsTable(db);
     await _createIrMirUploadsTable(db);
     await _seedWorkPhases(db);
+  }
+
+  Future<void> _createWithdrawalRequestsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS withdrawal_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        location_id INTEGER NOT NULL,
+        phase TEXT NOT NULL DEFAULT 'first_fix',
+        engineer_user_id INTEGER NOT NULL,
+        engineer_user_name TEXT NOT NULL,
+        location_path_label TEXT NOT NULL DEFAULT '',
+        sem_status TEXT NOT NULL DEFAULT 'pending',
+        om_status TEXT NOT NULL DEFAULT 'pending',
+        sem_reason TEXT,
+        om_reason TEXT,
+        sem_responded_at TEXT,
+        om_responded_at TEXT,
+        overall_status TEXT NOT NULL DEFAULT 'pending',
+        fulfilled_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects (id),
+        FOREIGN KEY (location_id) REFERENCES project_locations (id),
+        FOREIGN KEY (engineer_user_id) REFERENCES users (id)
+      )
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_withdrawal_req_active
+      ON withdrawal_requests(location_id, phase)
+      WHERE fulfilled_at IS NULL AND overall_status IN ('pending', 'approved')
+    ''');
   }
 
   Future<void> _createIrMirUploadsTable(Database db) async {
@@ -1597,6 +1634,21 @@ class DatabaseService {
       'disbursement_permit_images_json': disbursementPermitImagesJson,
       'delivery_permit_images_json': deliveryPermitImagesJson,
     });
+    await db.update(
+      'withdrawal_requests',
+      {
+        'fulfilled_at': nowStr,
+        'updated_at': nowStr,
+      },
+      where:
+          'location_id = ? AND phase = ? AND engineer_user_id = ? AND overall_status = ? AND fulfilled_at IS NULL',
+      whereArgs: [
+        locationId,
+        phase,
+        userId,
+        WithdrawalRequestModel.statusApproved,
+      ],
+    );
   }
 
   /// إلغاء سحب الخامات: حذف السجل واسترجاع أرصدة المشروع وحذف حركات withdraw_location المرتبطة.
@@ -2522,5 +2574,424 @@ class DatabaseService {
       'notes': notes,
       'created_at': DateTime.now().toIso8601String(),
     });
+  }
+
+  /// حذف مرفق IR/MIR محلياً. التحقق من صلاحية المسؤول يتم في الواجهة.
+  Future<void> deleteIrMirUpload(int id, {String? requesterEmail}) async {
+    final db = await database;
+    final n = await db.delete(
+      'ir_mir_uploads',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (n == 0) throw Exception('المرفق غير موجود');
+  }
+
+  Future<void> _wrNotifyRoles(
+    Database db,
+    List<String> roles, {
+    required String title,
+    required String body,
+    required String eventType,
+    int? actorUserId,
+    String? actorUserName,
+    String? projectName,
+  }) async {
+    if (roles.isEmpty) return;
+    final placeholders = List.filled(roles.length, '?').join(',');
+    final users = await db.rawQuery(
+      'SELECT id, role FROM users WHERE role IN ($placeholders)',
+      roles,
+    );
+    final now = DateTime.now().toIso8601String();
+    for (final u in users) {
+      await db.insert('notifications', {
+        'recipient_user_id': u['id'],
+        'recipient_role': u['role'],
+        'title': title,
+        'body': body,
+        'event_type': eventType,
+        'actor_user_id': actorUserId,
+        'actor_user_name': actorUserName,
+        'project_name': projectName,
+        'created_at': now,
+        'is_read': 0,
+      });
+    }
+  }
+
+  Future<void> _wrNotifyUser(
+    Database db,
+    int recipientUserId, {
+    required String title,
+    required String body,
+    required String eventType,
+    int? actorUserId,
+    String? actorUserName,
+    String? projectName,
+  }) async {
+    final u = await db.query('users', where: 'id = ?', whereArgs: [recipientUserId]);
+    if (u.isEmpty) return;
+    final now = DateTime.now().toIso8601String();
+    await db.insert('notifications', {
+      'recipient_user_id': recipientUserId,
+      'recipient_role': u.first['role'],
+      'title': title,
+      'body': body,
+      'event_type': eventType,
+      'actor_user_id': actorUserId,
+      'actor_user_name': actorUserName,
+      'project_name': projectName,
+      'created_at': now,
+      'is_read': 0,
+    });
+  }
+
+  WithdrawalRequestModel _wrFromRow(Map<String, dynamic> m) =>
+      WithdrawalRequestModel.fromMap(Map<String, dynamic>.from(m));
+
+  Future<List<WithdrawalRequestModel>> getWithdrawalRequestsForEngineerProject({
+    required int projectId,
+    required int engineerUserId,
+  }) async {
+    final db = await database;
+    final maps = await db.query(
+      'withdrawal_requests',
+      where: 'project_id = ? AND engineer_user_id = ? AND fulfilled_at IS NULL',
+      whereArgs: [projectId, engineerUserId],
+      orderBy: 'id DESC',
+    );
+    return maps.map(_wrFromRow).toList();
+  }
+
+  Future<WithdrawalRequestModel?> getOpenWithdrawalRequestForLocationPhase({
+    required int locationId,
+    required String phase,
+  }) async {
+    final db = await database;
+    final maps = await db.query(
+      'withdrawal_requests',
+      where:
+          'location_id = ? AND phase = ? AND fulfilled_at IS NULL AND overall_status IN (?, ?)',
+      whereArgs: [
+        locationId,
+        phase,
+        WithdrawalRequestModel.statusPending,
+        WithdrawalRequestModel.statusApproved,
+      ],
+      orderBy: 'id DESC',
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return _wrFromRow(maps.first);
+  }
+
+  Future<WithdrawalRequestModel> createWithdrawalRequest({
+    required int projectId,
+    required int locationId,
+    required String phase,
+    required int engineerUserId,
+    required String engineerUserName,
+    required String locationPathLabel,
+  }) async {
+    final db = await database;
+    final ex = await db.query(
+      'withdrawal_requests',
+      where:
+          'location_id = ? AND phase = ? AND fulfilled_at IS NULL AND overall_status IN (?, ?)',
+      whereArgs: [
+        locationId,
+        phase,
+        WithdrawalRequestModel.statusPending,
+        WithdrawalRequestModel.statusApproved,
+      ],
+    );
+    if (ex.isNotEmpty) {
+      final r = ex.first;
+      if (r['engineer_user_id'] != engineerUserId) {
+        throw Exception('existing_request_other_engineer');
+      }
+      if (r['overall_status'] == WithdrawalRequestModel.statusApproved) {
+        throw Exception('already_approved_complete_flow');
+      }
+      return _wrFromRow(r);
+    }
+    final now = DateTime.now().toIso8601String();
+    final id = await db.insert('withdrawal_requests', {
+      'project_id': projectId,
+      'location_id': locationId,
+      'phase': phase,
+      'engineer_user_id': engineerUserId,
+      'engineer_user_name': engineerUserName,
+      'location_path_label': locationPathLabel,
+      'sem_status': WithdrawalRequestModel.statusPending,
+      'om_status': WithdrawalRequestModel.statusPending,
+      'overall_status': WithdrawalRequestModel.statusPending,
+      'created_at': now,
+      'updated_at': now,
+    });
+    final p = await db.query('projects', where: 'id = ?', whereArgs: [projectId]);
+    final projectName = p.isNotEmpty ? (p.first['name'] as String? ?? '') : '';
+    final bodyN =
+        'طلب من "$engineerUserName" — مشروع "$projectName" — موقع: ${locationPathLabel.isEmpty ? '—' : locationPathLabel}\n'
+        'رقم الطلب: $id';
+    await _wrNotifyRoles(
+      db,
+      ['site_engineer_manager', 'operation_manager'],
+      title: 'طلب سحب خامات',
+      body: bodyN,
+      eventType: 'withdrawal_request_new',
+      actorUserId: engineerUserId,
+      actorUserName: engineerUserName,
+      projectName: projectName.isEmpty ? null : projectName,
+    );
+    final row = await db.query('withdrawal_requests', where: 'id = ?', whereArgs: [id]);
+    return _wrFromRow(row.first);
+  }
+
+  Future<int> countPendingWithdrawalActionsForManager({
+    required int userId,
+    required String role,
+  }) async {
+    final db = await database;
+    final u = await db.query('users', where: 'id = ?', whereArgs: [userId]);
+    if (u.isEmpty || u.first['role'] != role) return 0;
+    final clause = role == 'site_engineer_manager'
+        ? "overall_status = 'pending' AND sem_status = 'pending' AND fulfilled_at IS NULL"
+        : role == 'operation_manager'
+        ? "overall_status = 'pending' AND om_status = 'pending' AND fulfilled_at IS NULL"
+        : null;
+    if (clause == null) return 0;
+    final v = Sqflite.firstIntValue(
+      await db.rawQuery('SELECT COUNT(*) AS c FROM withdrawal_requests WHERE $clause'),
+    );
+    return v ?? 0;
+  }
+
+  Future<List<WithdrawalRequestModel>> listPendingWithdrawalActionsForManager({
+    required int userId,
+    required String role,
+  }) async {
+    final db = await database;
+    final u = await db.query('users', where: 'id = ?', whereArgs: [userId]);
+    if (u.isEmpty || u.first['role'] != role) return [];
+    final where = role == 'site_engineer_manager'
+        ? "wr.overall_status = 'pending' AND wr.sem_status = 'pending' AND wr.fulfilled_at IS NULL"
+        : role == 'operation_manager'
+        ? "wr.overall_status = 'pending' AND wr.om_status = 'pending' AND wr.fulfilled_at IS NULL"
+        : null;
+    if (where == null) return [];
+    final rows = await db.rawQuery(
+      'SELECT wr.*, p.name AS project_name FROM withdrawal_requests wr '
+      'INNER JOIN projects p ON p.id = wr.project_id WHERE $where ORDER BY wr.id DESC',
+    );
+    return rows
+        .map((e) => WithdrawalRequestModel.fromMap(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<void> respondWithdrawalRequest({
+    required int requestId,
+    required int managerUserId,
+    required bool approve,
+    String? reason,
+  }) async {
+    if (!approve && (reason == null || reason.trim().isEmpty)) {
+      throw Exception('reason_required');
+    }
+    final db = await database;
+    final actor = await db.query('users', where: 'id = ?', whereArgs: [managerUserId]);
+    if (actor.isEmpty) throw Exception('user not found');
+    final actorRole = actor.first['role'] as String? ?? '';
+    if (actorRole != 'site_engineer_manager' && actorRole != 'operation_manager') {
+      throw Exception('forbidden');
+    }
+    final rq = await db.query('withdrawal_requests', where: 'id = ?', whereArgs: [requestId]);
+    if (rq.isEmpty) throw Exception('not found');
+    final row = Map<String, dynamic>.from(rq.first);
+    if (row['fulfilled_at'] != null) throw Exception('closed');
+    if (row['overall_status'] == WithdrawalRequestModel.statusRejected) {
+      throw Exception('closed');
+    }
+    if (row['overall_status'] == WithdrawalRequestModel.statusApproved) {
+      throw Exception('already_approved');
+    }
+    final now = DateTime.now().toIso8601String();
+    final pid = row['project_id'] as int;
+    final p = await db.query('projects', where: 'id = ?', whereArgs: [pid]);
+    final projectName = p.isNotEmpty ? (p.first['name'] as String? ?? '') : '';
+    final pathLabel = (row['location_path_label'] as String?) ?? '';
+    final engId = row['engineer_user_id'] as int;
+    final engName = (row['engineer_user_name'] as String?) ?? '';
+    final actorName = (actor.first['name'] as String?) ?? '';
+
+    if (actorRole == 'site_engineer_manager') {
+      if (row['sem_status'] != WithdrawalRequestModel.statusPending) {
+        throw Exception('already_responded');
+      }
+      if (!approve) {
+        await db.update(
+          'withdrawal_requests',
+          {
+            'sem_status': WithdrawalRequestModel.statusRejected,
+            'sem_reason': reason!.trim(),
+            'sem_responded_at': now,
+            'overall_status': WithdrawalRequestModel.statusRejected,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [requestId],
+        );
+        await _wrNotifyUser(db, engId,
+            title: 'رفض طلب سحب خامات',
+            body: 'تم رفض طلبك بسبب: ${reason.trim()}',
+            eventType: 'withdrawal_request_rejected',
+            actorUserId: managerUserId,
+            actorUserName: actorName,
+            projectName: projectName.isEmpty ? null : projectName);
+        await _wrNotifyRoles(db, ['operation_manager'],
+            title: 'طلب سحب خامات — مرفوض',
+            body:
+                'رُفض الطلب من مدير مهندسي المواقع. السبب: ${reason.trim()}\nالمهندس: $engName — $pathLabel',
+            eventType: 'withdrawal_request_rejected_by_sem',
+            actorUserId: managerUserId,
+            actorUserName: actorName,
+            projectName: projectName.isEmpty ? null : projectName);
+        return;
+      }
+      await db.update(
+        'withdrawal_requests',
+        {
+          'sem_status': WithdrawalRequestModel.statusApproved,
+          'sem_responded_at': now,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [requestId],
+      );
+      if (row['om_status'] == WithdrawalRequestModel.statusApproved) {
+        await db.update(
+          'withdrawal_requests',
+          {
+            'overall_status': WithdrawalRequestModel.statusApproved,
+            'updated_at': now,
+          },
+          where: 'id = ?',
+          whereArgs: [requestId],
+        );
+        await _wrNotifyUser(db, engId,
+            title: 'تمت الموافقة على طلب سحب الخامات',
+            body:
+                'يمكنك الآن إكمال سحب الخامات من الموقع: $pathLabel — مشروع "$projectName"',
+            eventType: 'withdrawal_request_approved',
+            actorUserId: managerUserId,
+            actorUserName: actorName,
+            projectName: projectName.isEmpty ? null : projectName);
+      } else {
+        await _wrNotifyRoles(db, ['operation_manager'],
+            title: 'بانتظار موافقتكم — طلب سحب خامات',
+            body:
+                'وافق مدير مهندسي المواقع. بانتظار موافقة مدير التشغيل.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
+            eventType: 'withdrawal_request_waiting_om',
+            actorUserId: engId,
+            actorUserName: engName,
+            projectName: projectName.isEmpty ? null : projectName);
+      }
+      return;
+    }
+
+    if (row['om_status'] != WithdrawalRequestModel.statusPending) {
+      throw Exception('already_responded');
+    }
+    if (!approve) {
+      await db.update(
+        'withdrawal_requests',
+        {
+          'om_status': WithdrawalRequestModel.statusRejected,
+          'om_reason': reason!.trim(),
+          'om_responded_at': now,
+          'overall_status': WithdrawalRequestModel.statusRejected,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [requestId],
+      );
+      await _wrNotifyUser(db, engId,
+          title: 'رفض طلب سحب خامات',
+          body: 'تم رفض طلبك بسبب: ${reason.trim()}',
+          eventType: 'withdrawal_request_rejected',
+          actorUserId: managerUserId,
+          actorUserName: actorName,
+          projectName: projectName.isEmpty ? null : projectName);
+      await _wrNotifyRoles(db, ['site_engineer_manager'],
+          title: 'طلب سحب خامات — مرفوض',
+          body:
+              'رُفض الطلب من مدير التشغيل. السبب: ${reason.trim()}\nالمهندس: $engName — $pathLabel',
+          eventType: 'withdrawal_request_rejected_by_om',
+          actorUserId: managerUserId,
+          actorUserName: actorName,
+          projectName: projectName.isEmpty ? null : projectName);
+      return;
+    }
+    await db.update(
+      'withdrawal_requests',
+      {
+        'om_status': WithdrawalRequestModel.statusApproved,
+        'om_responded_at': now,
+        'updated_at': now,
+      },
+      where: 'id = ?',
+      whereArgs: [requestId],
+    );
+    if (row['sem_status'] == WithdrawalRequestModel.statusApproved) {
+      await db.update(
+        'withdrawal_requests',
+        {
+          'overall_status': WithdrawalRequestModel.statusApproved,
+          'updated_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [requestId],
+      );
+      await _wrNotifyUser(db, engId,
+          title: 'تمت الموافقة على طلب سحب الخامات',
+          body:
+              'يمكنك الآن إكمال سحب الخامات من الموقع: $pathLabel — مشروع "$projectName"',
+          eventType: 'withdrawal_request_approved',
+          actorUserId: managerUserId,
+          actorUserName: actorName,
+          projectName: projectName.isEmpty ? null : projectName);
+    } else {
+      await _wrNotifyRoles(db, ['site_engineer_manager'],
+          title: 'بانتظار موافقتكم — طلب سحب خامات',
+          body:
+              'وافق مدير التشغيل. بانتظار موافقة مدير مهندسي المواقع.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
+          eventType: 'withdrawal_request_waiting_sem',
+          actorUserId: engId,
+          actorUserName: engName,
+          projectName: projectName.isEmpty ? null : projectName);
+    }
+  }
+
+  Future<void> fulfillWithdrawalRequest({
+    required int requestId,
+    required int engineerUserId,
+  }) async {
+    final db = await database;
+    final rq = await db.query('withdrawal_requests', where: 'id = ?', whereArgs: [requestId]);
+    if (rq.isEmpty) throw Exception('not found');
+    final row = rq.first;
+    if (row['engineer_user_id'] != engineerUserId) throw Exception('forbidden');
+    if (row['overall_status'] != WithdrawalRequestModel.statusApproved) {
+      throw Exception('not_approved');
+    }
+    if (row['fulfilled_at'] != null) return;
+    final now = DateTime.now().toIso8601String();
+    await db.update(
+      'withdrawal_requests',
+      {'fulfilled_at': now, 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [requestId],
+    );
   }
 }

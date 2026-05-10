@@ -23,6 +23,7 @@ import '../models/activity_log_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
+import '../models/withdrawal_request_model.dart';
 import 'icon_visibility_service.dart';
 
 /// Storage implementation that uses the REST API (PostgreSQL backend).
@@ -1269,5 +1270,171 @@ class ApiStorageService {
       'fileData': fileData,
       'notes': notes,
     });
+  }
+
+  Future<void> deleteIrMirUpload(int id, {required String requesterEmail}) async {
+    final uri = Uri.parse(_path('ir-mir/uploads/$id')).replace(
+      queryParameters: {
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
+      },
+    );
+    final r = await http.delete(uri);
+    if (r.statusCode == 403) {
+      throw Exception('غير مصرح بحذف المرفقات');
+    }
+    if (r.statusCode == 404) {
+      throw Exception('المرفق غير موجود');
+    }
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  Future<Map<String, dynamic>> _postReturnMap(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final uri = Uri.parse(_path(path));
+    final r = await http.post(
+      uri,
+      body: jsonEncode(body),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    if (r.body.isEmpty) return {};
+    final decoded = jsonDecode(r.body);
+    return Map<String, dynamic>.from(decoded as Map);
+  }
+
+  Future<WithdrawalRequestModel> createWithdrawalRequest({
+    required int projectId,
+    required int locationId,
+    required String phase,
+    required int engineerUserId,
+    required String engineerUserName,
+    required String locationPathLabel,
+  }) async {
+    final m = await _postReturnMap('withdrawal-requests', {
+      'projectId': projectId,
+      'locationId': locationId,
+      'phase': phase,
+      'userId': engineerUserId,
+      'userName': engineerUserName,
+      'locationPathLabel': locationPathLabel,
+    });
+    return WithdrawalRequestModel.fromMap(m);
+  }
+
+  Future<List<WithdrawalRequestModel>> getWithdrawalRequestsForEngineerProject({
+    required int projectId,
+    required int engineerUserId,
+  }) async {
+    final uri = Uri.parse(_path('withdrawal-requests/for-engineer-project'))
+        .replace(queryParameters: {
+      'projectId': projectId.toString(),
+      'engineerUserId': engineerUserId.toString(),
+    });
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) => WithdrawalRequestModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<WithdrawalRequestModel?> getOpenWithdrawalRequestForLocationPhase({
+    required int locationId,
+    required String phase,
+  }) async {
+    final uri = Uri.parse(_path('withdrawal-requests/open')).replace(
+      queryParameters: {
+        'locationId': locationId.toString(),
+        'phase': phase,
+      },
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    if (r.body.isEmpty || r.body == 'null') return null;
+    final decoded = jsonDecode(r.body);
+    if (decoded == null) return null;
+    return WithdrawalRequestModel.fromMap(
+      Map<String, dynamic>.from(decoded as Map),
+    );
+  }
+
+  Future<int> countPendingWithdrawalActionsForManager({
+    required int userId,
+    required String role,
+  }) async {
+    final uri =
+        Uri.parse(_path('withdrawal-requests/action-count')).replace(
+      queryParameters: {
+        'userId': userId.toString(),
+        'role': role,
+      },
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final data = jsonDecode(r.body) as Map<String, dynamic>;
+    final c = data['count'];
+    if (c is int) return c;
+    return int.tryParse(c?.toString() ?? '0') ?? 0;
+  }
+
+  Future<List<WithdrawalRequestModel>> listPendingWithdrawalActionsForManager({
+    required int userId,
+    required String role,
+  }) async {
+    final uri =
+        Uri.parse(_path('withdrawal-requests/pending-actions')).replace(
+      queryParameters: {
+        'userId': userId.toString(),
+        'role': role,
+      },
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) => WithdrawalRequestModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> respondWithdrawalRequest({
+    required int requestId,
+    required int managerUserId,
+    required bool approve,
+    String? reason,
+  }) async {
+    final uri = Uri.parse(_path('withdrawal-requests/$requestId/respond'));
+    final r = await http.put(
+      uri,
+      body: jsonEncode({
+        'userId': managerUserId,
+        'decision': approve ? 'approve' : 'reject',
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  Future<void> fulfillWithdrawalRequest({
+    required int requestId,
+    required int engineerUserId,
+  }) async {
+    final uri = Uri.parse(_path('withdrawal-requests/$requestId/fulfill'));
+    final r = await http.put(
+      uri,
+      body: jsonEncode({'userId': engineerUserId}),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
   }
 }
