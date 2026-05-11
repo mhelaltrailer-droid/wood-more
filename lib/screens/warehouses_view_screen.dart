@@ -8,6 +8,7 @@ import '../models/location_withdrawal_model.dart';
 import '../models/project_location_model.dart';
 import '../models/project_model.dart';
 import '../models/user_model.dart';
+import '../services/project_warehouse_loading.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
@@ -22,7 +23,8 @@ class WarehousesViewScreen extends StatefulWidget {
   State<WarehousesViewScreen> createState() => _WarehousesViewScreenState();
 }
 
-class _WarehousesViewScreenState extends State<WarehousesViewScreen> {
+class _WarehousesViewScreenState extends State<WarehousesViewScreen>
+    with WidgetsBindingObserver {
   final _db = getStorage();
   List<ProjectModel> _projects = [];
   ProjectModel? _selectedProject;
@@ -30,13 +32,30 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen> {
   Map<String, List<LocationMaterialModel>> _materialsByLocationPhase = {};
   Map<String, LocationWithdrawalModel?> _withdrawalByLocationPhase = {};
   bool _loading = false;
+  String? _loadError;
+  int _loadToken = 0;
 
-  String _k(int locationId, String phase) => '${locationId}_$phase';
+  String _k(int locationId, String phase) =>
+      warehouseLocationPhaseKey(locationId, phase);
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadProjects();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || _selectedProject == null) return;
+    if (_loading || _loadError == null) return;
+    _loadLocationsAndMaterials();
   }
 
   Future<void> _loadProjects() async {
@@ -51,36 +70,38 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen> {
         _allLocations = [];
         _materialsByLocationPhase = {};
         _withdrawalByLocationPhase = {};
+        _loadError = null;
       });
       return;
     }
-    setState(() => _loading = true);
+    final loadToken = ++_loadToken;
+    setState(() {
+      _loading = true;
+      _loadError = null;
+      _allLocations = [];
+      _materialsByLocationPhase = {};
+      _withdrawalByLocationPhase = {};
+    });
     try {
-      final locations = await _db.getProjectLocations(_selectedProject!.id);
-      final Map<String, List<LocationMaterialModel>> materialsByLocPhase = {};
-      final Map<String, LocationWithdrawalModel?> withdrawalByLocPhase = {};
-      for (final loc in locations) {
-        for (final phase in LocationMaterialModel.phases) {
-          final mats = await _db.getLocationMaterials(loc.id, phase: phase);
-          if (mats.isNotEmpty) {
-            materialsByLocPhase[_k(loc.id, phase)] = mats;
-          }
-          withdrawalByLocPhase[_k(loc.id, phase)] =
-              await _db.getLocationWithdrawal(loc.id, phase: phase);
-        }
-      }
-      if (!mounted) return;
+      final projectId = _selectedProject!.id;
+      final snapshot = await loadProjectWarehouseSnapshot(_db, projectId);
+      if (!mounted || loadToken != _loadToken) return;
       setState(() {
-        _allLocations = locations;
-        _materialsByLocationPhase = materialsByLocPhase;
-        _withdrawalByLocationPhase = withdrawalByLocPhase;
+        _allLocations = snapshot.locations;
+        _materialsByLocationPhase = snapshot.materialsByLocationPhase;
+        _withdrawalByLocationPhase = snapshot.withdrawalByLocationPhase;
         _loading = false;
+        _loadError = null;
       });
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _loading = false);
+      if (!mounted || loadToken != _loadToken) return;
+      final message = warehouseLoadErrorMessage(e);
+      setState(() {
+        _loading = false;
+        _loadError = message;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('فشل التحميل: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text(message), backgroundColor: Colors.red),
       );
     }
   }
@@ -392,6 +413,27 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen> {
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: CircularProgressIndicator(),
+              ),
+            )
+          else if (_loadError != null)
+            Card(
+              color: Colors.red.shade50,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    Text(
+                      _loadError!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.red.shade900),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: _loadLocationsAndMaterials,
+                      child: const Text('إعادة المحاولة'),
+                    ),
+                  ],
+                ),
               ),
             )
           else if (_selectedProject != null && locationsWithMats.isEmpty)

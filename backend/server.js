@@ -2023,8 +2023,27 @@ app.get('/project-stock-ledger', async (req, res) => {
 app.get('/location-materials', async (req, res) => {
   try {
     const locationId = req.query.locationId;
+    const projectId = req.query.projectId;
     const phase = String(req.query.phase || 'first_fix').trim().toLowerCase();
-    if (!locationId) return res.status(400).json({ error: 'locationId required' });
+    if (projectId !== undefined && projectId !== '') {
+      const r = await pool.query(
+        `SELECT lm.id, lm.location_id, lm.phase, lm.material_name, lm.quantity, lm.unit
+         FROM location_materials lm
+         INNER JOIN project_locations pl ON pl.id = lm.location_id
+         WHERE pl.project_id = $1
+         ORDER BY lm.location_id, lm.phase, lm.material_name`,
+        [parseInt(String(projectId), 10)]
+      );
+      return res.json(r.rows.map(row => ({
+        id: parseInt(row.id),
+        location_id: parseInt(row.location_id),
+        phase: row.phase || 'first_fix',
+        material_name: row.material_name,
+        quantity: row.quantity,
+        unit: row.unit || ''
+      })));
+    }
+    if (!locationId) return res.status(400).json({ error: 'locationId or projectId required' });
     const r = await pool.query(
       'SELECT id, location_id, phase, material_name, quantity, unit FROM location_materials WHERE location_id = $1 AND phase = $2 ORDER BY material_name',
       [locationId, phase]
@@ -2083,8 +2102,30 @@ app.delete('/location-materials/:id', async (req, res) => {
 app.get('/location-withdrawal', async (req, res) => {
   try {
     const locationId = req.query.locationId;
+    const projectId = req.query.projectId;
     const phase = String(req.query.phase || 'first_fix').trim().toLowerCase();
-    if (!locationId) return res.status(400).json({ error: 'locationId required' });
+    if (projectId !== undefined && projectId !== '') {
+      const r = await pool.query(
+        `SELECT lw.id, lw.location_id, lw.phase, lw.user_id, lw.user_name, lw.created_at,
+                lw.disbursement_permit_images_json, lw.delivery_permit_images_json
+         FROM location_withdrawal lw
+         INNER JOIN project_locations pl ON pl.id = lw.location_id
+         WHERE pl.project_id = $1
+         ORDER BY lw.location_id, lw.phase`,
+        [parseInt(String(projectId), 10)]
+      );
+      return res.json(r.rows.map(row => ({
+        id: parseInt(row.id),
+        location_id: parseInt(row.location_id),
+        phase: row.phase || 'first_fix',
+        user_id: parseInt(row.user_id),
+        user_name: row.user_name,
+        created_at: row.created_at,
+        disbursement_permit_images_json: row.disbursement_permit_images_json,
+        delivery_permit_images_json: row.delivery_permit_images_json
+      })));
+    }
+    if (!locationId) return res.status(400).json({ error: 'locationId or projectId required' });
     const r = await pool.query(
       'SELECT id, location_id, phase, user_id, user_name, created_at, disbursement_permit_images_json, delivery_permit_images_json FROM location_withdrawal WHERE location_id = $1 AND phase = $2',
       [locationId, phase]

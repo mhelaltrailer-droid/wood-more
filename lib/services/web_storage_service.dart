@@ -1493,6 +1493,32 @@ class WebStorageService {
       ..sort((a, b) => a.materialName.compareTo(b.materialName));
   }
 
+  Future<List<LocationMaterialModel>> getLocationMaterialsForProject(
+    int projectId,
+  ) async {
+    final locations = await getProjectLocations(projectId);
+    final locationIds = locations.map((e) => e.id).toSet();
+    await _initData();
+    final prefs = await _prefs;
+    final list = (jsonDecode(prefs.getString(_locationMaterialsKey)!) as List)
+        .where((e) => locationIds.contains((e as Map)['location_id']))
+        .toList();
+    return list
+        .map(
+          (m) => LocationMaterialModel.fromMap(
+            Map<String, dynamic>.from(m as Map),
+          ),
+        )
+        .toList()
+      ..sort((a, b) {
+        final byLocation = a.locationId.compareTo(b.locationId);
+        if (byLocation != 0) return byLocation;
+        final byPhase = a.phase.compareTo(b.phase);
+        if (byPhase != 0) return byPhase;
+        return a.materialName.compareTo(b.materialName);
+      });
+  }
+
   Future<int> addLocationMaterial(LocationMaterialModel m) async {
     await _initData();
     final prefs = await _prefs;
@@ -1562,6 +1588,29 @@ class WebStorageService {
     return LocationWithdrawalModel.fromMap(
       Map<String, dynamic>.from(found.first as Map),
     );
+  }
+
+  Future<List<LocationWithdrawalModel>> getLocationWithdrawalsForProject(
+    int projectId,
+  ) async {
+    final locations = await getProjectLocations(projectId);
+    final locationIds = locations.map((e) => e.id).toSet();
+    await _initData();
+    final prefs = await _prefs;
+    final list = jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
+    return list
+        .where((e) => locationIds.contains((e as Map)['location_id']))
+        .map(
+          (e) => LocationWithdrawalModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList()
+      ..sort((a, b) {
+        final byLocation = a.locationId.compareTo(b.locationId);
+        if (byLocation != 0) return byLocation;
+        return a.phase.compareTo(b.phase);
+      });
   }
 
   Future<void> createLocationWithdrawal({

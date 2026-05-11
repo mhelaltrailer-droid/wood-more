@@ -37,20 +37,57 @@ class ApiStorageService {
   String _path(String segment) =>
       baseUrl.endsWith('/') ? '$baseUrl$segment' : '$baseUrl/$segment';
 
+  Future<http.Response> _httpGet(Uri uri, {int attempts = 3}) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await http.get(uri);
+      } catch (error) {
+        lastError = error;
+        if (attempt + 1 >= attempts) break;
+        await Future<void>.delayed(Duration(milliseconds: 250 * (attempt + 1)));
+      }
+    }
+    throw lastError ?? Exception('request failed');
+  }
+
   Future<Map<String, dynamic>> _get(String path) async {
     final uri = Uri.parse(_path(path));
-    final r = await http.get(uri);
+    final r = await _httpGet(uri);
     if (r.statusCode >= 400) throw Exception(r.body);
     return r.body.isEmpty ? {} : jsonDecode(r.body) as Map<String, dynamic>;
   }
 
   Future<List<dynamic>> _getList(String path) async {
     final uri = Uri.parse(_path(path));
-    final r = await http.get(uri);
+    final r = await _httpGet(uri);
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
     if (decoded == null) return [];
     return decoded is List ? decoded as List<dynamic> : [];
+  }
+
+  Future<List<dynamic>?> _tryGetList(String path) async {
+    final uri = Uri.parse(_path(path));
+    final r = await _httpGet(uri);
+    if (r.statusCode == 400) return null;
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final decoded = jsonDecode(r.body);
+    if (decoded == null) return const [];
+    return decoded is List ? decoded as List<dynamic> : const [];
+  }
+
+  Future<List<T>> _boundedWait<T>(
+    List<Future<T>> futures, {
+    int batchSize = 6,
+  }) async {
+    if (futures.isEmpty) return const [];
+    final out = <T>[];
+    for (var i = 0; i < futures.length; i += batchSize) {
+      final end = i + batchSize < futures.length ? i + batchSize : futures.length;
+      out.addAll(await Future.wait(futures.sublist(i, end)));
+    }
+    return out;
   }
 
   Future<int> _post(String path, Map<String, dynamic> body) async {
@@ -940,6 +977,31 @@ class ApiStorageService {
         .toList();
   }
 
+  Future<List<LocationMaterialModel>> getLocationMaterialsForProject(
+    int projectId,
+  ) async {
+    final bulk = await _tryGetList('location-materials?projectId=$projectId');
+    if (bulk != null) {
+      return bulk
+          .map(
+            (e) => LocationMaterialModel.fromMap(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .toList();
+    }
+
+    final locations = await getProjectLocations(projectId);
+    final futures = <Future<List<LocationMaterialModel>>>[];
+    for (final location in locations) {
+      for (final phase in LocationMaterialModel.phases) {
+        futures.add(getLocationMaterials(location.id, phase: phase));
+      }
+    }
+    final chunks = await _boundedWait(futures);
+    return chunks.expand((materials) => materials).toList();
+  }
+
   Future<int> addLocationMaterial(LocationMaterialModel m) async {
     return _post('location-materials', {
       'locationId': m.locationId,
@@ -1135,13 +1197,38 @@ class ApiStorageService {
     ).replace(
       queryParameters: {'locationId': locationId.toString(), 'phase': phase},
     );
-    final r = await http.get(uri);
+    final r = await _httpGet(uri);
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
     if (decoded == null) return null;
     return LocationWithdrawalModel.fromMap(
       Map<String, dynamic>.from(decoded as Map),
     );
+  }
+
+  Future<List<LocationWithdrawalModel>> getLocationWithdrawalsForProject(
+    int projectId,
+  ) async {
+    final bulk = await _tryGetList('location-withdrawal?projectId=$projectId');
+    if (bulk != null) {
+      return bulk
+          .map(
+            (e) => LocationWithdrawalModel.fromMap(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
+          .toList();
+    }
+
+    final locations = await getProjectLocations(projectId);
+    final futures = <Future<LocationWithdrawalModel?>>[];
+    for (final location in locations) {
+      for (final phase in LocationMaterialModel.phases) {
+        futures.add(getLocationWithdrawal(location.id, phase: phase));
+      }
+    }
+    final rows = await _boundedWait(futures);
+    return rows.whereType<LocationWithdrawalModel>().toList();
   }
 
   Future<void> createLocationWithdrawal({

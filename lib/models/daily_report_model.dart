@@ -213,4 +213,5 @@ const List<String> materialUnits = [
   'كيلو جرام',
   'متر طولي',
   'عود',
+  'قطعة',
 ];

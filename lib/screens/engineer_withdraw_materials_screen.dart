@@ -9,6 +9,7 @@ import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/project_stock_model.dart';
 import '../models/withdrawal_request_model.dart';
+import '../services/project_warehouse_loading.dart';
 import '../services/storage_service.dart';
 import '../services/withdrawal_stock_validation.dart';
 import '../services/route_persistence.dart';
@@ -25,7 +26,8 @@ class EngineerWithdrawMaterialsScreen extends StatefulWidget {
   State<EngineerWithdrawMaterialsScreen> createState() => _EngineerWithdrawMaterialsScreenState();
 }
 
-class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMaterialsScreen> {
+class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMaterialsScreen>
+    with WidgetsBindingObserver {
   final _db = getStorage();
   List<ProjectModel> _projects = [];
   ProjectModel? _selectedProject;
@@ -34,13 +36,18 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
   Map<String, LocationWithdrawalModel?> _withdrawalByLocationPhase = {};
   Map<String, WithdrawalRequestModel> _withdrawalRequestByKey = {};
   bool _loading = false;
+  bool _warehouseLoading = false;
+  String? _loadError;
+  int _loadToken = 0;
   Timer? _pollTimer;
 
-  String _k(int locationId, String phase) => '${locationId}_$phase';
+  String _k(int locationId, String phase) =>
+      warehouseLocationPhaseKey(locationId, phase);
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadProjects();
     _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) {
       if (_selectedProject != null && mounted) {
@@ -51,8 +58,16 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || _selectedProject == null) return;
+    if (_warehouseLoading || _loadError == null) return;
+    _loadLocationsAndMaterials();
   }
 
   WithdrawalRequestModel? _requestFor(int locationId, String phase) =>
@@ -109,28 +124,27 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
         _materialsByLocationPhase = {};
         _withdrawalByLocationPhase = {};
         _withdrawalRequestByKey = {};
+        _loadError = null;
       });
       return;
     }
-    setState(() => _loading = true);
+    final loadToken = ++_loadToken;
+    setState(() {
+      _warehouseLoading = true;
+      _loadError = null;
+      _allLocations = [];
+      _materialsByLocationPhase = {};
+      _withdrawalByLocationPhase = {};
+      _withdrawalRequestByKey = {};
+    });
     try {
-      final locations = await _db.getProjectLocations(_selectedProject!.id);
-      final Map<String, List<LocationMaterialModel>> materialsByLocPhase = {};
-      final Map<String, LocationWithdrawalModel?> withdrawalByLocPhase = {};
-      for (final loc in locations) {
-        for (final phase in LocationMaterialModel.phases) {
-          final mats = await _db.getLocationMaterials(loc.id, phase: phase);
-          if (mats.isNotEmpty) {
-            materialsByLocPhase[_k(loc.id, phase)] = mats;
-          }
-          withdrawalByLocPhase[_k(loc.id, phase)] = await _db
-              .getLocationWithdrawal(loc.id, phase: phase);
-        }
-      }
+      final projectId = _selectedProject!.id;
+      final snapshot = await loadProjectWarehouseSnapshot(_db, projectId);
+      if (!mounted || loadToken != _loadToken) return;
       final Map<String, WithdrawalRequestModel> reqMap = {};
       try {
         final reqs = await _db.getWithdrawalRequestsForEngineerProject(
-          projectId: _selectedProject!.id,
+          projectId: projectId,
           engineerUserId: widget.user.id,
         );
         for (final r in reqs) {
@@ -141,18 +155,25 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
           }
         }
       } catch (_) {}
-      if (!mounted) return;
+      if (!mounted || loadToken != _loadToken) return;
       setState(() {
-        _allLocations = locations;
-        _materialsByLocationPhase = materialsByLocPhase;
-        _withdrawalByLocationPhase = withdrawalByLocPhase;
+        _allLocations = snapshot.locations;
+        _materialsByLocationPhase = snapshot.materialsByLocationPhase;
+        _withdrawalByLocationPhase = snapshot.withdrawalByLocationPhase;
         _withdrawalRequestByKey = reqMap;
-        _loading = false;
+        _warehouseLoading = false;
+        _loadError = null;
       });
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('فشل التحميل: $e'), backgroundColor: Colors.red));
+      if (!mounted || loadToken != _loadToken) return;
+      final message = warehouseLoadErrorMessage(e);
+      setState(() {
+        _warehouseLoading = false;
+        _loadError = message;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -538,7 +559,9 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
           },
         ),
       ),
-      body: ListView(
+      body: Stack(
+        children: [
+          ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Card(
@@ -571,8 +594,29 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
             },
           ),
           const SizedBox(height: 20),
-          if (_loading)
+          if (_warehouseLoading)
             const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
+          else if (_loadError != null)
+            Card(
+              color: Colors.red.shade50,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    Text(
+                      _loadError!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.red.shade900),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: _loadLocationsAndMaterials,
+                      child: const Text('إعادة المحاولة'),
+                    ),
+                  ],
+                ),
+              ),
+            )
           else if (_selectedProject != null && locationsWithMats.isEmpty)
             const Card(
               child: Padding(
@@ -635,7 +679,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
                 ),
               );
             }),
-          if (_selectedProject != null && !_loading) ...[
+          if (_selectedProject != null && !_warehouseLoading && _loadError == null) ...[
             const SizedBox(height: 24),
             OutlinedButton.icon(
               onPressed: _showProjectWarehouseBalances,
@@ -648,6 +692,15 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
               ),
             ),
           ],
+        ],
+          ),
+          if (_loading)
+            const Positioned.fill(
+              child: ColoredBox(
+                color: Color(0x66FFFFFF),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ),
         ],
       ),
     );

@@ -48,16 +48,23 @@ class _AdminWarehouseWithdrawScreenState extends State<AdminWarehouseWithdrawScr
     }
     setState(() => _loading = true);
     try {
-      final locations = await _db.getProjectLocations(_selectedProject!.id);
+      final projectId = _selectedProject!.id;
+      final results = await Future.wait<dynamic>([
+        _db.getProjectLocations(projectId),
+        _db.getLocationMaterialsForProject(projectId),
+        _db.getLocationWithdrawalsForProject(projectId),
+      ]);
+      final locations = results[0] as List<ProjectLocationModel>;
+      final allMaterials = results[1] as List<LocationMaterialModel>;
+      final withdrawals = results[2] as List<LocationWithdrawalModel>;
       final Map<int, List<LocationMaterialModel>> materialsByLoc = {};
-      final Map<int, LocationWithdrawalModel?> withdrawalByLoc = {};
-      for (final loc in locations) {
-        final mats = await _db.getLocationMaterials(loc.id);
-        if (mats.isNotEmpty) {
-          materialsByLoc[loc.id] = mats;
-          withdrawalByLoc[loc.id] = await _db.getLocationWithdrawal(loc.id);
-        }
+      for (final material in allMaterials) {
+        materialsByLoc.putIfAbsent(material.locationId, () => []).add(material);
       }
+      final Map<int, LocationWithdrawalModel?> withdrawalByLoc = {
+        for (final withdrawal in withdrawals)
+          withdrawal.locationId: withdrawal,
+      };
       if (!mounted) return;
       setState(() {
         _allLocations = locations;

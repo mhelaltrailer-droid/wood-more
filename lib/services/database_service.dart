@@ -1529,6 +1529,23 @@ class DatabaseService {
     return maps.map((m) => LocationMaterialModel.fromMap(m)).toList();
   }
 
+  Future<List<LocationMaterialModel>> getLocationMaterialsForProject(
+    int projectId,
+  ) async {
+    final db = await database;
+    final maps = await db.rawQuery(
+      '''
+      SELECT lm.id, lm.location_id, lm.phase, lm.material_name, lm.quantity, lm.unit
+      FROM location_materials lm
+      INNER JOIN project_locations pl ON pl.id = lm.location_id
+      WHERE pl.project_id = ?
+      ORDER BY lm.location_id, lm.phase, lm.material_name
+      ''',
+      [projectId],
+    );
+    return maps.map((m) => LocationMaterialModel.fromMap(m)).toList();
+  }
+
   Future<int> addLocationMaterial(LocationMaterialModel m) async {
     final db = await database;
     return db.insert('location_materials', {
@@ -1572,6 +1589,24 @@ class DatabaseService {
     );
     if (maps.isEmpty) return null;
     return LocationWithdrawalModel.fromMap(maps.first);
+  }
+
+  Future<List<LocationWithdrawalModel>> getLocationWithdrawalsForProject(
+    int projectId,
+  ) async {
+    final db = await database;
+    final maps = await db.rawQuery(
+      '''
+      SELECT lw.id, lw.location_id, lw.phase, lw.user_id, lw.user_name, lw.created_at,
+             lw.disbursement_permit_images_json, lw.delivery_permit_images_json
+      FROM location_withdrawal lw
+      INNER JOIN project_locations pl ON pl.id = lw.location_id
+      WHERE pl.project_id = ?
+      ORDER BY lw.location_id, lw.phase
+      ''',
+      [projectId],
+    );
+    return maps.map((m) => LocationWithdrawalModel.fromMap(m)).toList();
   }
 
   Future<void> createLocationWithdrawal({
