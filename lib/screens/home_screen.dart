@@ -1011,7 +1011,7 @@ class _AccountantHome extends StatelessWidget {
   }
 }
 
-/// واجهة الصفحة الرئيسية لمدير المهندسين ومسؤول التطبيق
+/// واجهة الصفحة الرئيسية لمدير المشروعات ومسؤول التطبيق
 class _ManagerHome extends StatelessWidget {
   final UserModel user;
   final Map<String, bool>? iconConfig;
@@ -1199,7 +1199,7 @@ class _ManagerHome extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'ملخص خطة اليوم + جاهزية خطة الغد لمدير المهندسين',
+                      'ملخص خطة اليوم + جاهزية خطة الغد ل${UserModel.siteEngineerManagerRoleLabel}',
                       style: TextStyle(
                         fontSize: 14,
                         color: const Color(0xFF1B5E20).withOpacity(0.9),

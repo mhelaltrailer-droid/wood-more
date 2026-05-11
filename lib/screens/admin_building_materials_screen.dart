@@ -8,6 +8,7 @@ import '../models/zone_model.dart';
 import '../models/building_model.dart';
 import '../models/building_material_model.dart';
 import '../services/storage_service.dart';
+import '../widgets/material_name_picker_field.dart';
 
 /// إدارة التشوينات: الخامة، الطول، عدد القطعة، إجمالي الطول، إجمالي المساحة، مع إمكانية إرفاق صورة
 class AdminBuildingMaterialsScreen extends StatefulWidget {
@@ -100,13 +101,10 @@ class _AdminBuildingMaterialsScreenState extends State<AdminBuildingMaterialsScr
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                DropdownButtonFormField<String>(
+                MaterialNamePickerField(
                   value: selectedMaterial,
+                  options: _materials,
                   decoration: const InputDecoration(labelText: 'الخامة'),
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('— اختر الخامة —')),
-                    ..._materials.map((s) => DropdownMenuItem(value: s, child: Text(s))),
-                  ],
                   onChanged: (v) => setDialog(() => selectedMaterial = v),
                 ),
                 const SizedBox(height: 12),

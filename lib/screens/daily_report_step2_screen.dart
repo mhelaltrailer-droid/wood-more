@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../models/daily_report_model.dart';
 import '../services/storage_service.dart';
+import '../widgets/material_name_picker_field.dart';
 import 'daily_report_step3_screen.dart';
 
 /// الخطوة 2: الخامات (5 تكرارات) — الخامة، الكمية، الوحدة
@@ -149,22 +150,18 @@ class _MaterialRow extends StatelessWidget {
   }
 
   Widget _materialDropdown() {
-    return DropdownButtonFormField<String>(
-      value: item.materialName.isEmpty || !materialsList.contains(item.materialName) ? null : item.materialName,
+    final selected = item.materialName.isEmpty || !materialsList.contains(item.materialName)
+        ? null
+        : item.materialName;
+    return MaterialNamePickerField(
+      value: selected,
+      options: materialsList,
       decoration: const InputDecoration(
         labelText: 'الخامة',
         isDense: true,
         border: OutlineInputBorder(),
       ),
-      isExpanded: true,
-      selectedItemBuilder: (context) => [
-        const Text('—', overflow: TextOverflow.ellipsis, maxLines: 1),
-        ...materialsList.map((s) => Text(s, overflow: TextOverflow.ellipsis, maxLines: 1)),
-      ],
-      items: [
-        const DropdownMenuItem(value: null, child: Text('—')),
-        ...materialsList.map((s) => DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis, maxLines: 1))),
-      ],
+      placeholder: '—',
       onChanged: (s) {
         item.materialName = s ?? '';
         onChanged();

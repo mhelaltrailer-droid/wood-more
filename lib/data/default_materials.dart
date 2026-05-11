@@ -1,5 +1,8 @@
+import 'materials_display.dart';
+
 /// قائمة الخامات الافتراضية المستخدمة في التقرير اليومي - الخطوة الثانية
 const List<String> defaultMaterialsList = [
+  ...priorityMaterialNames,
   'وزر ((white))((f099))((700 cm))',
   'زاوية 9.8*4 عرض 10سم سمك 5مم((Angle 9.8*4))((10cm))((10 cm))',
   'زاواية 8*7.5 عرض 8سم سمك 5مم((Angle 8*7.5))((8cm))((8 cm))',

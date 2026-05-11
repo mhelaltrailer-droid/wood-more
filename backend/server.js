@@ -2173,6 +2173,24 @@ app.post('/location-withdrawal', async (req, res) => {
     if (loc.rows.length === 0) return res.status(404).json({ error: 'location not found' });
     const projectId = loc.rows[0].project_id;
     const materials = await pool.query('SELECT material_name, quantity, unit FROM location_materials WHERE location_id = $1 AND phase = $2', [locationId, phase]);
+    for (const m of materials.rows) {
+      const qtyNum = parseFloat(String(m.quantity).replace(/[^\d.]/g, '')) || 0;
+      if (qtyNum <= 0) continue;
+      const stock = await pool.query('SELECT id, quantity FROM project_stock WHERE project_id = $1 AND material_name = $2', [projectId, m.material_name]);
+      if (stock.rows.length === 0) {
+        return res.status(400).json({
+          error: 'insufficient_stock',
+          message: 'عملية سحب غير ناجحة الرصيد غير كافي',
+        });
+      }
+      const current = parseFloat(String(stock.rows[0].quantity).replace(/[^\d.]/g, '')) || 0;
+      if (current < qtyNum) {
+        return res.status(400).json({
+          error: 'insufficient_stock',
+          message: 'عملية سحب غير ناجحة الرصيد غير كافي',
+        });
+      }
+    }
     await pool.query(
       'INSERT INTO location_withdrawal (location_id, phase, user_id, user_name, created_at, disbursement_permit_images_json, delivery_permit_images_json) VALUES ($1, $2, $3, $4, $5, $6, $7)',
       [locationId, phase, userId, userName, now, disbursementPermitImagesJson || null, deliveryPermitImagesJson || null]
@@ -2183,7 +2201,7 @@ app.post('/location-withdrawal', async (req, res) => {
       const stock = await pool.query('SELECT id, quantity FROM project_stock WHERE project_id = $1 AND material_name = $2', [projectId, m.material_name]);
       if (stock.rows.length > 0) {
         const current = parseFloat(String(stock.rows[0].quantity).replace(/[^\d.]/g, '')) || 0;
-        const newQty = Math.max(0, current - qtyNum);
+        const newQty = current - qtyNum;
         await pool.query('UPDATE project_stock SET quantity = $1 WHERE id = $2', [newQty.toString(), stock.rows[0].id]);
       }
       await pool.query(
@@ -2513,7 +2531,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
         });
         await withdrawalInsertNotificationsForRoles(pool, ['operation_manager'], {
           title: 'طلب سحب خامات — مرفوض',
-          body: `رُفض الطلب من مدير مهندسي المواقع. السبب: ${reason}\nالمهندس: ${engName} — ${pathLabel}`,
+          body: `رُفض الطلب من مدير المشروعات. السبب: ${reason}\nالمهندس: ${engName} — ${pathLabel}`,
           event_type: 'withdrawal_request_rejected_by_sem',
           actor_user_id: userId,
           actor_user_name: actor.rows[0].name,
@@ -2541,7 +2559,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
       } else {
         await withdrawalInsertNotificationsForRoles(pool, ['operation_manager'], {
           title: 'بانتظار موافقتكم — طلب سحب خامات',
-          body: `وافق مدير مهندسي المواقع. بانتظار موافقة مدير التشغيل.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
+          body: `وافق مدير المشروعات. بانتظار موافقة مدير التشغيل.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
           event_type: 'withdrawal_request_waiting_om',
           actor_user_id: engId,
           actor_user_name: engName,
@@ -2599,7 +2617,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
       } else {
         await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
           title: 'بانتظار موافقتكم — طلب سحب خامات',
-          body: `وافق مدير التشغيل. بانتظار موافقة مدير مهندسي المواقع.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
+          body: `وافق مدير التشغيل. بانتظار موافقة مدير المشروعات.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
           event_type: 'withdrawal_request_waiting_sem',
           actor_user_id: engId,
           actor_user_name: engName,
@@ -2870,6 +2888,26 @@ app.post('/executed-plans', async (req, res) => {
         createdAt,
       ]
     );
+    if (status === 'postponed') {
+      const displayProject = String(projectName || '').trim() || 'غير محدد';
+      const reasonText =
+        (postponeCustomReason && postponeCustomReason.trim()) ||
+        (postponeReasonLabel && postponeReasonLabel.trim()) ||
+        postponeReasonKey ||
+        'غير محدد';
+      await withdrawalInsertNotificationsForRoles(
+        pool,
+        ['operation_manager', 'site_engineer_manager'],
+        {
+          title: 'تأجيل خطة عمل اليوم',
+          body: `تم تأجيل التنفيذ اليوم في مشروع "${displayProject}" بسبب = ${reasonText}`,
+          eventType: 'work_plan_postponed',
+          actorUserId: userId,
+          actorUserName: userName,
+          projectName: projectName,
+        }
+      );
+    }
     res.json(parseInt(r.rows[0].id));
   } catch (e) {
     res.status(500).json({ error: String(e.message) });

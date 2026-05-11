@@ -8,7 +8,7 @@ import '../services/storage_service.dart';
 import 'detailed_report_finances_screen.dart';
 import 'detailed_report_screen.dart';
 
-// مستقبلاً: عرض بنود الصرف لكل «خطة عمل اليوم» ضمن «تقرير متابعة خطط الأعمال» لواجهة مدير مهندسي الموقع.
+// مستقبلاً: عرض بنود الصرف لكل «خطة عمل اليوم» ضمن «تقرير متابعة خطط الأعمال» لواجهة مدير المشروعات.
 
 /// «الماليات» لمهندس الموقع: اختيار تاريخ مرتبط بخطة العمل المحفوظة → عرض الخطة للقراءة فقط → التالي → بنود الصرف.
 class SiteEngineerFinancesEntryScreen extends StatefulWidget {

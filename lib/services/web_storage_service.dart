@@ -25,6 +25,8 @@ import '../models/ir_mir_upload_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../data/default_materials.dart';
 import 'icon_visibility_service.dart';
+import 'withdrawal_stock_validation.dart';
+import '../data/materials_display.dart';
 
 /// تخزين للويب باستخدام SharedPreferences
 class WebStorageService {
@@ -392,9 +394,12 @@ class WebStorageService {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_materialsKey)!) as List;
-    if (list.isNotEmpty && list[0] is! Map)
-      return list.map((e) => e as String).toList()..sort();
-    return list.map((e) => (e as Map)['name'] as String).toList()..sort();
+    if (list.isNotEmpty && list[0] is! Map) {
+      return sortMaterialsForDisplay(list.map((e) => e as String));
+    }
+    return sortMaterialsForDisplay(
+      list.map((e) => (e as Map)['name'] as String),
+    );
   }
 
   Future<List<Map<String, dynamic>>> getMaterialsWithIds() async {
@@ -402,13 +407,18 @@ class WebStorageService {
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_materialsKey)!) as List;
     if (list.isEmpty) return [];
-    if (list[0] is Map)
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    return (list as List)
-        .asMap()
-        .entries
-        .map((e) => {'id': e.key + 1, 'name': e.value as String})
-        .toList();
+    if (list[0] is Map) {
+      return sortMaterialRowsForDisplay(
+        list.map((e) => Map<String, dynamic>.from(e as Map)).toList(),
+      );
+    }
+    return sortMaterialRowsForDisplay(
+      (list as List)
+          .asMap()
+          .entries
+          .map((e) => {'id': e.key + 1, 'name': e.value as String})
+          .toList(),
+    );
   }
 
   /// حد أقصى لعدد التقارير المخزنة على الويب لتجنب QuotaExceededError
@@ -1572,9 +1582,23 @@ class WebStorageService {
     if (locMap == null) throw Exception('الموقع غير موجود');
     final projectId = (locMap as Map)['project_id'] as int;
     final materials = await getLocationMaterials(locationId, phase: phase);
+    final stockList = jsonDecode(prefs.getString(_projectStockKey)!) as List;
+    final stockModels = stockList
+        .map(
+          (e) => ProjectStockModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .where((s) => s.projectId == projectId)
+        .toList();
+    if (!hasSufficientStockForWithdrawal(
+      locationMaterials: materials,
+      projectStock: stockModels,
+    )) {
+      throw Exception(withdrawalInsufficientStockMessage);
+    }
     final now = DateTime.now();
     final nowStr = now.toIso8601String();
-    final stockList = jsonDecode(prefs.getString(_projectStockKey)!) as List;
     for (final m in materials) {
       final qty =
           double.tryParse(m.quantity.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
@@ -2267,5 +2291,35 @@ class WebStorageService {
     required int engineerUserId,
   }) async {
     _withdrawalRequestsUnsupported();
+  }
+
+  /// حذف خطط العمل والهيكلة والمخازن والسحوبات والحضور في تخزين الويب.
+  Future<Map<String, int>> purgeOperationalData() async {
+    await _initData();
+    final prefs = await _prefs;
+    final keys = <String, String>{
+      'attendance_records': _attendanceKey,
+      'contractors': _contractorsKey,
+      'projects': _projectsKey,
+      'project_locations': _projectLocationsKey,
+      'zones': _zonesKey,
+      'buildings': _buildingsKey,
+      'units': _unitsKey,
+      'building_materials': _buildingMaterialsKey,
+      'building_cutlist_images': _buildingCutlistKey,
+      'project_stock': _projectStockKey,
+      'project_stock_ledger': _projectStockLedgerKey,
+      'location_materials': _locationMaterialsKey,
+      'location_withdrawal': _locationWithdrawalKey,
+      'ir_mir_uploads': _irMirUploadsKey,
+    };
+    final before = <String, int>{};
+    for (final entry in keys.entries) {
+      final raw = prefs.getString(entry.value) ?? '[]';
+      final list = jsonDecode(raw) as List;
+      before[entry.key] = list.length;
+      await prefs.setString(entry.value, jsonEncode(<Map<String, dynamic>>[]));
+    }
+    return before;
   }
 }

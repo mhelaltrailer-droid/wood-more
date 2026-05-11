@@ -15,7 +15,7 @@ class IconVisibilityService {
   static const Map<String, String> roleTitles = {
     roleAppAdmin: 'App admin',
     roleSiteEngineer: 'Site engineer',
-    roleSiteEngineerManager: 'Site engineer manager',
+    roleSiteEngineerManager: 'مدير المشروعات',
     roleOperationManager: 'Operation manager',
     roleAccountant: 'Accountant',
   };

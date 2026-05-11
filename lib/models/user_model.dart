@@ -1,5 +1,7 @@
-/// نموذج المستخدم - مهندس موقع أو مدير مهندسين
+/// نموذج المستخدم - مهندس موقع أو مدير المشروعات
 class UserModel {
+  static const String siteEngineerManagerRoleLabel = 'مدير المشروعات';
+
   final int id;
   final String name;
   final String email;
@@ -20,7 +22,7 @@ class UserModel {
   bool get isAdmin => role == 'app_admin';
   bool get isAccountant => role == 'accountant';
 
-  /// موافقة / رفض طلبات سحب الخامات (مدير مهندسي المواقع أو مدير التشغيل).
+  /// موافقة / رفض طلبات سحب الخامات (مدير المشروعات أو مدير التشغيل).
   bool get canActOnWithdrawalRequests =>
       role == 'site_engineer_manager' || role == 'operation_manager';
 

@@ -15,6 +15,7 @@ class _AdminMaterialsScreenState extends State<AdminMaterialsScreen> {
   final _db = getStorage();
   List<Map<String, dynamic>> _list = [];
   bool _loading = true;
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -80,28 +81,62 @@ class _AdminMaterialsScreenState extends State<AdminMaterialsScreen> {
     }
   }
 
+  List<Map<String, dynamic>> get _filteredList {
+    final q = _searchQuery.trim().toLowerCase();
+    if (q.isEmpty) return _list;
+    return _list
+        .where((m) => ((m['name'] as String?) ?? '').toLowerCase().contains(q))
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final visible = _filteredList;
     return Scaffold(
       appBar: AppBar(title: const Text('إدارة الخامات'), backgroundColor: const Color(0xFF1B5E20), foregroundColor: Colors.white),
-      body: _loading ? const Center(child: CircularProgressIndicator()) : ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _list.length,
-        itemBuilder: (context, i) {
-          final m = _list[i];
-          final name = m['name'] as String? ?? '';
-          return Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              title: Text(name),
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(icon: const Icon(Icons.edit), onPressed: () => _showForm(m)),
-                IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _delete(m)),
-              ]),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: TextField(
+                    decoration: const InputDecoration(
+                      labelText: 'بحث في الخامات',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                    ),
+                    textDirection: TextDirection.ltr,
+                    onChanged: (v) => setState(() => _searchQuery = v),
+                  ),
+                ),
+                Expanded(
+                  child: visible.isEmpty
+                      ? const Center(child: Text('لا توجد خامات مطابقة للبحث'))
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          itemCount: visible.length,
+                          itemBuilder: (context, i) {
+                            final m = visible[i];
+                            final name = m['name'] as String? ?? '';
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                title: Text(name, textDirection: TextDirection.ltr),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(icon: const Icon(Icons.edit), onPressed: () => _showForm(m)),
+                                    IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _delete(m)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
             ),
-          );
-        },
-      ),
       floatingActionButton: FloatingActionButton(onPressed: () => _showForm(), child: const Icon(Icons.add), backgroundColor: const Color(0xFF1B5E20)),
     );
   }

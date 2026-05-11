@@ -16,7 +16,7 @@ import 'home_screen.dart';
 bool canEditDeleteDailyReport(UserModel? user) =>
     user != null && user.role == 'app_admin' && user.email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
 
-/// شاشة التقارير لمدير المهندسين: فلتر (مهندس، من تاريخ، إلى تاريخ، مشروع اختياري) وعرض التقارير اليومية + تصدير PDF
+/// شاشة التقارير لمدير المشروعات: فلتر (مهندس، من تاريخ، إلى تاريخ، مشروع اختياري) وعرض التقارير اليومية + تصدير PDF
 class ReportsScreen extends StatefulWidget {
   final UserModel currentUser;
 

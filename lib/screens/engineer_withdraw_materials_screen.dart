@@ -10,6 +10,7 @@ import '../models/location_withdrawal_model.dart';
 import '../models/project_stock_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../services/storage_service.dart';
+import '../services/withdrawal_stock_validation.dart';
 import '../services/route_persistence.dart';
 import 'home_screen.dart';
 import 'withdrawal_balance_review_screen.dart';
@@ -79,7 +80,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
   String _engineerRequestStatusLine(WithdrawalRequestModel r) {
     if (r.isRejectedOverall) {
       if (r.semStatus == WithdrawalRequestModel.statusRejected) {
-        return 'تم رفض طلبك من مدير مهندسي المواقع بسبب: ${r.semReason ?? '—'}';
+        return 'تم رفض طلبك من ${UserModel.siteEngineerManagerRoleLabel} بسبب: ${r.semReason ?? '—'}';
       }
       return 'تم رفض طلبك من مدير التشغيل بسبب: ${r.omReason ?? '—'}';
     }
@@ -87,10 +88,10 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     final lines = <String>['في انتظار الرد على طلبكم'];
     if (r.semStatus == WithdrawalRequestModel.statusApproved &&
         r.omStatus == WithdrawalRequestModel.statusPending) {
-      lines.add('تمت موافقة مدير مهندسي المواقع — بانتظار موافقة مدير التشغيل');
+      lines.add('تمت موافقة ${UserModel.siteEngineerManagerRoleLabel} — بانتظار موافقة مدير التشغيل');
     } else if (r.omStatus == WithdrawalRequestModel.statusApproved &&
         r.semStatus == WithdrawalRequestModel.statusPending) {
-      lines.add('تمت موافقة مدير التشغيل — بانتظار موافقة مدير مهندسي المواقع');
+      lines.add('تمت موافقة مدير التشغيل — بانتظار موافقة ${UserModel.siteEngineerManagerRoleLabel}');
     }
     return lines.join('\n');
   }
@@ -201,7 +202,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
       builder: (ctx) => AlertDialog(
         title: const Text('طلب سحب خامات'),
         content: Text(
-          'إرسال طلب إلى مدير التشغيل ومدير مهندسي المواقع للموافقة على السحب من:\n${_locationPath(loc)}\nالمرحلة: ${LocationMaterialModel.phaseLabel(phase)}',
+          'إرسال طلب إلى مدير التشغيل و${UserModel.siteEngineerManagerRoleLabel} للموافقة على السحب من:\n${_locationPath(loc)}\nالمرحلة: ${LocationMaterialModel.phaseLabel(phase)}',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
@@ -341,11 +342,30 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
             FilledButton(
-              onPressed: () {
+              onPressed: () async {
                 if (disbursementImages.isEmpty || deliveryImages.isEmpty) {
                   ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('يجب إرفاق أذن الصرف وأذن التسليم (صورة أو صورتين لكل منهما)')));
                   return;
                 }
+                final locationMaterials =
+                    _materialsByLocationPhase[_k(loc.id, phase)] ?? [];
+                final projectStock = coerceProjectStockList(
+                  await _db.getProjectStock(loc.projectId),
+                );
+                if (!hasSufficientStockForWithdrawal(
+                  locationMaterials: locationMaterials,
+                  projectStock: projectStock,
+                )) {
+                  if (!ctx.mounted) return;
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                      content: Text(withdrawalInsufficientStockMessage),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+                if (!ctx.mounted) return;
                 Navigator.pop(ctx, true);
               },
               child: const Text('متابعة المراجعة والسحب'),
@@ -361,6 +381,20 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     try {
       final locationMaterials = _materialsByLocationPhase[_k(loc.id, phase)] ?? [];
       final projectStock = coerceProjectStockList(await _db.getProjectStock(loc.projectId));
+      if (!hasSufficientStockForWithdrawal(
+        locationMaterials: locationMaterials,
+        projectStock: projectStock,
+      )) {
+        if (!mounted) return;
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(withdrawalInsufficientStockMessage),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
       final previewRows = buildWithdrawalPreviewRows(
         locationMaterials: locationMaterials,
         projectStock: projectStock,
@@ -516,7 +550,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
                   Text('اسم المهندس: ${widget.user.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Text(
-                    'السحب يتطلب موافقة مدير التشغيل ومدير مهندسي المواقع معاً. ابدأ بـ «طلب سحب خامات» ثم بعد الاعتماد استخدم «إكمال سحب الخامات».',
+                    'السحب يتطلب موافقة مدير التشغيل و${UserModel.siteEngineerManagerRoleLabel} معاً. ابدأ بـ «طلب سحب خامات» ثم بعد الاعتماد استخدم «إكمال سحب الخامات».',
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade800),
                   ),
                 ],

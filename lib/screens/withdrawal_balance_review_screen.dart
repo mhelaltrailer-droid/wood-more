@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/location_material_model.dart';
 import '../models/project_stock_model.dart';
 import '../services/storage_service.dart';
+import '../services/withdrawal_stock_validation.dart';
 
 /// صف واحد لعرض خامة قُطعت من مخزن المشروع ضمن سحب موقع فرعي.
 class WithdrawalMaterialSnapshot {
@@ -142,6 +143,27 @@ class _WithdrawalBalanceReviewScreenState extends State<WithdrawalBalanceReviewS
   Future<void> _executeWithdrawalAndFinish() async {
     setState(() => _committingWithdrawal = true);
     try {
+      final locationMaterials = await _db.getLocationMaterials(
+        widget.locationId,
+        phase: widget.phase,
+      );
+      final projectStock = coerceProjectStockList(
+        await _db.getProjectStock(widget.projectId),
+      );
+      if (!hasSufficientStockForWithdrawal(
+        locationMaterials: locationMaterials,
+        projectStock: projectStock,
+      )) {
+        if (!mounted) return;
+        setState(() => _committingWithdrawal = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(withdrawalInsufficientStockMessage),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
       await _db.createLocationWithdrawal(
         locationId: widget.locationId,
         phase: widget.phase,

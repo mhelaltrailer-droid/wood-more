@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../services/storage_service.dart';
 
-/// واجهة المالية: تظهر لمدير مهندسين المواقع ومسؤول التطبيق فقط
+/// واجهة المالية: تظهر لمدير المشروعات ومسؤول التطبيق فقط
 /// عرض الرصيد، إضافة عهدة، وتقرير مصروفات لكل مهندس (+ Abderhman في القائمة المنسدلة فقط)
 class FinanceScreen extends StatefulWidget {
   final UserModel currentUser;

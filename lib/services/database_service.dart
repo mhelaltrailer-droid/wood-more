@@ -25,7 +25,9 @@ import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../data/default_materials.dart';
+import '../data/materials_display.dart';
 import 'icon_visibility_service.dart';
+import 'withdrawal_stock_validation.dart';
 
 /// خدمة قاعدة البيانات المحلية
 class DatabaseService {
@@ -1107,7 +1109,9 @@ class DatabaseService {
   Future<List<String>> getMaterials() async {
     final db = await database;
     final maps = await db.query('materials', orderBy: 'name');
-    return maps.map((m) => m['name'] as String).toList();
+    return sortMaterialsForDisplay(
+      maps.map((m) => m['name'] as String),
+    );
   }
 
   /// حفظ التقرير اليومي (ويتم خصم إجمالي بنود الماليات من رصيد المهندس، وخصم الخامات من مخزن المشروع)
@@ -1587,6 +1591,13 @@ class DatabaseService {
     if (locMaps.isEmpty) throw Exception('الموقع غير موجود');
     final projectId = locMaps.first['project_id'] as int;
     final materials = await getLocationMaterials(locationId, phase: phase);
+    final stockList = await getProjectStock(projectId);
+    if (!hasSufficientStockForWithdrawal(
+      locationMaterials: materials,
+      projectStock: stockList,
+    )) {
+      throw Exception(withdrawalInsufficientStockMessage);
+    }
     final now = DateTime.now();
     final nowStr = now.toIso8601String();
     for (final m in materials) {
@@ -2112,9 +2123,11 @@ class DatabaseService {
   Future<List<Map<String, dynamic>>> getMaterialsWithIds() async {
     final db = await database;
     final maps = await db.query('materials', orderBy: 'name');
-    return maps
-        .map((m) => {'id': m['id'], 'name': m['name'] as String})
-        .toList();
+    return sortMaterialRowsForDisplay(
+      maps
+          .map((m) => {'id': m['id'], 'name': m['name'] as String})
+          .toList(),
+    );
   }
 
   Future<List<WorkPhaseModel>> getWorkPhases() async {
@@ -2852,7 +2865,7 @@ class DatabaseService {
         await _wrNotifyRoles(db, ['operation_manager'],
             title: 'طلب سحب خامات — مرفوض',
             body:
-                'رُفض الطلب من مدير مهندسي المواقع. السبب: ${reason.trim()}\nالمهندس: $engName — $pathLabel',
+                'رُفض الطلب من ${UserModel.siteEngineerManagerRoleLabel}. السبب: ${reason.trim()}\nالمهندس: $engName — $pathLabel',
             eventType: 'withdrawal_request_rejected_by_sem',
             actorUserId: managerUserId,
             actorUserName: actorName,
@@ -2891,7 +2904,7 @@ class DatabaseService {
         await _wrNotifyRoles(db, ['operation_manager'],
             title: 'بانتظار موافقتكم — طلب سحب خامات',
             body:
-                'وافق مدير مهندسي المواقع. بانتظار موافقة مدير التشغيل.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
+                'وافق ${UserModel.siteEngineerManagerRoleLabel}. بانتظار موافقة مدير التشغيل.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
             eventType: 'withdrawal_request_waiting_om',
             actorUserId: engId,
             actorUserName: engName,
@@ -2965,7 +2978,7 @@ class DatabaseService {
       await _wrNotifyRoles(db, ['site_engineer_manager'],
           title: 'بانتظار موافقتكم — طلب سحب خامات',
           body:
-              'وافق مدير التشغيل. بانتظار موافقة مدير مهندسي المواقع.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
+              'وافق مدير التشغيل. بانتظار موافقة ${UserModel.siteEngineerManagerRoleLabel}.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
           eventType: 'withdrawal_request_waiting_sem',
           actorUserId: engId,
           actorUserName: engName,
@@ -2993,5 +3006,42 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [requestId],
     );
+  }
+
+  /// حذف خطط العمل والهيكلة والمخازن والسحوبات والحضور محلياً (SQLite).
+  Future<Map<String, int>> purgeOperationalData() async {
+    final db = await database;
+    const tables = <String>[
+      'withdrawal_requests',
+      'detailed_report_lines',
+      'detailed_reports',
+      'location_withdrawal',
+      'location_materials',
+      'ir_mir_uploads',
+      'project_stock_ledger',
+      'project_stock',
+      'building_cutlist_images',
+      'building_materials',
+      'units',
+      'buildings',
+      'zones',
+      'project_locations',
+      'projects',
+      'contractors',
+      'attendance_records',
+    ];
+    final before = <String, int>{};
+    for (final table in tables) {
+      final count = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM $table'),
+      );
+      before[table] = count ?? 0;
+    }
+    await db.transaction((txn) async {
+      for (final table in tables) {
+        await txn.delete(table);
+      }
+    });
+    return before;
   }
 }

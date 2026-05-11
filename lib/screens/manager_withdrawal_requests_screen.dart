@@ -7,7 +7,7 @@ import '../models/user_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../services/storage_service.dart';
 
-/// طلبات سحب الخامات — موافقة / رفض (مدير مهندسي المواقع أو مدير التشغيل).
+/// طلبات سحب الخامات — موافقة / رفض (مدير المشروعات أو مدير التشغيل).
 class ManagerWithdrawalRequestsScreen extends StatefulWidget {
   final UserModel currentUser;
 
@@ -214,7 +214,7 @@ class _ManagerWithdrawalRequestsScreenState
                   Text(
                     widget.currentUser.role == 'site_engineer_manager'
                         ? 'وافق مدير التشغيل — بانتظار موافقتكم لإكمال الاعتماد.'
-                        : 'وافق مدير مهندسي المواقع — بانتظار موافقتكم لإكمال الاعتماد.',
+                        : 'وافق ${UserModel.siteEngineerManagerRoleLabel} — بانتظار موافقتكم لإكمال الاعتماد.',
                     style: TextStyle(
                       fontSize: 13,
                       color: Colors.blue.shade800,

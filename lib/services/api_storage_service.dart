@@ -25,6 +25,8 @@ import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
 import '../models/withdrawal_request_model.dart';
 import 'icon_visibility_service.dart';
+import 'withdrawal_stock_validation.dart';
+import '../data/materials_display.dart';
 
 /// Storage implementation that uses the REST API (PostgreSQL backend).
 class ApiStorageService {
@@ -476,12 +478,14 @@ class ApiStorageService {
 
   Future<List<String>> getMaterials() async {
     final list = await _getList('materials');
-    return list.map((e) => e as String).toList();
+    return sortMaterialsForDisplay(list.map((e) => e as String));
   }
 
   Future<List<Map<String, dynamic>>> getMaterialsWithIds() async {
     final list = await _getList('materials/with-ids');
-    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    return sortMaterialRowsForDisplay(
+      list.map((e) => Map<String, dynamic>.from(e as Map)).toList(),
+    );
   }
 
   Future<int> addMaterial(String name) async {
@@ -1166,8 +1170,12 @@ class ApiStorageService {
     );
     if (r.statusCode >= 400) {
       final err = r.body;
-      if (err.contains('already_withdrawn'))
+      if (err.contains('already_withdrawn')) {
         throw Exception('تم سحب الخامات من هذا المكان مسبقاً');
+      }
+      if (err.contains('insufficient_stock')) {
+        throw Exception(withdrawalInsufficientStockMessage);
+      }
       throw Exception(err);
     }
   }

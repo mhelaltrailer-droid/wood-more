@@ -14,7 +14,7 @@ import '../services/storage_service.dart';
 bool canEditDeleteAttendance(UserModel? user) =>
     user != null && user.role == 'app_admin' && user.email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
 
-/// شاشة تقارير الحضور والانصراف - لمدير المهندسين (عرض؛ تعديل/حذف لمسؤول التطبيق فقط)
+/// شاشة تقارير الحضور والانصراف - لمدير المشروعات (عرض؛ تعديل/حذف لمسؤول التطبيق فقط)
 class AttendanceReportsScreen extends StatefulWidget {
   final UserModel? currentUser;
 

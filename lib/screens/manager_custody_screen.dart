@@ -12,7 +12,7 @@ import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
-/// شاشة العهدة - لمدير المهندسين فقط: إدخال عهدة + تقرير العهدة مع تصدير PDF
+/// شاشة العهدة - لمدير المشروعات فقط: إدخال عهدة + تقرير العهدة مع تصدير PDF
 class ManagerCustodyScreen extends StatefulWidget {
   final UserModel currentUser;
 

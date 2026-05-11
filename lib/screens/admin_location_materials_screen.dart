@@ -3,6 +3,7 @@ import '../models/user_model.dart';
 import '../models/location_material_model.dart';
 import '../models/daily_report_model.dart';
 import '../services/storage_service.dart';
+import '../widgets/material_name_picker_field.dart';
 
 /// إدارة خامات مكان فرعي واحد (للهيكلة المخازن)
 class AdminLocationMaterialsScreen extends StatefulWidget {
@@ -63,13 +64,10 @@ class _AdminLocationMaterialsScreenState extends State<AdminLocationMaterialsScr
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                DropdownButtonFormField<String>(
+                MaterialNamePickerField(
                   value: selectedMaterial,
+                  options: _materials,
                   decoration: const InputDecoration(labelText: 'اسم الخامة'),
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('— اختر الخامة —')),
-                    ..._materials.map((s) => DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis, maxLines: 1))),
-                  ],
                   onChanged: (v) => setDialog(() => selectedMaterial = v),
                 ),
                 const SizedBox(height: 12),

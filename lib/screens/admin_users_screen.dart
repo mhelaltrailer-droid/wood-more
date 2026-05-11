@@ -70,7 +70,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                   decoration: const InputDecoration(labelText: 'الدور'),
                   items: const [
                     DropdownMenuItem(value: 'site_engineer', child: Text('مهندس موقع')),
-                    DropdownMenuItem(value: 'site_engineer_manager', child: Text('مدير مهندسين')),
+                    DropdownMenuItem(value: 'site_engineer_manager', child: Text(UserModel.siteEngineerManagerRoleLabel)),
                     DropdownMenuItem(value: 'operation_manager', child: Text('مدير التشغيل')),
                     DropdownMenuItem(value: 'accountant', child: Text('محاسب')),
                     DropdownMenuItem(value: 'app_admin', child: Text('مسؤول التطبيق')),
@@ -134,7 +134,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
 
   String _roleLabel(String r) {
     if (r == 'site_engineer') return 'مهندس موقع';
-    if (r == 'site_engineer_manager') return 'مدير مهندسين';
+    if (r == 'site_engineer_manager') return UserModel.siteEngineerManagerRoleLabel;
     if (r == 'operation_manager') return 'مدير التشغيل';
     if (r == 'accountant') return 'محاسب';
     if (r == 'app_admin') return 'مسؤول التطبيق';
