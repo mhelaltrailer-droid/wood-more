@@ -394,6 +394,19 @@ async function ensureSystemLockTable() {
   }
 }
 
+async function ensureUserHomeIconOrderTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_home_icon_orders (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        icon_order_json TEXT NOT NULL DEFAULT '[]'
+      )
+    `);
+  } catch (e) {
+    console.warn('ensureUserHomeIconOrderTable:', e.message);
+  }
+}
+
 async function ensureHomeIconsVisibilitySetting() {
   try {
     const defaultConfig = {
@@ -654,6 +667,58 @@ app.get('/home-icons-visibility', async (req, res) => {
     } catch (_) {
       return res.json({});
     }
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/users/:id/home-icon-order', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'invalid user id' });
+    const r = await pool.query(
+      'SELECT icon_order_json FROM user_home_icon_orders WHERE user_id = $1',
+      [userId]
+    );
+    if (r.rows.length === 0) return res.json({ iconOrder: [] });
+    const raw = String(r.rows[0].icon_order_json || '').trim();
+    if (!raw) return res.json({ iconOrder: [] });
+    try {
+      const parsed = JSON.parse(raw);
+      return res.json({ iconOrder: Array.isArray(parsed) ? parsed : [] });
+    } catch (_) {
+      return res.json({ iconOrder: [] });
+    }
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.put('/users/:id/home-icon-order', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'invalid user id' });
+    const requesterUserId = parseInt(String(req.body?.requesterUserId ?? ''), 10);
+    if (!Number.isFinite(requesterUserId) || requesterUserId !== userId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const owner = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+    if (owner.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    if (String(owner.rows[0].role || '') !== 'app_admin') {
+      return res.status(403).json({ error: 'forbidden_role' });
+    }
+    const iconOrder = req.body?.iconOrder;
+    if (!Array.isArray(iconOrder)) return res.status(400).json({ error: 'iconOrder array required' });
+    const cleaned = iconOrder
+      .map((value) => String(value || '').trim())
+      .filter((value) => value.length > 0);
+    await pool.query(
+      `INSERT INTO user_home_icon_orders (user_id, icon_order_json)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE SET icon_order_json = EXCLUDED.icon_order_json`,
+      [userId, JSON.stringify(cleaned)]
+    );
+    res.json({ ok: true, iconOrder: cleaned });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -3225,6 +3290,7 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 ensurePasswordColumn()
   .then(() => ensureSystemLockTable())
   .then(() => ensureHomeIconsVisibilitySetting())
+  .then(() => ensureUserHomeIconOrderTable())
   .then(() => ensureDetailedReportsTables())
   .then(() => ensureLocationMaterialsTables())
   .then(() => ensureActivityLogsTable())

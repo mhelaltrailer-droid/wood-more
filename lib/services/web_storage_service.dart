@@ -24,6 +24,7 @@ import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../data/default_materials.dart';
+import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
 import '../data/materials_display.dart';
@@ -388,6 +389,32 @@ class WebStorageService {
     final current = await getHomeIconsVisibilityConfig();
     current[role] = Map<String, bool>.from(roleConfig);
     await prefs.setString(_homeIconsVisibilityKey, jsonEncode(current));
+  }
+
+  String _homeIconOrderKey(int userId) => 'wood_home_icon_order_$userId';
+
+  Future<List<String>> getUserHomeIconOrder(int userId) async {
+    await _initData();
+    final prefs = await _prefs;
+    final raw = prefs.getString(_homeIconOrderKey(userId));
+    if (raw == null || raw.trim().isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      return sanitizeSavedHomeIconOrder(
+        decoded is List ? decoded : null,
+      );
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> setUserHomeIconOrder({
+    required int userId,
+    required List<String> iconOrder,
+  }) async {
+    await _initData();
+    final prefs = await _prefs;
+    await prefs.setString(_homeIconOrderKey(userId), jsonEncode(iconOrder));
   }
 
   Future<List<String>> getMaterials() async {

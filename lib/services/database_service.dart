@@ -26,6 +26,7 @@ import '../models/ir_mir_upload_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../data/default_materials.dart';
 import '../data/materials_display.dart';
+import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
 
@@ -49,7 +50,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 27,
+      version: 28,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -101,6 +102,7 @@ class DatabaseService {
     await _createStoreAndUnitsTables(db);
     await _createFinanceTables(db);
     await _createSystemSettingsTable(db);
+    await _createUserHomeIconOrderTable(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -371,6 +373,9 @@ class DatabaseService {
     if (oldVersion < 27) {
       await _createWithdrawalRequestsTable(db);
     }
+    if (oldVersion < 28) {
+      await _createUserHomeIconOrderTable(db);
+    }
   }
 
   Future<void> _createFinanceTables(Database db) async {
@@ -406,6 +411,16 @@ class DatabaseService {
       'key': 'system_locked',
       'value': '0',
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<void> _createUserHomeIconOrderTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS user_home_icon_order (
+        user_id INTEGER PRIMARY KEY,
+        icon_order_json TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+      )
+    ''');
   }
 
   Future<void> _createNotificationsTable(Database db) async {
@@ -932,6 +947,39 @@ class DatabaseService {
     await db.insert('app_settings', {
       'key': 'home_icons_visibility',
       'value': jsonEncode(current),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<List<String>> getUserHomeIconOrder(int userId) async {
+    final db = await database;
+    final rows = await db.query(
+      'user_home_icon_order',
+      columns: ['icon_order_json'],
+      where: 'user_id = ?',
+      whereArgs: [userId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return const [];
+    final raw = rows.first['icon_order_json']?.toString();
+    if (raw == null || raw.trim().isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      return sanitizeSavedHomeIconOrder(
+        decoded is List ? decoded : null,
+      );
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> setUserHomeIconOrder({
+    required int userId,
+    required List<String> iconOrder,
+  }) async {
+    final db = await database;
+    await db.insert('user_home_icon_order', {
+      'user_id': userId,
+      'icon_order_json': jsonEncode(iconOrder),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 

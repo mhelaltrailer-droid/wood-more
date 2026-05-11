@@ -24,6 +24,7 @@ import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
 import '../models/withdrawal_request_model.dart';
+import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
 import '../data/materials_display.dart';
@@ -195,6 +196,27 @@ class ApiStorageService {
     await _put('home-icons-visibility/$role', {
       'requesterEmail': requesterEmail.trim().toLowerCase(),
       'icons': roleConfig,
+    });
+  }
+
+  Future<List<String>> getUserHomeIconOrder(int userId) async {
+    final uri = Uri.parse(_path('users/$userId/home-icon-order'));
+    final r = await _httpGet(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final decoded = r.body.isEmpty ? null : jsonDecode(r.body);
+    if (decoded is Map) {
+      return sanitizeSavedHomeIconOrder(decoded['iconOrder'] as List<dynamic>?);
+    }
+    return const [];
+  }
+
+  Future<void> setUserHomeIconOrder({
+    required int userId,
+    required List<String> iconOrder,
+  }) async {
+    await _put('users/$userId/home-icon-order', {
+      'requesterUserId': userId,
+      'iconOrder': iconOrder,
     });
   }
 
