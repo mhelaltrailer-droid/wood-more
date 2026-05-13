@@ -24,6 +24,8 @@ import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
 import '../models/withdrawal_request_model.dart';
+import '../models/pending_postpone_fine_action_model.dart';
+import '../models/postpone_fine_report_row_model.dart';
 import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
@@ -170,8 +172,15 @@ class ApiStorageService {
     }
   }
 
-  Future<void> setSystemLocked(bool locked) async {
-    await _put('system-lock', {'locked': locked});
+  Future<void> setSystemLocked(
+    bool locked, {
+    String? requesterEmail,
+  }) async {
+    await _put('system-lock', {
+      'locked': locked,
+      if (requesterEmail != null)
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
+    });
   }
 
   Future<Map<String, Map<String, bool>>> getHomeIconsVisibilityConfig() async {
@@ -1059,6 +1068,7 @@ class ApiStorageService {
     String? postponeCustomReason,
     String? postponeNotes,
     DateTime? postponeReopenDate,
+    String? engineerFineTarget,
   }) async {
     return _post('executed-plans', {
       'sourcePlanId': sourcePlanId,
@@ -1084,8 +1094,87 @@ class ApiStorageService {
               postponeReopenDate.day,
             ).toIso8601String()
           : null,
+      'engineerFineTarget': engineerFineTarget,
       'plan': plan.toJson(),
     });
+  }
+
+  Future<List<PendingPostponeFineActionModel>> listPendingSemPostponeFineActions({
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('executed-plans/pending-sem-fine-actions')).replace(
+      queryParameters: {'userId': userId.toString()},
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final decoded = jsonDecode(r.body);
+    if (decoded == null || decoded is! List) return [];
+    return decoded
+        .map((e) => PendingPostponeFineActionModel.fromMap(
+              Map<String, dynamic>.from(e as Map),
+            ))
+        .toList();
+  }
+
+  Future<void> resolveSemPostponeFineResolution({
+    required int executedPlanId,
+    required int managerUserId,
+    required String fineTarget,
+    String? fineAmount,
+    String? noFineReason,
+  }) async {
+    final uri = Uri.parse(_path('executed-plans/$executedPlanId/sem-fine-resolution'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'managerUserId': managerUserId,
+        'fineTarget': fineTarget,
+        if (fineAmount != null) 'fineAmount': fineAmount,
+        if (noFineReason != null) 'noFineReason': noFineReason,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  Future<List<PostponeFineReportRowModel>> getPostponeFinesReport({
+    required int actorUserId,
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    int? engineerUserId,
+    int? projectId,
+    int? contractorId,
+    String? reasonKey,
+  }) async {
+    String ymd(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    final qp = <String, String>{
+      'actorUserId': actorUserId.toString(),
+      'dateFrom': ymd(dateFrom),
+      'dateTo': ymd(dateTo),
+    };
+    if (engineerUserId != null) {
+      qp['engineerUserId'] = engineerUserId.toString();
+    }
+    if (projectId != null) qp['projectId'] = projectId.toString();
+    if (contractorId != null) qp['contractorId'] = contractorId.toString();
+    if (reasonKey != null && reasonKey.trim().isNotEmpty) {
+      qp['reasonKey'] = reasonKey.trim();
+    }
+    final uri = Uri.parse(_path('executed-plans/postpone-fines-report')).replace(
+      queryParameters: qp,
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final decoded = jsonDecode(r.body);
+    if (decoded == null || decoded is! List) return [];
+    return decoded
+        .map(
+          (e) => PostponeFineReportRowModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
   }
 
   Future<Map<String, dynamic>?> getLatestExecutedPlanStatus({

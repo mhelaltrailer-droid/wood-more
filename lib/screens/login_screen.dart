@@ -3,11 +3,14 @@ import '../models/user_model.dart';
 import '../services/auth_persistence.dart';
 import '../services/last_project_persistence.dart';
 import '../services/storage_service.dart';
+import '../services/system_lock_service.dart';
 import 'home_screen.dart';
 
 /// شاشة تسجيل الدخول - البريد الإلكتروني يحدد المستخدم ودوره
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final bool forcedMaintenanceSignOut;
+
+  const LoginScreen({super.key, this.forcedMaintenanceSignOut = false});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -21,8 +24,6 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   String? _errorMessage;
-  static const String _lockAdminEmail = 'mouhammedhelal@gmail.com';
-
   @override
   void dispose() {
     _emailController.dispose();
@@ -40,7 +41,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final email = _emailController.text.trim().toLowerCase();
-      final isAllowedAdmin = email == _lockAdminEmail;
+      final isAllowedAdmin = isMaintenanceBypassEmail(email);
       final locked = await _db.isSystemLocked();
       if (locked && !isAllowedAdmin) {
         if (!mounted) return;
@@ -116,6 +117,33 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    if (widget.forcedMaintenanceSignOut) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.build_circle_outlined,
+                              color: Colors.orange.shade800,
+                            ),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'تم إنهاء جلستك تلقائياً لأن النظام في وضع الصيانة.',
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     Image.asset(
                       'assets/images/logo.png',
                       height: 120,

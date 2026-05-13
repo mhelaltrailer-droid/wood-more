@@ -14,6 +14,8 @@ import 'services/route_persistence.dart';
 import 'core/route_observer.dart';
 import 'services/route_restore.dart';
 import 'services/storage_service.dart';
+import 'services/system_lock_service.dart';
+import 'widgets/system_lock_watch.dart';
 
 void main() async {
   // تأكد من إضافة هذين السطرين قبل runApp
@@ -71,12 +73,14 @@ class _AuthGate extends StatelessWidget {
           await clearCurrentUser();
           return null;
         }
+        if (await enforceMaintenanceSignOutIfNeeded(user)) return null;
         return user;
       } catch (_) {
         await clearCurrentUser();
         return null;
       }
     }
+    if (await enforceMaintenanceSignOutIfNeeded(user)) return null;
     return user;
   }
 
@@ -92,7 +96,10 @@ class _AuthGate extends StatelessWidget {
         }
         final user = snapshot.data;
         if (user != null) {
-          return _HomeWithRouteRestore(user: user);
+          return SystemLockWatch(
+            user: user,
+            child: _HomeWithRouteRestore(user: user),
+          );
         }
         return const LoginScreen();
       },

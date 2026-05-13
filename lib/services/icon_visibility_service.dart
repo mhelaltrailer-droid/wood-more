@@ -64,6 +64,10 @@ class IconVisibilityService {
         id: 'work_plan_tracking_report',
         label: 'تقارير متابعة خطط اليوم/الغد',
       ),
+      HomeIconItem(
+        id: 'postpone_fines_reports',
+        label: 'تقارير التأجيل/الغرامات',
+      ),
       HomeIconItem(id: 'new_icon', label: 'New icon'),
       HomeIconItem(
         id: 'operation_reports_tracking',
@@ -82,6 +86,10 @@ class IconVisibilityService {
       HomeIconItem(
         id: 'work_plan_tracking_report',
         label: 'تقارير متابعة خطط اليوم/الغد',
+      ),
+      HomeIconItem(
+        id: 'postpone_fines_reports',
+        label: 'تقارير التأجيل/الغرامات',
       ),
       HomeIconItem(id: 'new_icon', label: 'New icon'),
       HomeIconItem(

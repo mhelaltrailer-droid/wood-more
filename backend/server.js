@@ -62,6 +62,12 @@ async function ensureExecutedPlansTable() {
     await pool.query(`ALTER TABLE executed_plans ADD COLUMN IF NOT EXISTS postpone_custom_reason TEXT`).catch(() => {});
     await pool.query(`ALTER TABLE executed_plans ADD COLUMN IF NOT EXISTS postpone_notes TEXT`).catch(() => {});
     await pool.query(`ALTER TABLE executed_plans ADD COLUMN IF NOT EXISTS postpone_reopen_date TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE executed_plans ADD COLUMN IF NOT EXISTS engineer_fine_target TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE executed_plans ADD COLUMN IF NOT EXISTS sem_fine_target TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE executed_plans ADD COLUMN IF NOT EXISTS sem_fine_amount TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE executed_plans ADD COLUMN IF NOT EXISTS sem_no_fine_reason TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE executed_plans ADD COLUMN IF NOT EXISTS sem_resolved_at TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE executed_plans ADD COLUMN IF NOT EXISTS sem_resolved_by_user_id INTEGER`).catch(() => {});
     await pool.query('CREATE INDEX IF NOT EXISTS idx_executed_plans_plan_date ON executed_plans(plan_date)').catch(() => {});
     await pool.query('CREATE INDEX IF NOT EXISTS idx_executed_plans_user_id ON executed_plans(user_id)').catch(() => {});
     console.log('ensureExecutedPlansTable: ok');
@@ -83,21 +89,24 @@ async function ensurePostponeReasonsTable() {
       )
     `);
     const defaults = [
-      ['materials_shortage', 'نقص خامات', false],
       ['site_not_ready', 'عدم جاهزية موقع العمل', false],
-      ['approval_delay', 'تأخر اعتماد/موافقة', false],
       ['weather', 'ظروف جوية', false],
-      ['labor_shortage', 'نقص عمالة', false],
+      ['contractor_absent', 'عدم حضور المقاول', false],
       ['other', 'أخرى', true],
     ];
     for (const [key, label, requiresCustom] of defaults) {
       await pool.query(
         `INSERT INTO postpone_reasons (reason_key, label, requires_custom, is_system, created_at)
          VALUES ($1,$2,$3,TRUE,$4)
-         ON CONFLICT (reason_key) DO UPDATE SET label = EXCLUDED.label, requires_custom = EXCLUDED.requires_custom`,
+         ON CONFLICT (reason_key) DO UPDATE SET label = EXCLUDED.label, requires_custom = EXCLUDED.requires_custom, is_system = TRUE`,
         [key, label, requiresCustom, new Date().toISOString()]
       );
     }
+    await pool.query(
+      `DELETE FROM postpone_reasons
+       WHERE is_system = TRUE
+         AND reason_key NOT IN ('site_not_ready', 'weather', 'contractor_absent', 'other')`
+    );
     console.log('ensurePostponeReasonsTable: ok');
   } catch (e) {
     console.warn('ensurePostponeReasonsTable:', e.message);
@@ -644,6 +653,10 @@ app.get('/system-lock', async (req, res) => {
 
 app.put('/system-lock', async (req, res) => {
   try {
+    const requesterEmail = String(req.body?.requesterEmail || '').trim().toLowerCase();
+    if (requesterEmail !== PRIMARY_APP_ADMIN_EMAIL) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
     const locked = req.body?.locked === true;
     await pool.query(
       `INSERT INTO app_settings (key, value) VALUES ('system_locked', $1)
@@ -702,11 +715,8 @@ app.put('/users/:id/home-icon-order', async (req, res) => {
     if (!Number.isFinite(requesterUserId) || requesterUserId !== userId) {
       return res.status(403).json({ error: 'forbidden' });
     }
-    const owner = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+    const owner = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
     if (owner.rows.length === 0) return res.status(404).json({ error: 'not found' });
-    if (String(owner.rows[0].role || '') !== 'app_admin') {
-      return res.status(403).json({ error: 'forbidden_role' });
-    }
     const iconOrder = req.body?.iconOrder;
     if (!Array.isArray(iconOrder)) return res.status(400).json({ error: 'iconOrder array required' });
     const cleaned = iconOrder
@@ -2530,8 +2540,13 @@ app.get('/withdrawal-requests/action-count', async (req, res) => {
     }
     let q;
     if (role === 'site_engineer_manager') {
-      q = `SELECT COUNT(*)::int AS c FROM withdrawal_requests
-           WHERE overall_status = 'pending' AND sem_status = 'pending' AND fulfilled_at IS NULL`;
+      q = `SELECT (
+        (SELECT COUNT(*)::int FROM withdrawal_requests
+           WHERE overall_status = 'pending' AND sem_status = 'pending' AND fulfilled_at IS NULL)
+        +
+        (SELECT COUNT(*)::int FROM executed_plans
+           WHERE status = 'postponed' AND sem_resolved_at IS NULL)
+      ) AS c`;
     } else if (role === 'operation_manager') {
       q = `SELECT COUNT(*)::int AS c FROM withdrawal_requests
            WHERE overall_status = 'pending' AND om_status = 'pending' AND fulfilled_at IS NULL`;
@@ -2665,7 +2680,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
       } else {
         await withdrawalInsertNotificationsForRoles(pool, ['operation_manager'], {
           title: 'بانتظار موافقتكم — طلب سحب خامات',
-          body: `وافق مدير المشروعات. بانتظار موافقة مدير التشغيل.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
+          body: `وافق مدير المشروعات. بانتظار موافقة مدير العمليات.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
           event_type: 'withdrawal_request_waiting_om',
           actor_user_id: engId,
           actor_user_name: engName,
@@ -2695,7 +2710,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
         });
         await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
           title: 'طلب سحب خامات — مرفوض',
-          body: `رُفض الطلب من مدير التشغيل. السبب: ${reason}\nالمهندس: ${engName} — ${pathLabel}`,
+          body: `رُفض الطلب من مدير العمليات. السبب: ${reason}\nالمهندس: ${engName} — ${pathLabel}`,
           event_type: 'withdrawal_request_rejected_by_om',
           actor_user_id: userId,
           actor_user_name: actor.rows[0].name,
@@ -2723,7 +2738,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
       } else {
         await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
           title: 'بانتظار موافقتكم — طلب سحب خامات',
-          body: `وافق مدير التشغيل. بانتظار موافقة مدير المشروعات.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
+          body: `وافق مدير العمليات. بانتظار موافقة مدير المشروعات.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
           event_type: 'withdrawal_request_waiting_sem',
           actor_user_id: engId,
           actor_user_name: engName,
@@ -2943,12 +2958,21 @@ app.post('/executed-plans', async (req, res) => {
     let postponeCustomReason = b.postponeCustomReason != null ? String(b.postponeCustomReason).trim() : null;
     let postponeNotes = b.postponeNotes != null ? String(b.postponeNotes).trim() : null;
     let postponeReopenDate = b.postponeReopenDate != null ? String(b.postponeReopenDate).trim() : null;
+    let engineerFineTarget =
+      b.engineerFineTarget != null ? String(b.engineerFineTarget).trim().toLowerCase() : null;
+    if (b.engineer_fine_target != null && engineerFineTarget == null) {
+      engineerFineTarget = String(b.engineer_fine_target).trim().toLowerCase();
+    }
+    const allowedFine = new Set(['owner', 'contractor', 'none']);
     if (status === 'postponed') {
       if (!postponeReasonKey) {
         return res.status(400).json({ error: 'postponeReasonKey required for postponed status' });
       }
       if (!postponeReopenDate) {
         return res.status(400).json({ error: 'postponeReopenDate required for postponed status' });
+      }
+      if (!engineerFineTarget || !allowedFine.has(engineerFineTarget)) {
+        return res.status(400).json({ error: 'engineerFineTarget required (owner|contractor|none)' });
       }
       if (postponeReasonKey === 'other' && (!postponeCustomReason || postponeCustomReason.trim() === '')) {
         return res.status(400).json({ error: 'custom reason required when postponeReasonKey is other' });
@@ -2969,12 +2993,13 @@ app.post('/executed-plans', async (req, res) => {
       postponeCustomReason = null;
       postponeNotes = null;
       postponeReopenDate = null;
+      engineerFineTarget = null;
     }
     const createdAt = new Date().toISOString();
     const r = await pool.query(
       `INSERT INTO executed_plans
-      (source_plan_id, user_id, user_name, project_id, project_name, plan_date, status, modification_summary, postpone_reason_key, postpone_reason_label, postpone_custom_reason, postpone_notes, postpone_reopen_date, plan_json, created_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      (source_plan_id, user_id, user_name, project_id, project_name, plan_date, status, modification_summary, postpone_reason_key, postpone_reason_label, postpone_custom_reason, postpone_notes, postpone_reopen_date, engineer_fine_target, plan_json, created_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
       RETURNING id`,
       [
         Number.isNaN(sourcePlanId) ? null : sourcePlanId,
@@ -2990,6 +3015,7 @@ app.post('/executed-plans', async (req, res) => {
         postponeCustomReason,
         postponeNotes,
         postponeReopenDate,
+        engineerFineTarget,
         planJson,
         createdAt,
       ]
@@ -3001,20 +3027,295 @@ app.post('/executed-plans', async (req, res) => {
         (postponeReasonLabel && postponeReasonLabel.trim()) ||
         postponeReasonKey ||
         'غير محدد';
-      await withdrawalInsertNotificationsForRoles(
-        pool,
-        ['operation_manager', 'site_engineer_manager'],
-        {
-          title: 'تأجيل خطة عمل اليوم',
-          body: `تم تأجيل التنفيذ اليوم في مشروع "${displayProject}" بسبب = ${reasonText}`,
-          eventType: 'work_plan_postponed',
-          actorUserId: userId,
-          actorUserName: userName,
-          projectName: projectName,
-        }
-      );
+      const reopenDay = postponeReopenDate ? String(postponeReopenDate).slice(0, 10) : '';
+      const fineSuggestion =
+        engineerFineTarget === 'owner'
+          ? 'المالك'
+          : engineerFineTarget === 'contractor'
+            ? 'المقاول'
+            : 'لا تستدعي غرامة';
+      const notesLine =
+        postponeNotes && postponeNotes.trim() !== ''
+          ? `\nملاحظات المهندس: ${postponeNotes.trim()}`
+          : '';
+      const execId = parseInt(r.rows[0].id, 10);
+      const body =
+        `المشروع: ${displayProject}\n` +
+        `المهندس: ${userName}\n` +
+        `تاريخ الخطة: ${String(planDate).slice(0, 10)}\n` +
+        `سبب التأجيل: ${reasonText}\n` +
+        `تاريخ إعادة فتح الخطة: ${reopenDay}${notesLine}\n` +
+        `اقتراح توقيع غرامة (من المهندس): ${fineSuggestion}\n` +
+        `رقم المرجع: ${execId}`;
+      await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
+        title: 'تأجيل خطة عمل اليوم — يتطلب قرار الغرامة',
+        body,
+        eventType: 'work_plan_postponed',
+        actorUserId: userId,
+        actorUserName: userName,
+        projectName: projectName,
+      });
     }
     res.json(parseInt(r.rows[0].id));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/executed-plans/pending-sem-fine-actions', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId || ''), 10);
+    if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
+    const u = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+    if (u.rows.length === 0 || String(u.rows[0].role) !== 'site_engineer_manager') {
+      return res.json([]);
+    }
+    const r = await pool.query(
+      `SELECT id, user_id, user_name, project_id, project_name, plan_date, status,
+              postpone_reason_key, postpone_reason_label, postpone_custom_reason, postpone_notes, postpone_reopen_date,
+              engineer_fine_target, created_at
+       FROM executed_plans
+       WHERE status = 'postponed' AND sem_resolved_at IS NULL
+       ORDER BY created_at DESC, id DESC`
+    );
+    res.json(
+      r.rows.map((row) => ({
+        id: parseInt(row.id, 10),
+        user_id: parseInt(row.user_id, 10),
+        user_name: row.user_name,
+        project_id: row.project_id != null ? parseInt(row.project_id, 10) : null,
+        project_name: row.project_name,
+        plan_date: row.plan_date,
+        postpone_reason_key: row.postpone_reason_key,
+        postpone_reason_label: row.postpone_reason_label,
+        postpone_custom_reason: row.postpone_custom_reason,
+        postpone_notes: row.postpone_notes,
+        postpone_reopen_date: row.postpone_reopen_date,
+        engineer_fine_target: row.engineer_fine_target,
+        created_at: row.created_at,
+      }))
+    );
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+async function assertPostponeFinesReportAccess(actorUserId) {
+  const r = await pool.query(
+    `SELECT role, lower(trim(email::text)) AS email FROM users WHERE id = $1`,
+    [actorUserId]
+  );
+  if (!r.rows.length) return false;
+  const role = String(r.rows[0].role || '');
+  const email = String(r.rows[0].email || '');
+  if (role === 'operation_manager') return true;
+  if (role === 'app_admin' && email === PRIMARY_APP_ADMIN_EMAIL) return true;
+  return false;
+}
+
+function contractorIdsFromExecutedPlanJson(planJsonStr) {
+  try {
+    const j = JSON.parse(planJsonStr || '{}');
+    const lines = Array.isArray(j.lines) ? j.lines : [];
+    const ids = new Set();
+    for (const line of lines) {
+      const cid = line.contractorId ?? line.contractor_id;
+      if (cid == null || cid === '') continue;
+      const n = parseInt(String(cid), 10);
+      if (!Number.isNaN(n)) ids.add(n);
+    }
+    return [...ids];
+  } catch (_) {
+    return [];
+  }
+}
+
+app.get('/executed-plans/postpone-fines-report', async (req, res) => {
+  try {
+    const actorUserId = parseInt(String(req.query.actorUserId || ''), 10);
+    if (Number.isNaN(actorUserId)) return res.status(400).json({ error: 'actorUserId required' });
+    const allowed = await assertPostponeFinesReportAccess(actorUserId);
+    if (!allowed) return res.status(403).json({ error: 'forbidden' });
+
+    const dateFrom = String(req.query.dateFrom || '').trim().slice(0, 10);
+    const dateTo = String(req.query.dateTo || '').trim().slice(0, 10);
+    if (!dateFrom || !dateTo || dateFrom.length < 10 || dateTo.length < 10) {
+      return res.status(400).json({ error: 'dateFrom and dateTo required (YYYY-MM-DD)' });
+    }
+
+    let engineerUserId = null;
+    if (req.query.engineerUserId != null && String(req.query.engineerUserId).trim() !== '') {
+      engineerUserId = parseInt(String(req.query.engineerUserId), 10);
+      if (Number.isNaN(engineerUserId)) return res.status(400).json({ error: 'invalid engineerUserId' });
+    }
+    let projectId = null;
+    if (req.query.projectId != null && String(req.query.projectId).trim() !== '') {
+      projectId = parseInt(String(req.query.projectId), 10);
+      if (Number.isNaN(projectId)) return res.status(400).json({ error: 'invalid projectId' });
+    }
+    let contractorFilter = null;
+    if (req.query.contractorId != null && String(req.query.contractorId).trim() !== '') {
+      contractorFilter = parseInt(String(req.query.contractorId), 10);
+      if (Number.isNaN(contractorFilter)) return res.status(400).json({ error: 'invalid contractorId' });
+    }
+    let reasonKey = null;
+    if (req.query.reasonKey != null && String(req.query.reasonKey).trim() !== '') {
+      reasonKey = String(req.query.reasonKey).trim();
+    }
+
+    const params = [dateFrom, dateTo];
+    let sql = `
+      SELECT ep.id, ep.user_id, ep.user_name, ep.project_id, ep.project_name, ep.plan_date,
+        ep.postpone_reason_key, ep.postpone_reason_label, ep.postpone_custom_reason, ep.postpone_notes, ep.postpone_reopen_date,
+        ep.engineer_fine_target, ep.sem_fine_target, ep.sem_fine_amount, ep.sem_no_fine_reason, ep.sem_resolved_at,
+        ep.plan_json
+      FROM executed_plans ep
+      WHERE ep.status = 'postponed'
+        AND left(trim(ep.plan_date), 10) >= $1
+        AND left(trim(ep.plan_date), 10) <= $2
+    `;
+    let i = 3;
+    if (engineerUserId != null) {
+      sql += ` AND ep.user_id = $${i}`;
+      params.push(engineerUserId);
+      i++;
+    }
+    if (projectId != null) {
+      sql += ` AND ep.project_id = $${i}`;
+      params.push(projectId);
+      i++;
+    }
+    if (reasonKey != null) {
+      sql += ` AND ep.postpone_reason_key = $${i}`;
+      params.push(reasonKey);
+      i++;
+    }
+    sql += ' ORDER BY left(trim(ep.plan_date), 10) DESC, ep.id DESC';
+
+    const er = await pool.query(sql, params);
+    const contractorsRes = await pool.query('SELECT id, name FROM contractors');
+    const contractorById = new Map(
+      contractorsRes.rows.map((row) => [parseInt(row.id, 10), String(row.name || '').trim()])
+    );
+
+    const out = [];
+    for (const row of er.rows) {
+      const lineCids = contractorIdsFromExecutedPlanJson(row.plan_json);
+      if (contractorFilter != null && !lineCids.includes(contractorFilter)) continue;
+
+      const contractorNames = lineCids.map((id) => contractorById.get(id) || `#${id}`);
+      const contractorDisplay =
+        contractorNames.length === 0 ? '—' : [...new Set(contractorNames)].join('، ');
+
+      out.push({
+        id: parseInt(row.id, 10),
+        user_id: parseInt(row.user_id, 10),
+        user_name: row.user_name,
+        project_id: row.project_id != null ? parseInt(row.project_id, 10) : null,
+        project_name: row.project_name,
+        plan_date: row.plan_date,
+        postpone_reason_key: row.postpone_reason_key,
+        postpone_reason_label: row.postpone_reason_label,
+        postpone_custom_reason: row.postpone_custom_reason,
+        postpone_notes: row.postpone_notes,
+        postpone_reopen_date: row.postpone_reopen_date,
+        engineer_fine_target: row.engineer_fine_target,
+        sem_fine_target: row.sem_fine_target,
+        sem_fine_amount: row.sem_fine_amount,
+        sem_no_fine_reason: row.sem_no_fine_reason,
+        sem_resolved_at: row.sem_resolved_at,
+        contractors_in_plan_label: contractorDisplay,
+      });
+    }
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/executed-plans/:id/sem-fine-resolution', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id || ''), 10);
+    const managerUserId = parseInt(String(req.body?.managerUserId ?? req.body?.manager_user_id ?? ''), 10);
+    const fineTargetRaw = String(req.body?.fineTarget ?? req.body?.fine_target ?? '').trim().toLowerCase();
+    const fineAmount = req.body?.fineAmount != null ? String(req.body.fineAmount).trim() : '';
+    const noFineReason = req.body?.noFineReason != null ? String(req.body.noFineReason).trim() : '';
+    if (Number.isNaN(id) || Number.isNaN(managerUserId)) {
+      return res.status(400).json({ error: 'invalid id or managerUserId' });
+    }
+    const actor = await pool.query('SELECT id, role, name FROM users WHERE id = $1', [managerUserId]);
+    if (actor.rows.length === 0 || String(actor.rows[0].role) !== 'site_engineer_manager') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const semName = String(actor.rows[0].name || '').trim() || 'مدير المشروعات';
+    const allowed = new Set(['owner', 'contractor', 'none']);
+    if (!allowed.has(fineTargetRaw)) {
+      return res.status(400).json({ error: 'fineTarget must be owner|contractor|none' });
+    }
+    if (fineTargetRaw === 'none') {
+      if (!noFineReason) return res.status(400).json({ error: 'noFineReason required when fineTarget is none' });
+    } else if (!fineAmount) {
+      return res.status(400).json({ error: 'fineAmount required when fineTarget is owner or contractor' });
+    }
+    const ep = await pool.query(
+      `SELECT id, user_id, user_name, project_name, plan_date, status,
+              postpone_reason_key, postpone_reason_label, postpone_custom_reason, postpone_notes, postpone_reopen_date,
+              engineer_fine_target
+       FROM executed_plans WHERE id = $1`,
+      [id]
+    );
+    if (ep.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const row = ep.rows[0];
+    if (String(row.status) !== 'postponed') return res.status(400).json({ error: 'not_postponed' });
+    const chk = await pool.query('SELECT sem_resolved_at FROM executed_plans WHERE id = $1', [id]);
+    if (chk.rows.length && chk.rows[0].sem_resolved_at != null) {
+      return res.status(400).json({ error: 'already_resolved' });
+    }
+    const now = new Date().toISOString();
+    await pool.query(
+      `UPDATE executed_plans SET
+        sem_fine_target = $1,
+        sem_fine_amount = $2,
+        sem_no_fine_reason = $3,
+        sem_resolved_at = $4,
+        sem_resolved_by_user_id = $5
+       WHERE id = $6`,
+      [
+        fineTargetRaw,
+        fineTargetRaw === 'none' ? null : fineAmount,
+        fineTargetRaw === 'none' ? noFineReason : null,
+        now,
+        managerUserId,
+        id,
+      ]
+    );
+    const engName = String(row.user_name || '').trim();
+    const postponeReason =
+      (row.postpone_custom_reason && String(row.postpone_custom_reason).trim()) ||
+      (row.postpone_reason_label && String(row.postpone_reason_label).trim()) ||
+      String(row.postpone_reason_key || '').trim() ||
+      'غير محدد';
+    const proj = String(row.project_name || '').trim() || 'غير محدد';
+    let omBody = '';
+    if (fineTargetRaw === 'none') {
+      omBody =
+        `قام "${engName}" بتأجيل العمل في مشروع "${proj}" لسبب "${postponeReason}". ` +
+        `قام "${semName}" بعدم استدعاء غرامة للسبب: "${noFineReason}".`;
+    } else {
+      const onWhom = fineTargetRaw === 'owner' ? 'المالك' : 'المقاول';
+      omBody =
+        `قام "${engName}" بتأجيل العمل في مشروع "${proj}" لسبب "${postponeReason}". ` +
+        `قام "${semName}" بتوقيع غرامة على "${onWhom}" بقيمة = "${fineAmount}".`;
+    }
+    await withdrawalInsertNotificationsForRoles(pool, ['operation_manager'], {
+      title: 'تقرير تأجيل خطة عمل وقرار الغرامة',
+      body: omBody,
+      eventType: 'work_plan_postpone_sem_resolved',
+      actorUserId: managerUserId,
+      actorUserName: semName,
+      projectName: row.project_name,
+    });
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -3028,7 +3329,7 @@ app.get('/executed-plans/latest', async (req, res) => {
       return res.status(400).json({ error: 'sourcePlanId and userId are required' });
     }
     const r = await pool.query(
-      `SELECT id, source_plan_id, user_id, plan_date, status, modification_summary, postpone_reason_key, postpone_reason_label, postpone_custom_reason, postpone_notes, postpone_reopen_date, created_at
+      `SELECT id, source_plan_id, user_id, plan_date, status, modification_summary, postpone_reason_key, postpone_reason_label, postpone_custom_reason, postpone_notes, postpone_reopen_date, engineer_fine_target, created_at
        FROM executed_plans
        WHERE source_plan_id = $1 AND user_id = $2
        ORDER BY created_at DESC, id DESC
@@ -3049,6 +3350,7 @@ app.get('/executed-plans/latest', async (req, res) => {
       postpone_custom_reason: row.postpone_custom_reason,
       postpone_notes: row.postpone_notes,
       postpone_reopen_date: row.postpone_reopen_date,
+      engineer_fine_target: row.engineer_fine_target,
       created_at: row.created_at,
     });
   } catch (e) {
@@ -3268,18 +3570,31 @@ app.get('/executed-plans/contractor-report', async (req, res) => {
 
 app.get('/postpone-reasons', async (req, res) => {
   try {
+    const systemOrder = [
+      'site_not_ready',
+      'weather',
+      'contractor_absent',
+      'other',
+    ];
     const r = await pool.query(
       `SELECT reason_key, label, requires_custom, is_system
        FROM postpone_reasons
-       ORDER BY is_system DESC, label ASC`
+       WHERE is_system = TRUE AND reason_key = ANY($1::text[])`,
+      [systemOrder]
+    );
+    const byKey = new Map(
+      r.rows.map((row) => [String(row.reason_key), row]),
     );
     res.json(
-      r.rows.map((row) => ({
-        reason_key: row.reason_key,
-        label: row.label,
-        requires_custom: row.requires_custom === true,
-        is_system: row.is_system === true,
-      }))
+      systemOrder
+        .map((key) => byKey.get(key))
+        .filter(Boolean)
+        .map((row) => ({
+          reason_key: row.reason_key,
+          label: row.label,
+          requires_custom: row.requires_custom === true,
+          is_system: row.is_system === true,
+        }))
     );
   } catch (e) {
     res.status(500).json({ error: String(e.message) });

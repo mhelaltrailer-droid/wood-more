@@ -1,4 +1,4 @@
-/// طلب سحب خامات بانتظار موافقة مدير التشغيل ومدير المشروعات.
+/// طلب سحب خامات بانتظار موافقة مدير العمليات ومدير المشروعات.
 class WithdrawalRequestModel {
   final int id;
   final int projectId;

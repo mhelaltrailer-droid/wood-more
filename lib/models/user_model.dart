@@ -22,7 +22,7 @@ class UserModel {
   bool get isAdmin => role == 'app_admin';
   bool get isAccountant => role == 'accountant';
 
-  /// موافقة / رفض طلبات سحب الخامات (مدير المشروعات أو مدير التشغيل).
+  /// موافقة / رفض طلبات سحب الخامات (مدير المشروعات أو مدير العمليات).
   bool get canActOnWithdrawalRequests =>
       role == 'site_engineer_manager' || role == 'operation_manager';
 
@@ -41,6 +41,11 @@ class UserModel {
   /// التحكم في إظهار/إخفاء أيقونات الواجهة — لهذا البريد فقط.
   bool get canManageIconsControl =>
       email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+
+  /// تقارير التأجيل/الغرامات: مدير العمليات، أو مسؤول التطبيق بهذا البريد فقط.
+  bool get canAccessPostponeFinesReports =>
+      role == 'operation_manager' ||
+      (isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com');
 
   /// حذف مرفقات IR / MIR — مسؤول التطبيق بهذا البريد فقط.
   bool get canDeleteIrMirAttachments =>

@@ -12,7 +12,7 @@ import '../models/user_model.dart';
 import '../services/storage_service.dart';
 import '../utils/image_upload_compress.dart';
 
-/// IR-MIR: مهندس موقع يرفع، المدير/المسؤول/مدير التشغيل يعرضون.
+/// IR-MIR: مهندس موقع يرفع، المدير/المسؤول/مدير العمليات يعرضون.
 class IrMirScreen extends StatefulWidget {
   final UserModel currentUser;
 

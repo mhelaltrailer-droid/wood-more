@@ -50,7 +50,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 28,
+      version: 29,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -375,6 +375,30 @@ class DatabaseService {
     }
     if (oldVersion < 28) {
       await _createUserHomeIconOrderTable(db);
+    }
+    if (oldVersion < 29) {
+      await _trimMaterialsCatalog(db);
+    }
+  }
+
+  Future<void> _trimMaterialsCatalog(Database db) async {
+    if (defaultMaterialsList.isEmpty) return;
+    final placeholders = List.filled(defaultMaterialsList.length, '?').join(',');
+    await db.delete(
+      'materials',
+      where: 'name NOT IN ($placeholders)',
+      whereArgs: defaultMaterialsList,
+    );
+    for (final name in defaultMaterialsList) {
+      final count = Sqflite.firstIntValue(
+        await db.rawQuery(
+          'SELECT COUNT(*) FROM materials WHERE name = ?',
+          [name],
+        ),
+      );
+      if (count == 0) {
+        await db.insert('materials', {'name': name});
+      }
     }
   }
 
@@ -902,7 +926,10 @@ class DatabaseService {
     return value == '1' || value.toLowerCase() == 'true';
   }
 
-  Future<void> setSystemLocked(bool locked) async {
+  Future<void> setSystemLocked(
+    bool locked, {
+    String? requesterEmail,
+  }) async {
     final db = await database;
     await db.insert('app_settings', {
       'key': 'system_locked',
@@ -2987,7 +3014,7 @@ class DatabaseService {
         await _wrNotifyRoles(db, ['operation_manager'],
             title: 'بانتظار موافقتكم — طلب سحب خامات',
             body:
-                'وافق ${UserModel.siteEngineerManagerRoleLabel}. بانتظار موافقة مدير التشغيل.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
+                'وافق ${UserModel.siteEngineerManagerRoleLabel}. بانتظار موافقة مدير العمليات.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
             eventType: 'withdrawal_request_waiting_om',
             actorUserId: engId,
             actorUserName: engName,
@@ -3022,7 +3049,7 @@ class DatabaseService {
       await _wrNotifyRoles(db, ['site_engineer_manager'],
           title: 'طلب سحب خامات — مرفوض',
           body:
-              'رُفض الطلب من مدير التشغيل. السبب: ${reason.trim()}\nالمهندس: $engName — $pathLabel',
+              'رُفض الطلب من مدير العمليات. السبب: ${reason.trim()}\nالمهندس: $engName — $pathLabel',
           eventType: 'withdrawal_request_rejected_by_om',
           actorUserId: managerUserId,
           actorUserName: actorName,
@@ -3061,7 +3088,7 @@ class DatabaseService {
       await _wrNotifyRoles(db, ['site_engineer_manager'],
           title: 'بانتظار موافقتكم — طلب سحب خامات',
           body:
-              'وافق مدير التشغيل. بانتظار موافقة ${UserModel.siteEngineerManagerRoleLabel}.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
+              'وافق مدير العمليات. بانتظار موافقة ${UserModel.siteEngineerManagerRoleLabel}.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
           eventType: 'withdrawal_request_waiting_sem',
           actorUserId: engId,
           actorUserName: engName,

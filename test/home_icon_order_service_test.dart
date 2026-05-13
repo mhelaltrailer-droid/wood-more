@@ -3,55 +3,53 @@ import 'package:wood_and_more_app/models/user_model.dart';
 import 'package:wood_and_more_app/services/home_icon_order_service.dart';
 import 'package:wood_and_more_app/services/icon_visibility_service.dart';
 
-UserModel _adminUser() {
-  return const UserModel(
+UserModel _user(String role) {
+  return UserModel(
     id: 1,
-    name: 'Admin',
-    email: 'admin@example.com',
-    role: 'app_admin',
+    name: 'User',
+    email: 'user@example.com',
+    role: role,
   );
 }
 
 void main() {
-  test('resolveAppAdminHomeIconOrder keeps saved order for visible icons', () {
-    final iconConfig = IconVisibilityService.defaultForRole('app_admin');
-  final resolved = resolveAppAdminHomeIconOrder(
-      user: _adminUser(),
+  test('resolveHomeIconOrder keeps saved order for visible icons', () {
+    final iconConfig = IconVisibilityService.defaultForRole('site_engineer');
+    final resolved = resolveHomeIconOrder(
+      user: _user('site_engineer'),
       iconConfig: iconConfig,
-      savedOrder: const [
-        'warehouses_view',
-        'attendance_reports',
-        'dashboard',
-      ],
+      savedOrder: const ['ir_mir', 'attendance', 'engineer_projects'],
     );
 
-    expect(resolved.first, 'warehouses_view');
-    expect(resolved, contains('attendance_reports'));
-    expect(resolved, contains('dashboard'));
-    expect(resolved.length, eligibleAppAdminHomeIconIds(
-      user: _adminUser(),
-      iconConfig: iconConfig,
-    ).length);
+    expect(resolved.first, 'ir_mir');
+    expect(resolved, contains('attendance'));
+    expect(
+      resolved.length,
+      eligibleHomeIconIds(
+        user: _user('site_engineer'),
+        iconConfig: iconConfig,
+      ).length,
+    );
   });
 
-  test('resolveAppAdminHomeIconOrder appends new visible icons', () {
-    final iconConfig = IconVisibilityService.defaultForRole('app_admin');
-    final resolved = resolveAppAdminHomeIconOrder(
-      user: _adminUser(),
+  test('resolveHomeIconOrder appends new visible icons', () {
+    final iconConfig = IconVisibilityService.defaultForRole('accountant');
+    final resolved = resolveHomeIconOrder(
+      user: _user('accountant'),
       iconConfig: iconConfig,
-      savedOrder: const ['dashboard'],
+      savedOrder: const ['accountant_finance'],
     );
 
-    expect(resolved.first, 'dashboard');
+    expect(resolved.first, 'accountant_finance');
     expect(resolved.length, greaterThan(1));
   });
 
-  test('resolveAppAdminHomeIconOrder drops hidden icons from saved order', () {
+  test('resolveHomeIconOrder drops hidden icons from saved order', () {
     final iconConfig = Map<String, bool>.from(
       IconVisibilityService.defaultForRole('app_admin'),
     )..['warehouses_view'] = false;
-    final resolved = resolveAppAdminHomeIconOrder(
-      user: _adminUser(),
+    final resolved = resolveHomeIconOrder(
+      user: _user('app_admin'),
       iconConfig: iconConfig,
       savedOrder: const ['warehouses_view', 'dashboard', 'reports'],
     );

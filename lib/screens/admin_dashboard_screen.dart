@@ -50,13 +50,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Future<void> _toggleSystemLocked(bool value) async {
     setState(() => _systemLockLoading = true);
     try {
-      await _db.setSystemLocked(value);
+      await _db.setSystemLocked(
+        value,
+        requesterEmail: widget.currentUser.email,
+      );
       if (!mounted) return;
       setState(() => _systemLocked = value);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            value ? 'تم تفعيل قفل النظام (وضع الصيانة)' : 'تم إلغاء قفل النظام',
+            value
+                ? 'تم تفعيل وضع الصيانة؛ سيتم إنهاء جلسات المستخدمين الآخرين تلقائياً'
+                : 'تم إلغاء قفل النظام',
           ),
         ),
       );

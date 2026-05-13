@@ -57,6 +57,8 @@ class DetailedReportScreen extends StatefulWidget {
     String? postponeCustomReason,
     String? postponeNotes,
     DateTime? postponeReopenDate,
+    /// عند التأجيل: owner | contractor | none
+    String? engineerFineTarget,
   })?
   onExecutionSubmit;
   final String? initialExecutionStatus;
@@ -1532,18 +1534,8 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     } catch (_) {
       return const [
         {
-          'reason_key': 'materials_shortage',
-          'label': 'نقص خامات',
-          'requires_custom': false,
-        },
-        {
           'reason_key': 'site_not_ready',
           'label': 'عدم جاهزية موقع العمل',
-          'requires_custom': false,
-        },
-        {
-          'reason_key': 'approval_delay',
-          'label': 'تأخر اعتماد/موافقة',
           'requires_custom': false,
         },
         {
@@ -1552,8 +1544,8 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
           'requires_custom': false,
         },
         {
-          'reason_key': 'labor_shortage',
-          'label': 'نقص عمالة',
+          'reason_key': 'contractor_absent',
+          'label': 'عدم حضور المقاول',
           'requires_custom': false,
         },
         {'reason_key': 'other', 'label': 'أخرى', 'requires_custom': true},
@@ -1568,6 +1560,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       String? custom,
       String? notes,
       DateTime reopenDate,
+      String engineerFineTarget,
     })?
   >
   _askPostponeReason() async {
@@ -1576,6 +1569,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     String? selectedKey;
     String? selectedLabel;
     bool requiresCustom = false;
+    String? fineSignatureKey;
     final customController = TextEditingController();
     final notesController = TextEditingController();
     DateTime? reopenDate;
@@ -1587,6 +1581,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
             String? custom,
             String? notes,
             DateTime reopenDate,
+            String engineerFineTarget,
           })
         >(
           context: context,
@@ -1682,6 +1677,32 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                       border: OutlineInputBorder(),
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: fineSignatureKey,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'توقيع غرامة *',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'owner',
+                        child: Text('المالك'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'contractor',
+                        child: Text('المقاول'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'none',
+                        child: Text('لا تستدعي'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      setLocal(() => fineSignatureKey = v);
+                    },
+                  ),
                 ],
               ),
               actions: [
@@ -1695,6 +1716,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                     if (selectedKey == null || selectedLabel == null) return;
                     if (requiresCustom && custom.isEmpty) return;
                     if (reopenDate == null) return;
+                    if (fineSignatureKey == null) return;
                     Navigator.pop(ctx, (
                       key: selectedKey!,
                       label: selectedLabel!,
@@ -1703,6 +1725,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                           ? null
                           : notesController.text.trim(),
                       reopenDate: reopenDate!,
+                      engineerFineTarget: fineSignatureKey!,
                     ));
                   },
                   child: const Text('تأكيد التأجيل'),
@@ -1733,6 +1756,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     String? postponeCustomReason;
     String? postponeNotes;
     DateTime? postponeReopenDate;
+    String? engineerFineTarget;
     if (action == 'postponed') {
       final reason = await _askPostponeReason();
       if (reason == null) return;
@@ -1741,6 +1765,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       postponeCustomReason = reason.custom;
       postponeNotes = reason.notes;
       postponeReopenDate = reason.reopenDate;
+      engineerFineTarget = reason.engineerFineTarget;
     }
     final DetailedReportModel? plan = _editExecutionMode
         ? _buildReportForNext()
@@ -1761,6 +1786,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                 postponeCustomReason: postponeCustomReason,
                 postponeNotes: postponeNotes,
                 postponeReopenDate: postponeReopenDate,
+                engineerFineTarget: engineerFineTarget,
               ) ??
               Future.value(false));
       if (!mounted) return;

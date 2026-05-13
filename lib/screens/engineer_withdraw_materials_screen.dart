@@ -97,16 +97,16 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
       if (r.semStatus == WithdrawalRequestModel.statusRejected) {
         return 'تم رفض طلبك من ${UserModel.siteEngineerManagerRoleLabel} بسبب: ${r.semReason ?? '—'}';
       }
-      return 'تم رفض طلبك من مدير التشغيل بسبب: ${r.omReason ?? '—'}';
+      return 'تم رفض طلبك من مدير العمليات بسبب: ${r.omReason ?? '—'}';
     }
     if (r.isApprovedOverall) return '';
     final lines = <String>['في انتظار الرد على طلبكم'];
     if (r.semStatus == WithdrawalRequestModel.statusApproved &&
         r.omStatus == WithdrawalRequestModel.statusPending) {
-      lines.add('تمت موافقة ${UserModel.siteEngineerManagerRoleLabel} — بانتظار موافقة مدير التشغيل');
+      lines.add('تمت موافقة ${UserModel.siteEngineerManagerRoleLabel} — بانتظار موافقة مدير العمليات');
     } else if (r.omStatus == WithdrawalRequestModel.statusApproved &&
         r.semStatus == WithdrawalRequestModel.statusPending) {
-      lines.add('تمت موافقة مدير التشغيل — بانتظار موافقة ${UserModel.siteEngineerManagerRoleLabel}');
+      lines.add('تمت موافقة مدير العمليات — بانتظار موافقة ${UserModel.siteEngineerManagerRoleLabel}');
     }
     return lines.join('\n');
   }
@@ -223,7 +223,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
       builder: (ctx) => AlertDialog(
         title: const Text('طلب سحب خامات'),
         content: Text(
-          'إرسال طلب إلى مدير التشغيل و${UserModel.siteEngineerManagerRoleLabel} للموافقة على السحب من:\n${_locationPath(loc)}\nالمرحلة: ${LocationMaterialModel.phaseLabel(phase)}',
+          'إرسال طلب إلى مدير العمليات و${UserModel.siteEngineerManagerRoleLabel} للموافقة على السحب من:\n${_locationPath(loc)}\nالمرحلة: ${LocationMaterialModel.phaseLabel(phase)}',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
@@ -573,7 +573,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
                   Text('اسم المهندس: ${widget.user.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Text(
-                    'السحب يتطلب موافقة مدير التشغيل و${UserModel.siteEngineerManagerRoleLabel} معاً. ابدأ بـ «طلب سحب خامات» ثم بعد الاعتماد استخدم «إكمال سحب الخامات».',
+                    'السحب يتطلب موافقة مدير العمليات و${UserModel.siteEngineerManagerRoleLabel} معاً. ابدأ بـ «طلب سحب خامات» ثم بعد الاعتماد استخدم «إكمال سحب الخامات».',
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade800),
                   ),
                 ],

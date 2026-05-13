@@ -348,6 +348,38 @@ class WebStorageService {
         jsonEncode(IconVisibilityService.normalizeAllConfig(null)),
       );
     }
+    await _syncMaterialsCatalog();
+  }
+
+  Future<void> _syncMaterialsCatalog() async {
+    final prefs = await _prefs;
+    final allowed = defaultMaterialsList.map((e) => e.trim()).toSet();
+    final raw = prefs.getString(_materialsKey);
+    final list = raw == null
+        ? <Map<String, dynamic>>[]
+        : (jsonDecode(raw) as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+    final kept = list
+        .where((e) => allowed.contains((e['name'] as String?)?.trim() ?? ''))
+        .toList();
+    final names = kept
+        .map((e) => (e['name'] as String?)?.trim() ?? '')
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    for (final name in defaultMaterialsList) {
+      if (!names.contains(name)) {
+        kept.add({'id': 0, 'name': name});
+      }
+    }
+    final normalized = <Map<String, dynamic>>[];
+    for (var i = 0; i < kept.length; i++) {
+      normalized.add({
+        'id': i + 1,
+        'name': (kept[i]['name'] as String).trim(),
+      });
+    }
+    await prefs.setString(_materialsKey, jsonEncode(normalized));
   }
 
   Future<bool> isSystemLocked() async {
@@ -356,7 +388,10 @@ class WebStorageService {
     return prefs.getBool(_systemLockedKey) ?? false;
   }
 
-  Future<void> setSystemLocked(bool locked) async {
+  Future<void> setSystemLocked(
+    bool locked, {
+    String? requesterEmail,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     await prefs.setBool(_systemLockedKey, locked);

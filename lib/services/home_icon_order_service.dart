@@ -3,31 +3,27 @@ import '../models/user_model.dart';
 
 const String homeIconIdIconsControl = 'icons_control';
 
-const List<String> appAdminHomeDefaultIconOrder = [
-  'attendance_reports',
-  'work_plan_tracking_report',
-  'new_icon',
-  'operation_reports_tracking',
-  homeIconIdIconsControl,
-  'daily_movement',
-  'reports',
-  'aggregated_detailed_daily',
-  'contractor_report',
-  'ir_mir',
-  'warehouses_view',
-  'admin_project_structure',
-  'admin_dashboard',
-  'activity_logs',
-  'dashboard',
-];
+List<String> defaultHomeIconOrderForUser(UserModel user) {
+  final roleItems = IconVisibilityService.roleIcons[user.role] ?? const [];
+  final out = roleItems.map((item) => item.id).toList();
+  if (user.canManageIconsControl && !out.contains(homeIconIdIconsControl)) {
+    final trackingIndex = out.indexOf('operation_reports_tracking');
+    if (trackingIndex >= 0) {
+      out.insert(trackingIndex + 1, homeIconIdIconsControl);
+    } else {
+      out.add(homeIconIdIconsControl);
+    }
+  }
+  return out;
+}
 
-List<String> eligibleAppAdminHomeIconIds({
+List<String> eligibleHomeIconIds({
   required UserModel user,
   required Map<String, bool>? iconConfig,
 }) {
   final out = <String>[];
-  for (final iconId in appAdminHomeDefaultIconOrder) {
-    if (!_isAppAdminHomeIconAvailable(
+  for (final iconId in defaultHomeIconOrderForUser(user)) {
+    if (!_isHomeIconAvailable(
       iconId: iconId,
       user: user,
       iconConfig: iconConfig,
@@ -39,7 +35,7 @@ List<String> eligibleAppAdminHomeIconIds({
   return out;
 }
 
-bool _isAppAdminHomeIconAvailable({
+bool _isHomeIconAvailable({
   required String iconId,
   required UserModel user,
   required Map<String, bool>? iconConfig,
@@ -47,6 +43,9 @@ bool _isAppAdminHomeIconAvailable({
   switch (iconId) {
     case homeIconIdIconsControl:
       return user.canManageIconsControl;
+    case 'postpone_fines_reports':
+      return user.canAccessPostponeFinesReports &&
+          IconVisibilityService.isVisible(iconConfig, iconId);
     case 'daily_movement':
     case 'activity_logs':
       return user.canViewActivityLogs &&
@@ -56,15 +55,12 @@ bool _isAppAdminHomeIconAvailable({
   }
 }
 
-List<String> resolveAppAdminHomeIconOrder({
+List<String> resolveHomeIconOrder({
   required UserModel user,
   required Map<String, bool>? iconConfig,
   required List<String>? savedOrder,
 }) {
-  final eligible = eligibleAppAdminHomeIconIds(
-    user: user,
-    iconConfig: iconConfig,
-  );
+  final eligible = eligibleHomeIconIds(user: user, iconConfig: iconConfig);
   if (savedOrder == null || savedOrder.isEmpty) return eligible;
 
   final eligibleSet = eligible.toSet();

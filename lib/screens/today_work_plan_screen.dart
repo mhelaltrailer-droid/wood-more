@@ -363,6 +363,7 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
                   String? postponeCustomReason,
                   String? postponeNotes,
                   DateTime? postponeReopenDate,
+                  String? engineerFineTarget,
                 }) async {
                   try {
                     if (_db is! ApiStorageService) {
@@ -388,6 +389,7 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
                       postponeCustomReason: postponeCustomReason,
                       postponeNotes: postponeNotes,
                       postponeReopenDate: postponeReopenDate,
+                      engineerFineTarget: engineerFineTarget,
                     );
                     return true;
                   } catch (e) {

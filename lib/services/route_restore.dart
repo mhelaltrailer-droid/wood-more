@@ -23,6 +23,7 @@ import '../screens/daily_movement_screen.dart';
 import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
 import '../screens/operation_reports_tracking_screen.dart';
+import '../screens/postpone_fines_report_screen.dart';
 import '../screens/work_plan_tracking_report_screen.dart';
 import '../screens/icons_control_screen.dart';
 import '../screens/ir_mir_screen.dart';
@@ -83,6 +84,8 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return OperationReportsTrackingScreen(currentUser: user);
     case 'work-plan-tracking-report':
       return WorkPlanTrackingReportScreen(currentUser: user);
+    case 'postpone-fines-report':
+      return PostponeFinesReportScreen(currentUser: user);
     case 'icons-control':
       return IconsControlScreen(currentUser: user);
     case 'ir-mir':
