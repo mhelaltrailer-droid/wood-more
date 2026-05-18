@@ -1,11 +1,12 @@
 /// نموذج المستخدم - مهندس موقع أو مدير المشروعات
 class UserModel {
   static const String siteEngineerManagerRoleLabel = 'مدير المشروعات';
+  static const String generalSupervisorRoleLabel = 'مشرف عام';
 
   final int id;
   final String name;
   final String email;
-  final String role; // 'site_engineer' | 'site_engineer_manager' | 'operation_manager' | 'app_admin' | 'accountant'
+  final String role; // 'site_engineer' | 'site_engineer_manager' | 'general_supervisor' | 'operation_manager' | 'app_admin' | 'accountant'
 
   const UserModel({
     required this.id,
@@ -15,8 +16,17 @@ class UserModel {
   });
 
   bool get isSiteEngineer => role == 'site_engineer';
+  bool get isGeneralSupervisor => role == 'general_supervisor';
   bool get isManager =>
       role == 'site_engineer_manager' ||
+      role == 'general_supervisor' ||
+      role == 'operation_manager' ||
+      role == 'app_admin';
+
+  /// زر الإشعارات في الشاشة الرئيسية (بدون طلبات السحب لـ مشرف عام).
+  bool get canUseNotifications =>
+      role == 'site_engineer_manager' ||
+      role == 'general_supervisor' ||
       role == 'operation_manager' ||
       role == 'app_admin';
   bool get isAdmin => role == 'app_admin';

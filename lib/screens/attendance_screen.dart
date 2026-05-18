@@ -9,6 +9,28 @@ import '../services/location_service.dart';
 import '../services/last_project_persistence.dart';
 import 'home_screen.dart';
 
+/// خيار «مشروع أخر» في الحضور — غير موجود في جدول المشاريع (`id = 0`).
+const ProjectModel _kOtherAttendanceProject =
+    ProjectModel(id: 0, name: 'مشروع أخر');
+
+String _formatOtherAttendanceProjectDisplay(String userInput) {
+  final inner = userInput.trim().replaceAll('"', "'");
+  return 'مشروع أخر ("$inner")';
+}
+
+/// يستعيد النص الداخلي إن كان المشروع المحفوظ بنفس التنسيق.
+bool _tryRestoreOtherProjectCustomName(
+  String storedProjectName,
+  TextEditingController c,
+) {
+  const prefix = 'مشروع أخر ("';
+  const suffix = '")';
+  final s = storedProjectName.trim();
+  if (!s.startsWith(prefix) || !s.endsWith(suffix)) return false;
+  c.text = s.substring(prefix.length, s.length - suffix.length);
+  return true;
+}
+
 /// شاشة تسجيل الحضور والانصراف للمهندس
 class AttendanceScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -22,11 +44,23 @@ class AttendanceScreen extends StatefulWidget {
 class _AttendanceScreenState extends State<AttendanceScreen> {
   final _db = getStorage();
   final _notesController = TextEditingController();
+  final _otherProjectNameController = TextEditingController();
   List<ProjectModel> _projects = [];
   ProjectModel? _selectedProject;
   String? _selectedType; // 'check_in' | 'check_out'
   bool _isLoading = false;
   String? _errorMessage;
+
+  bool get _isOtherProjectSelected =>
+      _selectedProject?.id == _kOtherAttendanceProject.id;
+
+  bool get _projectSelectionComplete {
+    if (_selectedProject == null) return false;
+    if (_isOtherProjectSelected) {
+      return _otherProjectNameController.text.trim().isNotEmpty;
+    }
+    return true;
+  }
 
   @override
   void initState() {
@@ -37,6 +71,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void dispose() {
     _notesController.dispose();
+    _otherProjectNameController.dispose();
     super.dispose();
   }
 
@@ -45,17 +80,22 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final last = await getLastAttendanceProjectForUser(widget.currentUser.id);
     ProjectModel? defaultProject;
     if (last != null) {
-      for (final p in projects) {
-        if (last.projectId != null && p.id == last.projectId) {
-          defaultProject = p;
-          break;
-        }
-      }
-      if (defaultProject == null) {
+      if (last.projectId == null &&
+          _tryRestoreOtherProjectCustomName(last.projectName, _otherProjectNameController)) {
+        defaultProject = _kOtherAttendanceProject;
+      } else {
         for (final p in projects) {
-          if (p.name.trim() == last.projectName) {
+          if (last.projectId != null && p.id == last.projectId) {
             defaultProject = p;
             break;
+          }
+        }
+        if (defaultProject == null) {
+          for (final p in projects) {
+            if (p.name.trim() == last.projectName) {
+              defaultProject = p;
+              break;
+            }
           }
         }
       }
@@ -67,7 +107,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     });
   }
 
-  bool get _canSubmit => _selectedProject != null && _selectedType != null;
+  bool get _canSubmit =>
+      _projectSelectionComplete && _selectedType != null;
 
   Future<void> _requestLocationAndSetType(String type) async {
     if (_isLoading) return;
@@ -113,6 +154,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         return;
       }
 
+      final isOther = _isOtherProjectSelected;
+      final projectNameForRecord = isOther
+          ? _formatOtherAttendanceProjectDisplay(_otherProjectNameController.text)
+          : _selectedProject!.name.trim();
+
       final record = AttendanceRecordModel(
         id: 0,
         userId: widget.currentUser.id,
@@ -120,8 +166,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         type: _selectedType!,
         dateTime: now,
         location: location,
-        projectId: _selectedProject?.id,
-        projectName: _selectedProject?.name,
+        projectId: isOther ? null : _selectedProject!.id,
+        projectName: projectNameForRecord,
         notes: _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim(),
@@ -130,8 +176,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       await _db.addAttendanceRecord(record);
       await saveLastAttendanceProjectForUser(
         userId: widget.currentUser.id,
-        projectId: _selectedProject?.id,
-        projectName: _selectedProject?.name ?? '',
+        projectId: isOther ? null : _selectedProject!.id,
+        projectName: projectNameForRecord,
       );
 
       if (!mounted) return;
@@ -167,7 +213,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final dateStr = DateFormat('yyyy/MM/dd', 'ar').format(now);
     final timeStr = DateFormat('hh:mm a', 'ar').format(now);
 
-    final projectSelected = _selectedProject != null;
+    final projectReady = _projectSelectionComplete;
 
     return Scaffold(
       appBar: AppBar(
@@ -224,20 +270,44 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 prefixIcon: Icon(Icons.business),
                 border: OutlineInputBorder(),
               ),
-              items: _projects
-                  .map(
-                    (p) => DropdownMenuItem(
-                      value: p,
-                      child: Text(p.name, overflow: TextOverflow.ellipsis),
-                    ),
-                  )
-                  .toList(),
+              items: [
+                ..._projects.map(
+                  (p) => DropdownMenuItem(
+                    value: p,
+                    child: Text(p.name, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+                const DropdownMenuItem<ProjectModel>(
+                  value: _kOtherAttendanceProject,
+                  child: Text('مشروع أخر'),
+                ),
+              ],
               onChanged: (p) => setState(() => _selectedProject = p),
             ),
+            if (_isOtherProjectSelected) ...[
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _otherProjectNameController,
+                maxLines: 2,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'اسم المشروع *',
+                  hintText: 'اكتب اسم المشروع (إلزامي عند اختيار مشروع أخر)',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.edit_outlined),
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
-            if (!projectSelected)
+            if (_selectedProject == null)
               Text(
                 'يجب اختيار المشروع أولاً لتفعيل تسجيل الحضور أو الانصراف',
+                style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+              )
+            else if (_isOtherProjectSelected &&
+                _otherProjectNameController.text.trim().isEmpty)
+              Text(
+                'يرجى كتابة اسم المشروع عند اختيار «مشروع أخر»',
                 style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
               ),
             const SizedBox(height: 24),
@@ -252,7 +322,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               children: [
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: projectSelected && !_isLoading
+                    onPressed: projectReady && !_isLoading
                         ? () => _requestLocationAndSetType('check_in')
                         : null,
                     icon: const Icon(Icons.login),
@@ -268,7 +338,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: projectSelected && !_isLoading
+                    onPressed: projectReady && !_isLoading
                         ? () => _requestLocationAndSetType('check_out')
                         : null,
                     icon: const Icon(Icons.logout),

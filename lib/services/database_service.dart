@@ -50,7 +50,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 29,
+      version: 30,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -377,6 +377,9 @@ class DatabaseService {
       await _createUserHomeIconOrderTable(db);
     }
     if (oldVersion < 29) {
+      await _trimMaterialsCatalog(db);
+    }
+    if (oldVersion < 30) {
       await _trimMaterialsCatalog(db);
     }
   }

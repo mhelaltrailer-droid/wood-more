@@ -44,6 +44,20 @@ void main() {
     expect(resolved.length, greaterThan(1));
   });
 
+  test('general_supervisor has manager icons plus attendance', () {
+    final iconConfig =
+        IconVisibilityService.defaultForRole('general_supervisor');
+    final eligible = eligibleHomeIconIds(
+      user: _user('general_supervisor'),
+      iconConfig: iconConfig,
+    );
+
+    expect(eligible.first, 'attendance');
+    expect(eligible, contains('attendance_reports'));
+    expect(eligible, contains('warehouses_view'));
+    expect(eligible, isNot(contains('today_work_plan')));
+  });
+
   test('resolveHomeIconOrder drops hidden icons from saved order', () {
     final iconConfig = Map<String, bool>.from(
       IconVisibilityService.defaultForRole('app_admin'),

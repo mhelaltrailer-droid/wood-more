@@ -1,1861 +1,1113 @@
-# Wood & More Application - Full Technical Documentation
+# Wood & More Application — Complete Technical Documentation
+
+> **Document version:** 2026-05-17  
+> **Repository:** `wood_and_more_app`  
+> **Audience:** Developers, DevOps, and AI agents onboarding to this codebase  
+> **Scope:** Read-only analysis of the full project — no application logic was modified to produce this document.
+
+---
+
+## Table of Contents
+
+1. [Project Overview](#1-project-overview)
+2. [System Architecture](#2-system-architecture)
+3. [Folder Structure Explanation](#3-folder-structure-explanation)
+4. [Features Breakdown](#4-features-breakdown)
+5. [User Flow](#5-user-flow)
+6. [API / Backend Integration](#6-api--backend-integration)
+7. [Data Models](#7-data-models)
+8. [State Management](#8-state-management)
+9. [External Services](#9-external-services)
+10. [Environment Setup](#10-environment-setup)
+11. [Deployment Notes](#11-deployment-notes)
+
+---
 
 ## 1. Project Overview
 
-### What the application does
-`wood_and_more_app` is a role-based construction operations platform for Wood & More teams. It supports field execution tracking, attendance, daily and detailed reports, project structure management, warehouse and material workflows, and financial custody and balance operations.
+### 1.1 What the application does
 
-The system consists of:
-- A Flutter client in `lib/` for web, desktop, and mobile.
-- A Node.js + Express backend in `backend/` with PostgreSQL persistence.
-- A configurable storage strategy that can switch between API mode and local storage mode based on runtime configuration.
+**Wood & More** is a **role-based construction operations platform** for Wood & More field and office teams. It digitizes day-to-day site work across wood/WPC cladding and related trades:
 
-### Core purpose and business logic
-The app digitizes day-to-day site operations and internal administration:
-- Manage users, projects, locations, zones, buildings, units, contractors, supervisors, and materials.
-- Track attendance for site engineers.
-- Capture daily and detailed field reports.
-- Track warehouse stock, material allocation, and withdrawal movements.
-- Track engineer balances, custody, and finance-related records.
-- Generate printable and shareable operational reports.
-- Maintain an API-level activity log for traceability.
+- **Attendance** with geolocation
+- **Work plans** for today and tomorrow (confirm, edit, postpone, fines)
+- **Operational reports** (inspection, status proof, damage)
+- **Detailed daily reports** (structured work lines by project location, phase, contractor, workers)
+- **Legacy multi-step daily reports** (still in codebase)
+- **Project structure** (projects → zones → buildings → units; parallel tree of `project_locations`)
+- **Warehouse & materials** (project stock, location staging, withdrawal with approval workflow)
+- **Engineer finances** (balance, custody, movements)
+- **IR / MIR document uploads** per project and work site
+- **In-app notifications** and limited private admin chat
+- **Administration** (users, master data, system lock, icon visibility, activity logs)
+
+The system ships as:
+
+| Component | Technology | Location |
+|-----------|------------|----------|
+| Client | Flutter (Dart) | `lib/` |
+| API | Node.js + Express | `backend/server.js` |
+| Database | PostgreSQL | `backend/init-db.sql`, `backend/migrations/` |
+| Optional local fallback | SQLite (mobile/desktop) or SharedPreferences (web) | `lib/services/` |
+
+Supported client platforms: **Web**, **Android**, **iOS**, **Windows**, **Linux**, **macOS** (via standard Flutter runners).
+
+### 1.2 Core purpose and business logic
+
+The app replaces paper/spreadsheet workflows with a single source of truth when **`apiBaseUrl`** is configured:
+
+1. **Site engineers** execute and report work; their expenses reduce personal balance; material usage can reduce project stock.
+2. **Project managers** (`site_engineer_manager`) approve withdrawals, resolve postpone fines, and review reports.
+3. **Operation managers** (`operation_manager`) share withdrawal approval and access postpone/fine analytics.
+4. **Accountants** manage custody and balances.
+5. **App admins** maintain master data, project trees, warehouse structure, and system settings.
+
+**Business rules highlights:**
+
+- Login uses email + password stored in PostgreSQL (plain text comparison on server).
+- **System lock** blocks all users except the primary admin email during maintenance.
+- **Withdrawal requests** require dual approval (SEM + OM) before physical withdrawal is recorded.
+- **Postponed work plans** trigger SEM fine decisions, then notify OM.
+- **Reference data** (projects, contractors, supervisors, zones) must come from storage/API — not hardcoded lists in UI (see `.cursor/rules/reference-data.mdc`).
 
 ---
 
 ## 2. System Architecture
 
-### High-level architecture
-The application follows a client-service-database architecture:
+### 2.1 High-level architecture
 
-1. Flutter presentation layer
-   - Screen-driven UI built with Flutter Material widgets.
-   - Arabic-first localization and role-specific navigation.
+```mermaid
+flowchart TB
+  subgraph Client["Flutter Client"]
+    UI["Screens / Widgets"]
+    Facade["storage_service.getStorage()"]
+    API["ApiStorageService"]
+    SQLite["DatabaseService"]
+    WebStore["WebStorageService"]
+  end
 
-2. Storage abstraction layer
-   - `lib/services/storage_service.dart` chooses the active persistence implementation at startup:
-     - `ApiStorageService` when `apiBaseUrl` is configured.
-     - `WebStorageService` for web local persistence when no API is configured.
-     - `DatabaseService` for SQLite persistence on desktop/mobile when no API is configured.
+  subgraph Server["Backend"]
+    Express["Express server.js"]
+    Ensure["ensure* schema guards"]
+  end
 
-3. Backend API layer
-   - Express-based REST API in `backend/server.js`.
-   - Handles domain operations for users, projects, reports, stock, finance, and audit logs.
+  subgraph Data["Persistence"]
+    PG[(PostgreSQL)]
+  end
 
-4. Persistence layer
-   - PostgreSQL schema created via `backend/init-db.sql`.
-   - Incremental schema evolution through `backend/migrations/*.sql`.
-   - Some backend startup guards automatically add missing columns or tables.
+  UI --> Facade
+  Facade -->|apiBaseUrl set| API
+  Facade -->|no API, web| WebStore
+  Facade -->|no API, native| SQLite
+  API -->|HTTP JSON| Express
+  Express --> Ensure
+  Express --> PG
+```
 
-### How components interact
-- `lib/main.dart` initializes Firebase and the storage layer.
-- The auth gate restores the persisted user and validates it in API mode.
-- UI screens call methods on the active storage implementation.
-- In API mode, Flutter service methods translate screen actions into HTTP requests.
-- The backend applies business rules, persists data, and returns JSON payloads mapped into Dart models.
+### 2.2 Storage strategy (central design decision)
+
+At startup, `initStorage()` in `lib/services/storage_service.dart` selects **one** implementation:
+
+| Condition | Implementation | Persistence |
+|-----------|----------------|-------------|
+| `apiBaseUrl` in config | `ApiStorageService` | Remote PostgreSQL via REST |
+| No API + Web | `WebStorageService` | Browser SharedPreferences JSON |
+| No API + Mobile/Desktop | `DatabaseService` | SQLite `wood_and_more.db` v30 |
+
+**Config sources:**
+
+- Web: `GET /config.json` (same origin; Docker mounts `config.api.json`)
+- Mobile/Desktop: `assets/config.json` bundled at build time
+
+All three implementations expose the **same method surface** (duck typing via `dynamic getStorage()`).
+
+### 2.3 Component interaction
+
+1. **`main.dart`** — `WidgetsFlutterBinding` → Firebase init (non-fatal on failure) → Hive (`LocalCacheService`) → `initStorage()` → `runApp`.
+2. **`_AuthGate`** — Restores session from `auth_persistence`; in API mode validates user still exists via `/users/by-email`.
+3. **`SystemLockWatch`** — Polls `/system-lock` every 30s; signs out non-bypass users if locked.
+4. **`HomeScreen`** — Loads per-role icon visibility + per-user icon order → `ReorderableHomeScreen`.
+5. **Screen action** → `getStorage().method()` → (API) HTTP → `server.js` handler → SQL → JSON response → Dart model → UI.
+
+### 2.4 Backend architecture
+
+- **Monolithic** `backend/server.js` (~3,600 lines): all routes, business logic, and startup DDL helpers.
+- **`pg` connection pool** — `DATABASE_URL` (Neon/cloud) or `PGHOST`/`PGPORT`/etc.
+- **No JWT/session middleware** — client sends `userId`, `requesterEmail`, or body fields; selective per-route authorization.
+- **`ensure*()` functions** on startup create/alter critical tables (notifications, withdrawal_requests, executed_plans extensions, etc.).
+- **`migrations/*.sql`** — manual incremental scripts; **not** auto-run by the server (operators run on existing DBs).
+
+### 2.5 Security model (as implemented)
+
+| Mechanism | Behavior |
+|-----------|----------|
+| Authentication | `POST /auth/login` returns user profile; client stores locally |
+| Authorization | Per-endpoint checks (role, email match, requester id) |
+| Primary admin | `mouhammedhelal@gmail.com` — system lock, activity logs, icon control, hidden from other users' lists |
+| Passwords | Plain text in `users.password` (default `0000`) |
+| Activity audit | Middleware logs most requests to `activity_logs` |
+
+**Production hardening gaps:** token-based auth, password hashing, centralized auth middleware, HTTPS enforcement.
 
 ---
 
 ## 3. Folder Structure Explanation
 
-### Top-level folders
-- `lib/`: Main Flutter application source code.
-- `backend/`: Node.js backend, SQL schema, and migrations.
-- `assets/`: App assets and non-web runtime configuration.
-- `web/`: Web entry files and web runtime configuration.
-- `android/`, `ios/`, `windows/`, `linux/`, `macos/`: Flutter platform runner folders.
-- `test/`: Flutter test files.
+### 3.1 Repository root
 
-### Important root files
-- `pubspec.yaml`: Flutter dependencies, assets, and project metadata.
-- `README.md`: Main setup and local run documentation.
-- `docker-compose.yml`: Full stack orchestration for Postgres, API, and web app.
-- `Dockerfile`: Root container build for the Flutter web application.
-- `BUILD_SIGN_README.md`, `RELEASE_APK_STEPS.md`, `DEPLOYMENT_GUIDE.md`: Deployment/build notes.
+| Path | Responsibility |
+|------|----------------|
+| `lib/` | Flutter application source (~118 Dart files) |
+| `backend/` | Node.js API, SQL schema, migrations, ops scripts |
+| `assets/` | Images, `config.json` (API URL for native builds) |
+| `web/` | Web entrypoint, `index.html`, web `config.json` |
+| `android/`, `ios/`, `windows/`, `linux/`, `macos/` | Platform runners and build config |
+| `test/` | Flutter unit tests |
+| `docker-compose.yml` | Postgres (optional profile) + API + Flutter web/nginx |
+| `Dockerfile` | Flutter web build served by nginx |
+| `config.api.json` | API URL injected into web container |
+| `pubspec.yaml` | Flutter dependencies and assets |
+| `README.md` | Windows/local PostgreSQL setup guide |
+| `APK.md` | Android release APK build instructions |
+| `DEPLOYMENT_GUIDE.md`, `BUILD_SIGN_README.md`, `RELEASE_APK_STEPS.md` | Deployment notes |
+| `.cursor/rules/` | AI/editor rules (e.g. reference data policy) |
+| `.agents/skills/` | Agent skill metadata |
 
-### `lib/` structure
-- `main.dart`: Bootstrap, theme, localization, auth gate, route restore logic.
-- `screens/`: UI screens for engineers, managers, accountants, and admins.
-- `services/`: API, SQLite, web storage, persistence helpers, geolocation, route restore.
-- `models/`: Domain models used across the application.
-- `core/`: Theme and route observer support.
-- `utils/`: Cross-platform PDF share helpers.
-- `data/`: Static/default data sources.
-- `firebase_options.dart`: Firebase configuration scaffold.
+### 3.2 `lib/` — Flutter application
 
-### `backend/` structure
-- `server.js`: Main REST API and business logic.
-- `init-db.sql`: Core schema and seed data.
-- `migrations/`: Manual SQL migration scripts.
-- `Dockerfile`: Backend service image definition.
-- `README-DATABASE.md`: Database setup guidance.
+| Folder | Files | Responsibility |
+|--------|------:|----------------|
+| `screens/` | 60 | Full-screen UI flows by role |
+| `services/` | 16 | Storage, auth, routes, business helpers |
+| `models/` | 26 | Domain entities (`fromMap` / `toMap`) |
+| `widgets/` | 4 | Reusable UI components |
+| `utils/` | 4 | PDF share (IO/stub), image compression |
+| `data/` | 2 | Default/priority material names and sort order |
+| `core/` | 2 | Theme, route observer |
+| Root | 8 | `main.dart`, Firebase options, print stubs |
+
+**Key root files:**
+
+| File | Role |
+|------|------|
+| `main.dart` | App bootstrap, auth gate, route restore, localization |
+| `firebase_options.dart` | Firebase platform config scaffold |
+
+### 3.3 `lib/services/` — Data & cross-cutting
+
+| Service | Purpose |
+|---------|---------|
+| `storage_service.dart` | Facade: API vs web vs SQLite selection |
+| `api_storage_service.dart` | REST client (~1,600 lines) mirroring all domain operations |
+| `database_service.dart` | SQLite offline mirror, schema v30, migrations in `_onUpgrade` |
+| `web_storage_service.dart` | SharedPreferences JSON entity stores + seeds |
+| `auth_persistence.dart` | Current user + session in SharedPreferences |
+| `route_persistence.dart` / `route_restore.dart` | Last route save/restore; route name → widget map |
+| `system_lock_service.dart` | Maintenance lock check and forced sign-out |
+| `icon_visibility_service.dart` | Per-role home icon definitions and defaults |
+| `home_icon_order_service.dart` | Merge saved order with eligible icons |
+| `location_service.dart` | Geolocator wrapper for attendance |
+| `project_warehouse_loading.dart` | Batch load/index warehouse by location+phase |
+| `withdrawal_stock_validation.dart` | Pre-withdrawal stock validation |
+| `local_cache_service.dart` | Hive TTL cache (e.g. daily movement) |
+| `operation_reports_store.dart` | Local ValueNotifier + prefs for operation tracking UI |
+| `last_project_persistence.dart` | Remember last selected project |
+
+### 3.4 `lib/screens/` — Complete inventory by domain
+
+#### Auth & shell
+
+| Screen | Purpose |
+|--------|---------|
+| `animated_logo_splash_screen.dart` | Entry splash animation |
+| `login_screen.dart` | Email/password login; maintenance lock UI |
+| `home_screen.dart` | Role home: notifications badge, withdrawal count, chat entry |
+| `reorderable_home_screen.dart` | Drag-to-reorder home icons |
+
+#### Site engineer
+
+| Screen | Purpose |
+|--------|---------|
+| `attendance_screen.dart` | Check-in/out + GPS + project |
+| `today_work_plan_screen.dart` | View/execute today's plan |
+| `tomorrow_work_plan_screen.dart` | Plan tomorrow; worker distribution |
+| `detailed_report_screen.dart` | Primary "daily report": sites, phases, contractors, attachments |
+| `detailed_report_finances_screen.dart` | Expense lines for detailed report |
+| `site_engineer_finances_entry_screen.dart` | Finances linked to work plan |
+| `operation_reports_screen.dart` | Inspection / status / damage reports + photos |
+| `engineer_withdraw_materials_screen.dart` | Warehouse withdrawal per sub-location |
+| `withdrawal_balance_review_screen.dart` | Stock review before withdrawal |
+| `engineer_projects_screen.dart` | Project → zone → building → materials/cutlists |
+| `ir_mir_screen.dart` | Upload/view MIR and IR documents |
+| `site_engineer_reports_screen.dart` | Placeholder (disabled) |
+| `daily_report_step1/2/3_screen.dart` | Legacy wizard (route restore only) |
+
+#### Project manager (`site_engineer_manager`)
+
+| Screen | Purpose |
+|--------|---------|
+| `attendance_reports_screen.dart` | All engineers' attendance; PDF |
+| `work_plan_tracking_report_screen.dart` | Today/tomorrow plan tracking table |
+| `new_icon_screen.dart` | Today plan status + tomorrow readiness summary |
+| `operation_reports_tracking_screen.dart` | Track engineers' operation reports |
+| `aggregated_detailed_daily_report_screen.dart` | Aggregated detailed reports + withdrawals |
+| `contractor_report_screen.dart` | Contractor worker counts from confirmed plans |
+| `manager_withdrawal_requests_screen.dart` | Approve/reject withdrawal requests; postpone queue |
+| `manager_custody_screen.dart` | Custody entry and reports |
+| `finance_screen.dart` | Balances, custody, engineer expenses |
+| `warehouses_view_screen.dart` | Read-only warehouse view |
+| `notifications_screen.dart` | In-app notification inbox |
+| `ir_mir_screen.dart` | View engineers' uploads |
+
+#### Operation manager
+
+Same manager screens where configured, plus:
+
+| Screen | Purpose |
+|--------|---------|
+| `postpone_fines_report_screen.dart` | Postpone/fine analytics with filters and PDF |
+
+#### Accountant
+
+| Screen | Purpose |
+|--------|---------|
+| `accountant_custody_screen.dart` | Custody by user/period; PDF |
+| `accountant_finance_screen.dart` | Balances; add/withdraw; movement report |
+
+#### App admin
+
+| Screen | Purpose |
+|--------|---------|
+| `admin_dashboard_screen.dart` | Admin hub + system lock toggle |
+| `admin_users_screen.dart` | User CRUD |
+| `admin_projects_screen.dart` | Project CRUD |
+| `admin_zones_screen.dart` | Zones per project |
+| `admin_buildings_screen.dart` | Buildings per zone |
+| `admin_units_screen.dart` | Units per building |
+| `admin_building_materials_screen.dart` | Tashweenat per building |
+| `admin_cutlists_screen.dart` | Cutlist images |
+| `admin_supervisors_screen.dart` | Supervisors |
+| `admin_contractors_screen.dart` | Contractors |
+| `admin_materials_screen.dart` | Global material catalog |
+| `admin_project_stores_screen.dart` | Project stock balances |
+| `admin_warehouse_structure_screen.dart` | Location tree + materials per site |
+| `admin_location_materials_screen.dart` | Materials for one sub-location |
+| `admin_warehouse_withdraw_screen.dart` | Cancel withdrawal / restore stock |
+| `admin_project_structure_screen.dart` | `project_locations` tree |
+| `activity_logs_screen.dart` | API activity audit (restricted email) |
+| `icons_control_screen.dart` | Toggle home icons per role |
+| `daily_movement_screen.dart` | Daily plan execute/edit/postpone summary |
+| `reports_screen.dart` | Filter legacy daily reports |
+| `salary_deduction_screen.dart` | Salary deduction PDF form |
+| `dashboard_screen.dart` | Demo management dashboard (static mock) |
+
+#### Shared reports & chat
+
+| Screen | Purpose |
+|--------|---------|
+| `workers_report_screen.dart` | Worker counts by filters; PDF |
+| `user_custody_report_screen.dart` | Custody movements; PDF |
+| `attendance_sub_report_screen.dart` | Attendance movements; PDF |
+| `sub_reports_screen.dart` | Hub for sub-reports (**not wired** in current navigation) |
+| `private_chat_screen.dart` | Chat between two fixed admin emails |
+
+### 3.5 `backend/`
+
+| Path | Purpose |
+|------|---------|
+| `server.js` | Express API (111 routes) |
+| `package.json` | `express`, `pg`, `cors`, `dotenv` |
+| `init-db.sql` | Full schema + seed users/projects/materials |
+| `01-create-database.sql` / `00-drop-database.sql` | DB lifecycle utilities |
+| `migrations/*.sql` | Incremental schema (manual apply) |
+| `scripts/*.js`, `*.sql` | Data sync, purge, project-specific seeds |
+| `Dockerfile` | Node 20 Alpine API image |
+| `.env.example` | `DATABASE_URL` / `PG*` template |
+| `README-DATABASE.md` | Arabic DB setup guide |
+
+### 3.6 Platform runners
+
+Standard Flutter multi-platform layout. Build artifacts under `build/` per platform. Android uses adaptive icon from `assets/images/logo.png` (`#1B5E20` background).
 
 ---
 
 ## 4. Features Breakdown
 
-### Authentication and role-based access
-User perspective:
-- Users log in with email and password.
-- The app home menu changes based on user role.
+For each feature: **user perspective** (what people see) and **system perspective** (how it is implemented).
 
-System perspective:
-- Login is handled by `POST /auth/login`.
-- Roles include `site_engineer`, `site_engineer_manager`, `app_admin`, and `accountant`.
-- Session data is persisted locally and restored on next launch.
+### 4.1 Authentication & session
 
-### Attendance management
-User perspective:
-- Site engineers record attendance and departure events.
-- Supervisors/managers can review attendance reports.
+| | |
+|---|---|
+| **User** | Log in with email/password; session persists; on refresh, returns to last screen when possible. |
+| **System** | `POST /auth/login`; `auth_persistence` stores `UserModel`; API mode re-validates via `/users/by-email`; `SystemLockWatch` enforces maintenance mode. |
 
-System perspective:
-- Attendance is stored through `/attendance` endpoints.
-- Geolocation support is available through `geolocator`.
+### 4.2 System maintenance lock
 
-### Daily reports
-User perspective:
-- Engineers complete a multi-step daily report with work summary, materials, expenses, and attachments.
+| | |
+|---|---|
+| **User** | Admin toggles lock; other users see maintenance message and cannot use the app (live sessions signed out). |
+| **System** | `app_settings.system_locked`; `GET/PUT /system-lock`; bypass for `mouhammedhelal@gmail.com`; HTTP 423 on login when locked. |
 
-System perspective:
-- Reports are stored through `POST /daily-reports`.
-- Expenses may affect engineer balance.
-- Materials may trigger stock deductions and ledger entries.
+### 4.3 Configurable home screen
 
-### Detailed reports
-User perspective:
-- Engineers can create structured reports with multiple work lines, phases, contractor allocations, worker counts, and optional financial entries.
+| | |
+|---|---|
+| **User** | Icon grid on home; long-press drag to reorder (per user); admin can hide icons per role. |
+| **System** | `IconVisibilityService.roleIcons`; `user_home_icon_orders`; `/home-icons-visibility`, `/users/:id/home-icon-order`; `ReorderableHomeScreen` + `HomeIconBuilder`. |
 
-System perspective:
-- Stored in `detailed_reports` and `detailed_report_lines`.
-- Supports project-linked or custom project-name reporting.
-- Supports attachments and expense tracking.
+### 4.4 Attendance
 
-### Admin project and structure management
-User perspective:
-- Admin users manage projects, zones, buildings, units, materials, contractors, supervisors, and users.
-- Admin can define project location trees and warehouse structures.
+| | |
+|---|---|
+| **User** | Engineer records arrival/departure with project, notes, and map location. Managers view/filter reports and export PDF. |
+| **System** | `attendance_records`; `POST /attendance` notifies managers; `geolocator` + `url_launcher` for maps; `location_service.dart`. |
 
-System perspective:
-- CRUD flows are implemented through dedicated backend endpoint groups and mirrored in Flutter admin screens.
+### 4.5 Work plans (today / tomorrow)
 
-### Warehouse and stock workflows
-User perspective:
-- Users manage project stock, assign materials to locations, and perform site withdrawals.
+| | |
+|---|---|
+| **User** | Engineer views today's assigned plan; plans tomorrow with lines (contractor, location, workers, phases). Can confirm, edit, or **postpone** with reason, reopen date, and fine suggestion. |
+| **System** | Plans stored as `executed_plans` with `plan_json`; statuses `confirmed` \| `confirmed_edited` \| `postponed`; `postpone_reasons` catalog; SEM resolves fines via `/executed-plans/:id/sem-fine-resolution`; notifications to SEM/OM. |
 
-System perspective:
-- Stock is tracked through `project_stock` and `project_stock_ledger`.
-- Location-level allocation is tracked through `location_materials`.
-- One-time site withdrawal is tracked through `location_withdrawal`.
+### 4.6 Operation reports
 
-### Finance and custody
-User perspective:
-- Accountants and managers can inspect engineer balances, register custody, and review finance reports.
+| | |
+|---|---|
+| **User** | Engineer submits inspection/status/damage reports with photos; managers track completion. |
+| **System** | `operation_reports_screen.dart` + `operation_reports_tracking_screen.dart`; `OperationReportsStore` for local tracking state; animated home card for quick access. |
 
-System perspective:
-- Balance and custody flows use `/engineer-balance`, `/custody`, and `/balance-movement`.
-- Expense entries in reports can automatically reduce balance.
+### 4.7 Detailed daily report ("التقرير اليومي")
 
-### Activity logging
-User perspective:
-- Authorized admin can inspect operational activity.
+| | |
+|---|---|
+| **User** | Multi-line report: project or custom name, work sites from `project_locations`, contractors, multiple **phases per site** (worker count can copy from previous phase), optional attachments and expenses. |
+| **System** | `detailed_reports` + `detailed_report_lines`; `POST /detailed-reports` deducts expenses from `engineer_balance`; `workers_count >= 0`; aggregated views join withdrawals. |
 
-System perspective:
-- Backend middleware writes request activity metadata into `activity_logs`.
+> **Reporting note:** When aggregating contractor worker counts, do not sum line-level `workers_count` across phases for the same crew — use max-per-site or count crew once per policy.
 
-### PDF/export/reporting
-User perspective:
-- Users can generate printable or shareable reports.
+### 4.8 Legacy daily report wizard
 
-System perspective:
-- Implemented using `pdf`, `printing`, and `share_plus`.
+| | |
+|---|---|
+| **User** | Three-step flow (basics → materials → expenses) — not on current home icons. |
+| **System** | `daily_reports` table; `POST /daily-reports` deducts expenses and materials from stock + ledger; reachable via saved route `daily-report`. |
+
+### 4.9 Finances & custody
+
+| | |
+|---|---|
+| **User** | Accountant/manager views balances, records custody handover, add/withdraw movements; engineers see own finances; PDF exports. |
+| **System** | `engineer_balance`, `engineer_custody` (with `movement_type`, `document_path`); `/engineer-balance`, `/custody`, `/balance-movement`. |
+
+### 4.10 Project structure (admin)
+
+| | |
+|---|---|
+| **User** | Admin maintains projects, zones, buildings, units, supervisors, contractors, building materials, cutlists. |
+| **System** | CRUD endpoints for each entity; cascade rules on project delete (stock, locations, zones). |
+
+### 4.11 Project locations tree
+
+| | |
+|---|---|
+| **User** | Admin builds folder/work_site tree used in detailed reports and warehouse. |
+| **System** | `project_locations` (`parent_id`, `type`, `display_order`); used by detailed report lines and location materials. |
+
+### 4.12 Project warehouse & stock
+
+| | |
+|---|---|
+| **User** | Admin sets project-level stock; structures materials per sub-location and phase (`first_fix`, `second_fix`); engineers withdraw with dispatch/delivery documents. |
+| **System** | `project_stock`, `project_stock_ledger`; `location_materials`, `location_withdrawal`; `project_warehouse_loading.dart` indexes by `locationId_phase`. |
+
+### 4.13 Withdrawal request workflow
+
+| | |
+|---|---|
+| **User** | Engineer requests withdrawal → SEM and OM each approve/reject → engineer performs physical withdrawal → optional fulfill marker. Badge on home for pending actions. |
+| **System** | `withdrawal_requests` with `sem_status`, `om_status`, `overall_status`; `/withdrawal-requests/*`; notifications on state changes; `POST /location-withdrawal` can auto-fulfill approved request. |
+
+### 4.14 IR / MIR uploads
+
+| | |
+|---|---|
+| **User** | Engineer uploads MIR/IR files tied to project, location, phase; managers view; primary admin can delete. |
+| **System** | `ir_mir_uploads` (base64 in DB); `/ir-mir/uploads`; `IrMirUploadModel`. |
+
+### 4.15 Notifications
+
+| | |
+|---|---|
+| **User** | Bell icon with unread count; list of events (attendance, withdrawals, plan postpone, etc.). |
+| **System** | `notifications` table; inserted by server on domain events; `/notifications`, `/notifications/unread-count`, mark read. |
+
+### 4.16 Private admin chat
+
+| | |
+|---|---|
+| **User** | Two designated emails can exchange messages. |
+| **System** | `private_chat_messages`; `/private-chat/messages`; restricted to Shams ↔ primary admin pair. |
+
+### 4.17 Reporting & PDF export
+
+| | |
+|---|---|
+| **User** | Many screens export/share PDF reports (attendance, custody, contractors, plans, fines, etc.). |
+| **System** | `pdf`, `printing`, `share_plus`; `lib/utils/pdf_share.dart` with IO/stub conditional import. |
+
+### 4.18 Activity audit
+
+| | |
+|---|---|
+| **User** | Primary admin views filtered API activity log. |
+| **System** | Middleware on `res.finish` → `activity_logs`; `GET /activity-logs` (email-gated). |
+
+### 4.19 Materials catalog & display order
+
+| | |
+|---|---|
+| **User** | Materials appear in consistent priority order (Terrace Zayed WPC/ALU first, then others). |
+| **System** | `lib/data/materials_display.dart` — `priorityMaterialNames`, `sortMaterialsForDisplay()`; seeds in `init-db.sql` and migration `012_terrace_zayed_materials_and_stock.sql`. |
 
 ---
 
 ## 5. User Flow
 
-### Primary flow
-1. The app starts and initializes Firebase plus storage selection.
-2. The app restores the last stored user session.
-3. In API mode, the user is validated against backend data.
-4. If no valid session exists, the user logs in.
-5. The user lands on a role-specific home screen.
-6. The user performs relevant tasks:
-   - Site engineer: attendance, daily reports, detailed reports, stock withdrawal.
-   - Manager: report review and custody oversight.
-   - Accountant: finance and balance operations.
-   - Admin: data and structure management.
-7. The user can later review, filter, print, or share reports.
-8. The app restores the last route on the next launch when possible.
+### 5.1 Application bootstrap
 
-### Example engineer workflow
-1. Log in.
-2. Record attendance.
-3. Open assigned project data.
-4. Submit a daily report or detailed report.
-5. Withdraw materials from an assigned work-site if needed.
-6. Manager/accountant reviews financial impact and reporting output.
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant App as Flutter App
+  participant Store as getStorage()
+  participant API as Backend
+
+  U->>App: Launch
+  App->>App: Firebase + Hive + initStorage()
+  App->>App: getStoredUser()
+  alt API mode and user exists
+    App->>Store: validate user
+    Store->>API: GET /users/by-email
+  end
+  alt no valid session
+    App->>U: LoginScreen
+  else authenticated
+    App->>App: SystemLockWatch
+    App->>App: restore last route or HomeScreen
+  end
+```
+
+### 5.2 Site engineer — typical day
+
+1. **Login** → home icon grid (personal order if saved).
+2. **Attendance** — check-in with GPS and project.
+3. **Today work plan** — review plan; confirm, edit, or postpone (if postpone: reason + reopen date + fine target).
+4. **Detailed report** — enter work lines per site/phase/contractor; attachments; finances screen for expenses.
+5. **Operation report** (if required) — inspection/damage with photos.
+6. **Withdrawal** — request materials for location+phase → wait for SEM+OM approval → withdraw with documents → stock deducted.
+7. **IR/MIR** — upload documents for completed work sites.
+8. **Logout** or leave app (route saved for next launch).
+
+### 5.3 Project manager — typical day
+
+1. Login → review **notification badge** and **withdrawal/postpone action count**.
+2. **Pending withdrawal requests** — approve or reject (SEM side).
+3. **Pending postpone fine actions** — set fine target, amount, or no-fine reason.
+4. **Work plan tracking report** — filter engineers/projects/dates.
+5. **Operation reports tracking** — monitor engineer submissions.
+6. **Aggregated detailed daily report** — review combined field data.
+7. **Attendance reports** — review/export PDF.
+8. **Warehouses view** — read-only stock after withdrawals.
+
+### 5.4 Operation manager
+
+Same as manager for withdrawals and tracking, plus **postpone fines report** with date/engineer/project/contractor filters and PDF export.
+
+### 5.5 Accountant
+
+1. Login → **Custody** or **Finance** icons only.
+2. Filter by user and period → review movements → export PDF.
+3. Add balance or record custody handover.
+
+### 5.6 App admin
+
+1. Login → extended icon set including **Admin dashboard**, **Project structure**, **Daily movement**, **Activity logs** (if email allowed).
+2. CRUD master data via dashboard links.
+3. Toggle **system lock** when deploying maintenance.
+4. Optional: **Icons control** — hide features per role without redeploying.
+
+### 5.7 Route persistence
+
+- `route_persistence.dart` saves route name on navigation (`pushAndSaveRoute`).
+- On cold start, `getScreenForRoute()` rebuilds deep-linked screen with back → home.
+- Supported routes include: `attendance`, `detailed-report`, `today-work-plan`, `admin-dashboard`, `operation-reports-tracking`, etc. (see `route_restore.dart`).
 
 ---
 
 ## 6. API / Backend Integration
 
-### Backend stack
-- Node.js
-- Express
-- PostgreSQL via `pg`
-- CORS + JSON API
+### 6.1 Stack
 
-### Root and system endpoints
-- `GET /`
-- `GET /system-lock`
-- `PUT /system-lock`
+- **Runtime:** Node.js (Docker: Node 20 Alpine)
+- **Framework:** Express 4 + `cors` + JSON body (10 MB limit)
+- **DB client:** `pg` with connection pool
+- **Config:** `dotenv` from `backend/.env`
 
-### Authentication
-- `POST /auth/login`
+### 6.2 Environment variables
 
-### Users
-- `GET /users/by-email`
-- `GET /users`
-- `GET /users/site-engineers`
-- `POST /users`
-- `PUT /users/:id`
-- `DELETE /users/:id`
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | Full connection string (Neon: include SSL) |
+| `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | Used when `DATABASE_URL` unset |
+| `PORT` | API listen port (default `3000`) |
 
-### Projects and hierarchy
-- `GET /projects`
-- `POST /projects`
-- `PUT /projects/:id`
-- `DELETE /projects/:id`
-- `GET /project-locations`
-- `POST /project-locations`
-- `PUT /project-locations/:id`
-- `DELETE /project-locations/:id`
-- `GET /zones`
-- `POST /zones`
-- `PUT /zones/:id`
-- `DELETE /zones/:id`
-- `GET /buildings`
-- `POST /buildings`
-- `PUT /buildings/:id`
-- `DELETE /buildings/:id`
-- `GET /units`
-- `POST /units`
-- `PUT /units/:id`
-- `DELETE /units/:id`
+SSL auto-enabled when URL contains `sslmode=require` or `neon.tech`.
 
-### Attendance
-- `POST /attendance`
-- `GET /attendance`
-- `GET /attendance/by-user/:userId`
-- `DELETE /attendance/:id`
+### 6.3 Complete endpoint catalog (111 routes)
 
-### Materials and stock
-- `GET /materials`
-- `GET /materials/with-ids`
-- `POST /materials`
-- `PUT /materials/:id`
-- `DELETE /materials/:id`
-- `GET /project-stock`
-- `POST /project-stock`
-- `PUT /project-stock/:id`
-- `DELETE /project-stock/:id`
-- `POST /project-stock-ledger`
-- `GET /project-stock-ledger`
+#### Health & authentication
 
-### Daily reports
-- `POST /daily-reports`
-- `GET /daily-reports`
-- `DELETE /daily-reports/:id`
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | API health/info |
+| POST | `/auth/login` | Login; 423 if system locked |
 
-### Detailed reports and phases
-- `GET /work-phases`
-- `POST /detailed-reports`
-- `GET /detailed-reports`
-- `DELETE /detailed-reports/:id`
+#### System & UI configuration
 
-### Supervisors and contractors
-- `GET /supervisors`
-- `POST /supervisors`
-- `PUT /supervisors/:id`
-- `DELETE /supervisors/:id`
-- `GET /contractors`
-- `POST /contractors`
-- `PUT /contractors/:id`
-- `DELETE /contractors/:id`
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/system-lock` | Read maintenance flag |
+| PUT | `/system-lock` | Set lock (primary admin) |
+| GET | `/home-icons-visibility` | Per-role icon visibility JSON |
+| PUT | `/home-icons-visibility/:role` | Update visibility for role |
+| GET | `/users/:id/home-icon-order` | User icon order |
+| PUT | `/users/:id/home-icon-order` | Save icon order |
 
-### Finance and custody
-- `GET /engineer-balance/:userId`
-- `POST /engineer-balance`
-- `POST /custody`
-- `POST /balance-movement`
-- `GET /custody`
+#### Users
 
-### Location materials and withdrawals
-- `GET /location-materials`
-- `POST /location-materials`
-- `PUT /location-materials/:id`
-- `DELETE /location-materials/:id`
-- `GET /location-withdrawal`
-- `POST /location-withdrawal`
-- `DELETE /location-withdrawal`
-- `GET /location-withdrawals-for-period`
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/users/by-email` | Lookup by email |
+| GET | `/users` | List users |
+| GET | `/users/site-engineers` | Engineers only |
+| POST | `/users` | Create (default password `0000`) |
+| PUT | `/users/:id` | Update |
+| DELETE | `/users/:id` | Delete |
 
-### Audit
-- `GET /activity-logs`
+#### Projects & spatial hierarchy
 
-### Frontend-backend data flow
-- Screen action in Flutter.
-- Call into `ApiStorageService`.
-- HTTP request to backend.
-- Backend route applies validations and business rules.
-- Data stored in PostgreSQL.
-- JSON mapped back into Dart models and rendered in UI.
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST | `/projects` | List/create |
+| PUT/DELETE | `/projects/:id` | Update/delete |
+| GET/POST | `/project-locations` | Location tree |
+| PUT/DELETE | `/project-locations/:id` | Update/delete location |
+| GET/POST/PUT/DELETE | `/zones`, `/zones/:id` | Zones |
+| GET/POST/PUT/DELETE | `/buildings`, `/buildings/:id` | Buildings |
+| GET/POST/PUT/DELETE | `/units`, `/units/:id` | Units |
+| GET/POST/PUT/DELETE | `/building-materials`, `.../:id` | Building tashweenat |
+| GET/POST/DELETE | `/building-cutlists`, `.../:id` | Cutlist images |
+
+#### Attendance
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/attendance` | Create; notifies managers |
+| GET | `/attendance` | List (filters) |
+| GET | `/attendance/by-user/:userId` | Per user |
+| DELETE | `/attendance/:id` | Delete |
+
+#### Notifications & chat
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/notifications` | Inbox for userId |
+| GET | `/notifications/unread-count` | Badge count |
+| PUT | `/notifications/:id/read` | Mark read |
+| GET/POST | `/private-chat/messages` | Restricted chat |
+
+#### IR / MIR
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/ir-mir/uploads` | List (filters) |
+| POST | `/ir-mir/uploads` | Upload base64 payload |
+| DELETE | `/ir-mir/uploads/:id` | Delete |
+
+#### Materials & reports
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST/PUT/DELETE | `/materials`, `/materials/:id` | Catalog |
+| GET | `/materials/with-ids` | With database ids |
+| POST/GET/DELETE | `/daily-reports` | Legacy daily reports |
+| GET | `/work-phases` | Standard phases |
+| POST/GET | `/detailed-reports` | Create/list detailed |
+| PUT | `/detailed-reports/:id` | Full update |
+| PUT | `/detailed-reports/:id/expenses` | Expenses only |
+| DELETE | `/detailed-reports/:id` | Delete |
+
+#### Finance
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/engineer-balance/:userId` | Balance |
+| POST | `/engineer-balance` | Set balance |
+| POST | `/custody` | Custody handover |
+| POST | `/balance-movement` | Log movement |
+| GET | `/custody` | History |
+
+#### Supervisors & contractors
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST/PUT/DELETE | `/supervisors`, `/supervisors/:id` | Supervisors |
+| GET/POST/PUT/DELETE | `/contractors`, `/contractors/:id` | Contractors |
+
+#### Stock & warehouse
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET/POST/PUT/DELETE | `/project-stock`, `/project-stock/:id` | Project stock |
+| POST/GET | `/project-stock-ledger` | Ledger append/query |
+| GET/POST/PUT/DELETE | `/location-materials`, `.../:id` | Staged materials |
+| GET | `/location-withdrawal` | Withdrawal by location |
+| GET | `/location-withdrawals-for-period` | Period report |
+| POST | `/location-withdrawal` | Execute withdrawal |
+| DELETE | `/location-withdrawal` | Reverse (admin) |
+
+#### Withdrawal requests
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/withdrawal-requests` | Engineer creates request |
+| GET | `/withdrawal-requests/for-engineer-project` | Engineer's open requests |
+| GET | `/withdrawal-requests/open` | Open for location+phase |
+| GET | `/withdrawal-requests/action-count` | Badge (SEM includes fines) |
+| GET | `/withdrawal-requests/pending-actions` | SEM/OM queue |
+| PUT | `/withdrawal-requests/:id/respond` | Approve/reject |
+| PUT | `/withdrawal-requests/:id/fulfill` | Mark fulfilled |
+
+#### Executed work plans
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/executed-plans` | Confirm/edit/postpone |
+| GET | `/executed-plans/pending-sem-fine-actions` | SEM fine queue |
+| GET | `/executed-plans/postpone-fines-report` | Analytics (OM/admin) |
+| POST | `/executed-plans/:id/sem-fine-resolution` | SEM fine decision |
+| GET | `/executed-plans/latest` | Latest by sourcePlanId+user |
+| GET | `/executed-plans/postponed-reopens` | Plans reopening on date |
+| GET | `/executed-plans/daily-summary` | Admin daily counts |
+| GET | `/executed-plans/contractor-report` | Worker stats from plans |
+| GET | `/postpone-reasons` | Reason catalog |
+
+#### Audit
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/activity-logs` | Filtered audit (primary admin email) |
+
+### 6.4 Frontend ↔ backend data flow
+
+```
+UI event
+  → getStorage().<method>(...)
+    → ApiStorageService: http.get/post/put/delete
+      → Express route handler
+        → pool.query(...)  // business rules inline
+          → JSON response
+    → Model.fromMap(json)
+  → setState / FutureBuilder rebuild
+```
+
+**Side effects enforced server-side:**
+
+| Action | Side effect |
+|--------|-------------|
+| Create daily report | Deduct expenses from balance; deduct materials from stock + ledger |
+| Create detailed report | Deduct expenses from balance |
+| Location withdrawal | Deduct stock; ledger entry; may fulfill withdrawal request |
+| Postpone work plan | Insert notification for SEM |
+| SEM fine resolution | Insert notification for OM |
+
+### 6.5 Roles in API seed data
+
+`site_engineer`, `site_engineer_manager`, `operation_manager`, `app_admin`, `accountant`
 
 ---
 
 ## 7. Data Models
 
-### Main backend entities
-- `users`
-- `projects`
-- `app_settings`
-- `attendance_records`
-- `materials`
-- `daily_reports`
-- `zones`
-- `buildings`
-- `units`
-- `supervisors`
-- `contractors`
-- `project_locations`
-- `project_stock`
-- `project_stock_ledger`
-- `building_materials`
-- `building_cutlist_images`
-- `engineer_balance`
-- `engineer_custody`
-- `work_phases`
-- `detailed_reports`
-- `detailed_report_lines`
-- `location_materials`
-- `location_withdrawal`
-- `activity_logs`
+### 7.1 PostgreSQL entities (primary)
 
-### Main Flutter models
-- `UserModel`
-- `ProjectModel`
-- `ZoneModel`
-- `BuildingModel`
-- `UnitModel`
-- `ProjectLocationModel`
-- `AttendanceRecordModel`
-- `DailyReportData`
-- `DetailedReportModel`
-- `WorkPhaseModel`
-- `ProjectStockModel`
-- `ProjectStockLedgerModel`
-- `LocationMaterialModel`
-- `LocationWithdrawalModel`
-- `LocationWithdrawalForPeriodModel`
-- `SupervisorModel`
-- `ContractorModel`
-- `BuildingMaterialModel`
-- `BuildingCutlistModel`
-- `ActivityLogModel`
+| Table | Description |
+|-------|-------------|
+| `users` | id, name, email, role, password |
+| `app_settings` | key-value (`system_locked`, `home_icons_visibility`) |
+| `projects` | Project master |
+| `attendance_records` | Check-in/out events |
+| `notifications` | In-app notifications per recipient |
+| `private_chat_messages` | Admin-manager chat |
+| `materials` | Global material name catalog |
+| `daily_reports` | Legacy daily reports (JSON columns for materials/expenses/contractors) |
+| `project_locations` | Tree: folder \| work_site |
+| `zones`, `buildings`, `units` | Classic hierarchy |
+| `supervisors`, `contractors` | Reference lists |
+| `project_stock` | Quantity per project+material |
+| `project_stock_ledger` | Stock movement audit |
+| `building_materials`, `building_cutlist_images` | Per-building data |
+| `engineer_balance` | Current balance per engineer |
+| `engineer_custody` | Custody/movement history |
+| `work_phases` | Standard phase names |
+| `detailed_reports` | Report header |
+| `detailed_report_lines` | Lines: contractor, location, phase, workers_count, zone/building refs |
+| `location_materials` | Materials at location + phase |
+| `location_withdrawal` | One withdrawal record per location+phase |
+| `withdrawal_requests` | Approval workflow state |
+| `executed_plans` | Work plan executions + postpone/fine fields |
+| `postpone_reasons` | System and custom postpone reasons |
+| `ir_mir_uploads` | File metadata + base64 payload |
+| `user_home_icon_orders` | Per-user icon order JSON |
+| `activity_logs` | API request audit trail |
 
-### Schema evolution
-The backend schema has evolved through explicit migrations, including:
-- engineer custody movement tracking
-- daily report contractor JSON support
-- detailed report tables
-- project location hierarchy
-- detailed report summary and location updates
-- project-name support for detailed reports
-- location material and withdrawal tables
-- contractor optionality and phase refinement
+### 7.2 Flutter models (`lib/models/`)
+
+| Model | Maps to |
+|-------|---------|
+| `UserModel` | users + capability getters |
+| `ProjectModel`, `ZoneModel`, `BuildingModel`, `UnitModel` | Spatial hierarchy |
+| `ProjectLocationModel` | project_locations tree |
+| `AttendanceRecordModel` | attendance_records |
+| `DailyReportData` (+ nested types) | daily_reports |
+| `DetailedReportModel`, lines, attachments | detailed_reports |
+| `WorkPhaseModel` | work_phases |
+| `SupervisorModel`, `ContractorModel` | Reference data |
+| `ProjectStockModel`, `ProjectStockLedgerModel` | Warehouse |
+| `LocationMaterialModel`, `LocationWithdrawalModel`, `LocationWithdrawalForPeriodModel` | Site warehouse |
+| `WithdrawalRequestModel` | withdrawal_requests |
+| `NotificationItemModel` | notifications |
+| `PrivateChatMessageModel` | private_chat_messages |
+| `IrMirUploadModel` | ir_mir_uploads |
+| `ActivityLogModel` | activity_logs |
+| `PendingPostponeFineActionModel`, `PostponeFineReportRowModel` | Plan postpone UI |
+| `BuildingMaterialModel`, `BuildingCutlistModel` | Building-level data |
+
+### 7.3 Schema evolution
+
+**Automatic (server startup `ensure*`):** activity_logs, executed_plans columns, postpone_reasons, notifications, withdrawal_requests, ir_mir_uploads, user_home_icon_orders, work_phases, project_locations, detailed report tables, location warehouse tables, password column.
+
+**Manual migrations (`backend/migrations/`):**
+
+| File | Change |
+|------|--------|
+| `001_add_engineer_custody_movement_type.sql` | Custody movement types |
+| `002_add_daily_reports_contractors_json.sql` | contractors_json |
+| `002_user_home_icon_order.sql` | user_home_icon_orders |
+| `003_detailed_reports.sql` | Detailed report tables |
+| `004_project_locations.sql` | Location tree |
+| `005_detailed_reports_summary_and_location.sql` | Summary + location on lines |
+| `006_detailed_reports_project_name.sql` | Custom project name |
+| `007_location_materials_and_withdrawal.sql` | Site warehouse |
+| `008_detailed_report_phases_and_contractor_nullable.sql` | Phase + nullable contractor |
+| `008_ir_mir_uploads.sql` | IR/MIR table |
+| `009_executed_plans_postpone_reopen_date.sql` | postpone_reopen_date |
+| `011_allow_zero_workers_count.sql` | workers_count >= 0 |
+| `012_terrace_zayed_materials_and_stock.sql` | Terrace Zayed WPC/ALU stock seed |
 
 ---
 
 ## 8. State Management
 
-### Current pattern
-- The app primarily uses local widget state with `StatefulWidget`.
-- Async screen loading is handled through direct service calls and `FutureBuilder`.
-- No centralized state framework such as Riverpod, BLoC, or Provider appears to be the primary architecture.
+### 8.1 Pattern summary
 
-### Session and route persistence
-- User session is persisted with SharedPreferences.
-- Last visited route is also persisted and restored.
-- `main.dart` uses an auth gate plus route restore wrapper to avoid unnecessary navigation flash.
+The app does **not** use Provider, Riverpod, BLoC, or GetX as a global architecture.
 
-### Storage state modes
-- API mode is the central multi-user mode.
-- Web local storage mode is a browser-based fallback.
-- SQLite mode is a local-device fallback.
+| Mechanism | Usage |
+|-----------|--------|
+| `StatefulWidget` + `setState` | Primary UI state on ~60 screens |
+| `FutureBuilder` | Auth gate loading in `main.dart` |
+| `getStorage()` singleton | All domain data reads/writes |
+| `SharedPreferences` | Auth session, routes, web entity storage, operation reports store |
+| `Hive` | `LocalCacheService` with TTL (e.g. 5 min cache on daily movement) |
+| `ValueNotifier` | `OperationReportsStore.reports` only |
+| `RouteObserver` + `RouteAware` | `HomeScreen` refreshes on pop |
+| `Timer.periodic` | Notifications poll, system lock poll |
+| Imperative `Navigator.push` | No `go_router`; route names as strings |
+
+### 8.2 Session & navigation state
+
+| Component | Data persisted |
+|-----------|----------------|
+| `auth_persistence.dart` | Current `UserModel` JSON |
+| `route_persistence.dart` | Last route name string |
+| `route_restore.dart` | Maps route → widget constructor |
+| `last_project_persistence.dart` | Last selected project id |
+
+### 8.3 Home screen state
+
+1. Load `home_icons_visibility` from API/settings.
+2. Load user's `home_icon_order` from API/local.
+3. `resolveHomeIconOrder()` merges saved order with eligible icons for role + visibility.
+4. `ReorderableHomeScreen` persists new order on drag end.
+
+### 8.4 Storage mode implications
+
+| Mode | State authority |
+|------|-----------------|
+| API | PostgreSQL is source of truth; client is thin |
+| SQLite / Web | Local JSON/SQLite is source of truth; no multi-user sync |
+
+Always confirm `apiBaseUrl` when testing multi-user workflows.
 
 ---
 
 ## 9. External Services
 
-### Third-party integrations and packages
-- Firebase Core
-- Cloud Firestore
-- Firebase Auth
-- Geolocator
-- HTTP client
-- SQLite via `sqflite`
-- SharedPreferences
-- PDF generation via `pdf`
-- Printing via `printing`
-- File sharing via `share_plus`
-- File picker via `file_picker`
-- URL launcher via `url_launcher`
-- Flutter localization delegates
+### 9.1 Packages (`pubspec.yaml`)
 
-### Observed integration usage
-- Firebase is initialized at startup.
-- Geolocation is used in attendance-related flows.
-- PDF and sharing packages are used in reporting/finance export flows.
-- API communication is handled through the `http` package.
+| Package | Integration |
+|---------|-------------|
+| `flutter` + `flutter_localizations` | UI; Arabic (`ar`) default locale |
+| `http` | REST API client |
+| `sqflite`, `path`, `path_provider` | SQLite offline mode |
+| `shared_preferences` | Session, web storage, prefs |
+| `hive`, `hive_flutter` | TTL response cache |
+| `geolocator` | Attendance GPS |
+| `url_launcher` | Open map links from coordinates |
+| `pdf`, `printing`, `share_plus` | Report PDF generation and sharing |
+| `intl` | Date/number formatting |
+| `file_picker` | Attachments (reports, IR/MIR, custody docs) |
+| `image` | Image compression before upload |
+| `firebase_core`, `cloud_firestore`, `firebase_auth` | Initialized in `main.dart`; **not used elsewhere in `lib/`** currently |
+| `cupertino_icons` | Icon font |
+
+### 9.2 Firebase
+
+- `Firebase.initializeApp()` in `main.dart` with non-fatal error handling (web may block `gstatic`).
+- Dependencies present for future auth/Firestore; **all business data flows through REST + PostgreSQL** in production configuration.
+
+### 9.3 PostgreSQL hosting
+
+- Designed for **Neon Serverless Postgres** or self-hosted Postgres.
+- `DATABASE_URL` with SSL for cloud deployments.
+- Docker Compose optional local Postgres via profile `local-db`.
+
+### 9.4 No other third-party SaaS
+
+Maps are opened via URL launcher (not embedded Maps SDK billing). No push notification service (in-app polling only). No Stripe/payment integration.
 
 ---
 
 ## 10. Environment Setup
 
-### Prerequisites
-- Flutter SDK
-- Node.js
-- PostgreSQL
+### 10.1 Prerequisites
 
-### Local development flow
-1. Create the PostgreSQL application database, typically `wood_more`.
-2. Run `backend/init-db.sql`.
-3. Start the backend:
-   - `cd backend`
-   - `npm install`
-   - `node server.js`
-4. Configure API URL:
-   - `web/config.json` for web
-   - `assets/config.json` for desktop/mobile
-5. Start Flutter app:
-   - `flutter pub get`
-   - `flutter run -d chrome`
-   - or `flutter run -d windows`
+| Tool | Version / notes |
+|------|-----------------|
+| Flutter SDK | Dart `^3.11.0` per `pubspec.yaml` |
+| Node.js | LTS recommended |
+| PostgreSQL | 16+ (local, Docker, or Neon) |
 
-### Docker-based flow
-1. Run `docker compose up -d --build`
-2. Stack includes:
-   - PostgreSQL
-   - Backend API
-   - Flutter web app
-3. Web app is exposed at `http://localhost:8080`
+Verify:
 
-### Runtime behavior
-- If `apiBaseUrl` is present, the app uses centralized backend mode.
-- If absent, the app falls back to local persistence.
+```bash
+flutter doctor
+node -v
+npm -v
+```
+
+### 10.2 Database setup
+
+**Option A — Dedicated database (recommended):**
+
+1. Run `backend/01-create-database.sql` as `postgres` superuser.
+2. Connect to database `wood_more`.
+3. Run `backend/init-db.sql`.
+4. Apply any missing files from `backend/migrations/` on existing deployments.
+
+**Option B — Docker local DB:**
+
+```bash
+docker compose --profile local-db up --build
+```
+
+Postgres initializes from mounted `init-db.sql`.
+
+### 10.3 Backend
+
+```bash
+cd backend
+cp .env.example .env   # set DATABASE_URL or PG* vars
+npm install
+node server.js
+```
+
+API listens on **http://localhost:3000** (unless `PORT` overridden).
+
+### 10.4 Flutter client
+
+1. Set API URL:
+
+**Mobile/Desktop** — `assets/config.json`:
+
+```json
+{
+  "apiBaseUrl": "http://localhost:3000"
+}
+```
+
+**Web** — `web/config.json` or root `config.api.json` for Docker.
+
+2. Run:
+
+```bash
+flutter pub get
+flutter run -d chrome
+# or
+flutter run -d windows
+# or connect Android device
+flutter run
+```
+
+### 10.5 Offline / demo mode
+
+Leave `apiBaseUrl` empty:
+
+- Web → seeded users in `WebStorageService`
+- Mobile → SQLite with seeded data in `DatabaseService`
+
+### 10.6 Running tests
+
+```bash
+flutter test
+```
+
+Notable tests: `test/home_icon_order_service_test.dart`, `test/project_warehouse_loading_test.dart`.
 
 ---
 
 ## 11. Deployment Notes
 
-### Build and deployment approach
-- Flutter web is containerized from the root `Dockerfile`.
-- Backend is containerized from `backend/Dockerfile`.
-- `docker-compose.yml` coordinates service startup and database health checks.
+### 11.1 Docker Compose (full stack)
 
-### Operational notes
-- Backend startup includes schema guard functions to reduce failure from missing tables or columns.
-- Some authorization controls are implemented in UI flow or hardcoded backend checks rather than standardized middleware.
-- Production hardening would benefit from:
-  - token-based auth
-  - centralized authorization middleware
-  - secure secret management
-  - stricter CORS and HTTPS enforcement
-  - structured monitoring/logging
+From repository root:
 
-### Supporting project docs
-- `README.md`
-- `backend/README-DATABASE.md`
-- `DEPLOYMENT_GUIDE.md`
-- `BUILD_SIGN_README.md`
-- `RELEASE_APK_STEPS.md`
+```bash
+# Cloud DB: set DATABASE_URL in backend/.env
+docker compose up --build
 
----
+# Local Postgres:
+docker compose --profile local-db up --build
+```
 
-## Conclusion
+| Service | Port | Role |
+|---------|------|------|
+| `postgres` | 5432 | DB (profile `local-db` only) |
+| `api` | 3000 (internal) | Node API |
+| `app` | 8080 → 80 | Flutter web via nginx |
 
-The `wood_and_more_app` repository is a fairly mature operations platform for construction/site workflows. It combines Flutter-based multi-role UI, a flexible storage strategy, and a PostgreSQL-backed REST API to support attendance, reporting, stock control, finance, and administration in a single system. The architecture favors pragmatic feature growth with direct service access and route-driven UI organization, while maintaining enough backend structure to support centralized deployment and future scaling.
-# Wood & More Application - Full Technical Documentation
+Web app: **http://localhost:8080**  
+API config injected via `config.api.json` volume mount.
 
-## 1. Project Overview
+### 11.2 Backend container
 
-### What the application does
-`wood_and_more_app` is a role-based construction operations platform for Wood & More teams. It supports field execution tracking, attendance, daily and detailed reports, project structure management, warehouse and material workflows, and financial custody and balance operations.
+- `backend/Dockerfile` — Node 20 Alpine; copies `server.js` + `package.json` only.
+- SQL/migrations **not** in image — apply schema separately on cloud DB.
+- Restart API after `server.js` changes.
 
-The system consists of:
-- A Flutter client in `lib/` for web, desktop, and mobile.
-- A Node.js + Express backend in `backend/` with PostgreSQL persistence.
-- A configurable storage strategy that can switch between API mode and local storage mode based on runtime configuration.
+### 11.3 Flutter web container
 
-### Core purpose and business logic
-The app digitizes day-to-day site operations and internal administration:
-- Manage users, projects, locations, zones, buildings, units, contractors, supervisors, and materials.
-- Track attendance for site engineers.
-- Capture daily and detailed field reports.
-- Track warehouse stock, material allocation, and withdrawal movements.
-- Track engineer balances, custody, and finance-related records.
-- Generate printable and shareable operational reports.
-- Maintain an API-level activity log for traceability.
+- Root `Dockerfile` — multi-stage Flutter build + nginx.
+- `nginx.standalone.conf` available for standalone serving patterns.
 
----
+### 11.4 Android APK
 
-## 2. System Architecture
+See **`APK.md`**:
 
-### High-level architecture
-The application follows a client-service-database architecture:
+```bash
+flutter build apk --release
+# Output: build/app/outputs/flutter-apk/app-release.apk
+```
 
-1. Flutter presentation layer
-   - Screen-driven UI built with Flutter Material widgets.
-   - Arabic-first localization and role-specific navigation.
+Rebuild after every `assets/config.json` URL change (bundled at compile time).
 
-2. Storage abstraction layer
-   - `lib/services/storage_service.dart` chooses the active persistence implementation at startup:
-     - `ApiStorageService` when `apiBaseUrl` is configured.
-     - `WebStorageService` for web local persistence when no API is configured.
-     - `DatabaseService` for SQLite persistence on desktop/mobile when no API is configured.
+Optional smaller builds:
 
-3. Backend API layer
-   - Express-based REST API in `backend/server.js`.
-   - Handles domain operations for users, projects, reports, stock, finance, and audit logs.
+```bash
+flutter build apk --release --split-per-abi
+```
 
-4. Persistence layer
-   - PostgreSQL schema created via `backend/init-db.sql`.
-   - Incremental schema evolution through `backend/migrations/*.sql`.
-   - Some backend startup guards automatically add missing columns or tables.
+### 11.5 Operational checklist
 
-### How components interact
-- `lib/main.dart` initializes Firebase and the storage layer.
-- The auth gate restores the persisted user and validates it in API mode.
-- UI screens call methods on the active storage implementation.
-- In API mode, Flutter service methods translate screen actions into HTTP requests.
-- The backend applies business rules, persists data, and returns JSON payloads mapped into Dart models.
+| Task | Action |
+|------|--------|
+| Schema update on Neon | Run relevant `migrations/*.sql` in SQL editor |
+| New backend feature | Deploy `server.js`; restart container/process |
+| New Flutter feature | Rebuild web/APK; bump version in `pubspec.yaml` if publishing |
+| Maintenance window | `PUT /system-lock` or admin dashboard toggle |
+| Verify API mode | Confirm `apiBaseUrl` non-empty in built config |
+
+### 11.6 Known limitations for production
+
+- Plain-text passwords
+- No API-wide authentication token
+- Activity logs restricted to one email
+- Some admin powers hardcoded to `mouhammedhelal@gmail.com`
+- `migrations/` not applied automatically — drift risk if `ensure*` and manual migrations diverge
+- Firebase packages unused — safe to remove or implement later
+
+### 11.7 Related documentation files
+
+| File | Content |
+|------|---------|
+| `README.md` | Windows PostgreSQL + local run |
+| `backend/README-DATABASE.md` | Database setup (Arabic) |
+| `APK.md` | Android release build |
+| `DEPLOYMENT_GUIDE.md` | Deployment guide |
+| `BUILD_SIGN_README.md` | Signing notes |
+| `RELEASE_APK_STEPS.md` | Release steps |
+| `.cursor/rules/reference-data.mdc` | Dropdown data policy |
 
 ---
 
-## 3. Folder Structure Explanation
+## Appendix A — User roles & home icons (reference)
 
-### Top-level folders
-- `lib/`: Main Flutter application source code.
-- `backend/`: Node.js backend, SQL schema, and migrations.
-- `assets/`: App assets and non-web runtime configuration.
-- `web/`: Web entry files and web runtime configuration.
-- `android/`, `ios/`, `windows/`, `linux/`, `macos/`: Flutter platform runner folders.
-- `test/`: Flutter test files.
+Defined in `lib/services/icon_visibility_service.dart`:
 
-### Important root files
-- `pubspec.yaml`: Flutter dependencies, assets, and project metadata.
-- `README.md`: Main setup and local run documentation.
-- `docker-compose.yml`: Full stack orchestration for Postgres, API, and web app.
-- `Dockerfile`: Root container build for the Flutter web application.
-- `BUILD_SIGN_README.md`, `RELEASE_APK_STEPS.md`, `DEPLOYMENT_GUIDE.md`: Deployment/build notes.
+| Role | Example home icons |
+|------|-------------------|
+| `site_engineer` | attendance, today_work_plan, tomorrow_work_plan, engineer_withdraw_materials, engineer_finances, operation_reports, detailed_report, engineer_projects, ir_mir |
+| `site_engineer_manager` | attendance_reports, work_plan_tracking_report, new_icon, operation_reports_tracking, aggregated_detailed_daily, contractor_report, ir_mir, warehouses_view |
+| `operation_manager` | Same as SEM + postpone_fines_reports |
+| `app_admin` | SEM set + daily_movement, reports, admin_project_structure, admin_dashboard, activity_logs, dashboard |
+| `accountant` | accountant_custody, accountant_finance |
 
-### `lib/` structure
-- `main.dart`: Bootstrap, theme, localization, auth gate, route restore logic.
-- `screens/`: UI screens for engineers, managers, accountants, and admins.
-- `services/`: API, SQLite, web storage, persistence helpers, geolocation, route restore.
-- `models/`: Domain models used across the application.
-- `core/`: Theme and route observer support.
-- `utils/`: Cross-platform PDF share helpers.
-- `data/`: Static/default data sources.
-- `firebase_options.dart`: Firebase configuration scaffold.
-
-### `backend/` structure
-- `server.js`: Main REST API and business logic.
-- `init-db.sql`: Core schema and seed data.
-- `migrations/`: Manual SQL migration scripts.
-- `Dockerfile`: Backend service image definition.
-- `README-DATABASE.md`: Database setup guidance.
+Admin-only icon: `icons_control` (when `canManageIconsControl`).
 
 ---
 
-## 4. Features Breakdown
+## Appendix B — Evolution timeline (functional)
 
-### Authentication and role-based access
-User perspective:
-- Users log in with email and password.
-- The app home menu changes based on user role.
-
-System perspective:
-- Login is handled by `POST /auth/login`.
-- Roles include `site_engineer`, `site_engineer_manager`, `app_admin`, and `accountant`.
-- Session data is persisted locally and restored on next launch.
-
-### Attendance management
-User perspective:
-- Site engineers record attendance and departure events.
-- Supervisors/managers can review attendance reports.
-
-System perspective:
-- Attendance is stored through `/attendance` endpoints.
-- Geolocation support is available through `geolocator`.
-
-### Daily reports
-User perspective:
-- Engineers complete a multi-step daily report with work summary, materials, expenses, and attachments.
-
-System perspective:
-- Reports are stored through `POST /daily-reports`.
-- Expenses may affect engineer balance.
-- Materials may trigger stock deductions and ledger entries.
-
-### Detailed reports
-User perspective:
-- Engineers can create structured reports with multiple work lines, phases, contractor allocations, worker counts, and optional financial entries.
-
-System perspective:
-- Stored in `detailed_reports` and `detailed_report_lines`.
-- Supports project-linked or custom project-name reporting.
-- Supports attachments and expense tracking.
-
-### Admin project and structure management
-User perspective:
-- Admin users manage projects, zones, buildings, units, materials, contractors, supervisors, and users.
-- Admin can define project location trees and warehouse structures.
-
-System perspective:
-- CRUD flows are implemented through dedicated backend endpoint groups and mirrored in Flutter admin screens.
-
-### Warehouse and stock workflows
-User perspective:
-- Users manage project stock, assign materials to locations, and perform site withdrawals.
-
-System perspective:
-- Stock is tracked through `project_stock` and `project_stock_ledger`.
-- Location-level allocation is tracked through `location_materials`.
-- One-time site withdrawal is tracked through `location_withdrawal`.
-
-### Finance and custody
-User perspective:
-- Accountants and managers can inspect engineer balances, register custody, and review finance reports.
-
-System perspective:
-- Balance and custody flows use `/engineer-balance`, `/custody`, and `/balance-movement`.
-- Expense entries in reports can automatically reduce balance.
-
-### Activity logging
-User perspective:
-- Authorized admin can inspect operational activity.
-
-System perspective:
-- Backend middleware writes request activity metadata into `activity_logs`.
-
-### PDF/export/reporting
-User perspective:
-- Users can generate printable or shareable reports.
-
-System perspective:
-- Implemented using `pdf`, `printing`, and `share_plus`.
+1. Flutter foundation, roles, SQLite storage  
+2. Attendance + legacy daily reports  
+3. Admin CRUD (projects, zones, buildings, materials)  
+4. Engineer balance, custody, accountant flows  
+5. Project stock + ledger  
+6. `project_locations` + detailed reports + attachments  
+7. Location warehouse + direct withdrawal  
+8. Central PostgreSQL API (`ApiStorageService`)  
+9. System maintenance lock  
+10. Work plans + executed_plans + postpone/fines workflow  
+11. Operation reports + tracking  
+12. Withdrawal request dual approval (SEM + OM)  
+13. Notifications + private chat  
+14. IR/MIR uploads  
+15. `operation_manager` role  
+16. Reorderable home icons + per-role visibility control  
+17. Terrace Zayed materials/stock seed + display priority sorting  
 
 ---
 
-## 5. User Flow
-
-### Primary flow
-1. The app starts and initializes Firebase plus storage selection.
-2. The app restores the last stored user session.
-3. In API mode, the user is validated against backend data.
-4. If no valid session exists, the user logs in.
-5. The user lands on a role-specific home screen.
-6. The user performs relevant tasks:
-   - Site engineer: attendance, daily reports, detailed reports, stock withdrawal.
-   - Manager: report review and custody oversight.
-   - Accountant: finance and balance operations.
-   - Admin: data and structure management.
-7. The user can later review, filter, print, or share reports.
-8. The app restores the last route on the next launch when possible.
-
-### Example engineer workflow
-1. Log in.
-2. Record attendance.
-3. Open assigned project data.
-4. Submit a daily report or detailed report.
-5. Withdraw materials from an assigned work-site if needed.
-6. Manager/accountant reviews financial impact and reporting output.
-
----
-
-## 6. API / Backend Integration
-
-### Backend stack
-- Node.js
-- Express
-- PostgreSQL via `pg`
-- CORS + JSON API
-
-### Root and system endpoints
-- `GET /`
-- `GET /system-lock`
-- `PUT /system-lock`
-
-### Authentication
-- `POST /auth/login`
-
-### Users
-- `GET /users/by-email`
-- `GET /users`
-- `GET /users/site-engineers`
-- `POST /users`
-- `PUT /users/:id`
-- `DELETE /users/:id`
-
-### Projects and hierarchy
-- `GET /projects`
-- `POST /projects`
-- `PUT /projects/:id`
-- `DELETE /projects/:id`
-- `GET /project-locations`
-- `POST /project-locations`
-- `PUT /project-locations/:id`
-- `DELETE /project-locations/:id`
-- `GET /zones`
-- `POST /zones`
-- `PUT /zones/:id`
-- `DELETE /zones/:id`
-- `GET /buildings`
-- `POST /buildings`
-- `PUT /buildings/:id`
-- `DELETE /buildings/:id`
-- `GET /units`
-- `POST /units`
-- `PUT /units/:id`
-- `DELETE /units/:id`
-
-### Attendance
-- `POST /attendance`
-- `GET /attendance`
-- `GET /attendance/by-user/:userId`
-- `DELETE /attendance/:id`
-
-### Materials and stock
-- `GET /materials`
-- `GET /materials/with-ids`
-- `POST /materials`
-- `PUT /materials/:id`
-- `DELETE /materials/:id`
-- `GET /project-stock`
-- `POST /project-stock`
-- `PUT /project-stock/:id`
-- `DELETE /project-stock/:id`
-- `POST /project-stock-ledger`
-- `GET /project-stock-ledger`
-
-### Daily reports
-- `POST /daily-reports`
-- `GET /daily-reports`
-- `DELETE /daily-reports/:id`
-
-### Detailed reports and phases
-- `GET /work-phases`
-- `POST /detailed-reports`
-- `GET /detailed-reports`
-- `DELETE /detailed-reports/:id`
-
-### Supervisors and contractors
-- `GET /supervisors`
-- `POST /supervisors`
-- `PUT /supervisors/:id`
-- `DELETE /supervisors/:id`
-- `GET /contractors`
-- `POST /contractors`
-- `PUT /contractors/:id`
-- `DELETE /contractors/:id`
-
-### Finance and custody
-- `GET /engineer-balance/:userId`
-- `POST /engineer-balance`
-- `POST /custody`
-- `POST /balance-movement`
-- `GET /custody`
-
-### Location materials and withdrawals
-- `GET /location-materials`
-- `POST /location-materials`
-- `PUT /location-materials/:id`
-- `DELETE /location-materials/:id`
-- `GET /location-withdrawal`
-- `POST /location-withdrawal`
-- `DELETE /location-withdrawal`
-- `GET /location-withdrawals-for-period`
-
-### Audit
-- `GET /activity-logs`
-
-### Frontend-backend data flow
-- Screen action in Flutter.
-- Call into `ApiStorageService`.
-- HTTP request to backend.
-- Backend route applies validations and business rules.
-- Data stored in PostgreSQL.
-- JSON mapped back into Dart models and rendered in UI.
-
----
-
-## 7. Data Models
-
-### Main backend entities
-- `users`
-- `projects`
-- `app_settings`
-- `attendance_records`
-- `materials`
-- `daily_reports`
-- `zones`
-- `buildings`
-- `units`
-- `supervisors`
-- `contractors`
-- `project_locations`
-- `project_stock`
-- `project_stock_ledger`
-- `building_materials`
-- `building_cutlist_images`
-- `engineer_balance`
-- `engineer_custody`
-- `work_phases`
-- `detailed_reports`
-- `detailed_report_lines`
-- `location_materials`
-- `location_withdrawal`
-- `activity_logs`
-
-### Main Flutter models
-- `UserModel`
-- `ProjectModel`
-- `ZoneModel`
-- `BuildingModel`
-- `UnitModel`
-- `ProjectLocationModel`
-- `AttendanceRecordModel`
-- `DailyReportData`
-- `DetailedReportModel`
-- `WorkPhaseModel`
-- `ProjectStockModel`
-- `ProjectStockLedgerModel`
-- `LocationMaterialModel`
-- `LocationWithdrawalModel`
-- `LocationWithdrawalForPeriodModel`
-- `SupervisorModel`
-- `ContractorModel`
-- `BuildingMaterialModel`
-- `BuildingCutlistModel`
-- `ActivityLogModel`
-
-### Schema evolution
-The backend schema has evolved through explicit migrations, including:
-- engineer custody movement tracking
-- daily report contractor JSON support
-- detailed report tables
-- project location hierarchy
-- detailed report summary and location updates
-- project-name support for detailed reports
-- location material and withdrawal tables
-- contractor optionality and phase refinement
-
----
-
-## 8. State Management
-
-### Current pattern
-- The app primarily uses local widget state with `StatefulWidget`.
-- Async screen loading is handled through direct service calls and `FutureBuilder`.
-- No centralized state framework such as Riverpod, BLoC, or Provider appears to be the primary architecture.
-
-### Session and route persistence
-- User session is persisted with SharedPreferences.
-- Last visited route is also persisted and restored.
-- `main.dart` uses an auth gate plus route restore wrapper to avoid unnecessary navigation flash.
-
-### Storage state modes
-- API mode is the central multi-user mode.
-- Web local storage mode is a browser-based fallback.
-- SQLite mode is a local-device fallback.
-
----
-
-## 9. External Services
-
-### Third-party integrations and packages
-- Firebase Core
-- Cloud Firestore
-- Firebase Auth
-- Geolocator
-- HTTP client
-- SQLite via `sqflite`
-- SharedPreferences
-- PDF generation via `pdf`
-- Printing via `printing`
-- File sharing via `share_plus`
-- File picker via `file_picker`
-- URL launcher via `url_launcher`
-- Flutter localization delegates
-
-### Observed integration usage
-- Firebase is initialized at startup.
-- Geolocation is used in attendance-related flows.
-- PDF and sharing packages are used in reporting/finance export flows.
-- API communication is handled through the `http` package.
-
----
-
-## 10. Environment Setup
-
-### Prerequisites
-- Flutter SDK
-- Node.js
-- PostgreSQL
-
-### Local development flow
-1. Create the PostgreSQL application database, typically `wood_more`.
-2. Run `backend/init-db.sql`.
-3. Start the backend:
-   - `cd backend`
-   - `npm install`
-   - `node server.js`
-4. Configure API URL:
-   - `web/config.json` for web
-   - `assets/config.json` for desktop/mobile
-5. Start Flutter app:
-   - `flutter pub get`
-   - `flutter run -d chrome`
-   - or `flutter run -d windows`
-
-### Docker-based flow
-1. Run `docker compose up -d --build`
-2. Stack includes:
-   - PostgreSQL
-   - Backend API
-   - Flutter web app
-3. Web app is exposed at `http://localhost:8080`
-
-### Runtime behavior
-- If `apiBaseUrl` is present, the app uses centralized backend mode.
-- If absent, the app falls back to local persistence.
-
----
-
-## 11. Deployment Notes
-
-### Build and deployment approach
-- Flutter web is containerized from the root `Dockerfile`.
-- Backend is containerized from `backend/Dockerfile`.
-- `docker-compose.yml` coordinates service startup and database health checks.
-
-### Operational notes
-- Backend startup includes schema guard functions to reduce failure from missing tables or columns.
-- Some authorization controls are implemented in UI flow or hardcoded backend checks rather than standardized middleware.
-- Production hardening would benefit from:
-  - token-based auth
-  - centralized authorization middleware
-  - secure secret management
-  - stricter CORS and HTTPS enforcement
-  - structured monitoring/logging
-
-### Supporting project docs
-- `README.md`
-- `backend/README-DATABASE.md`
-- `DEPLOYMENT_GUIDE.md`
-- `BUILD_SIGN_README.md`
-- `RELEASE_APK_STEPS.md`
-
----
-
-## Conclusion
-
-The `wood_and_more_app` repository is a fairly mature operations platform for construction/site workflows. It combines Flutter-based multi-role UI, a flexible storage strategy, and a PostgreSQL-backed REST API to support attendance, reporting, stock control, finance, and administration in a single system. The architecture favors pragmatic feature growth with direct service access and route-driven UI organization, while maintaining enough backend structure to support centralized deployment and future scaling.
-# Wood & More Application - Full Technical Documentation
-
-## 1. Project Overview
-
-### What the application does
-`wood_and_more_app` is a role-based construction operations platform for Wood & More teams. It supports field execution tracking, attendance, daily and detailed reports, project structure management, warehouse/material workflows, and financial custody/balance operations.
-
-The system consists of:
-- A Flutter client (`lib/`) for web/desktop/mobile.
-- A Node.js + Express backend (`backend/server.js`) with PostgreSQL persistence.
-- A configurable storage strategy that can switch between API mode and local storage mode (SQLite/browser storage) based on runtime configuration.
-
-### Core purpose and business logic
-The app is designed to digitize site operations and reporting:
-- Manage organizational and project master data (users, projects, locations, zones, buildings, units, contractors, supervisors, materials).
-- Track attendance with geolocation for site engineers.
-- Capture operational reports:
-  - Daily report flow (multi-step narrative + materials + expenses + attachments).
-  - Detailed report flow (structured line items by phase/location/contractor/workers).
-- Track stock and warehouse movements (project-level and location-level).
-- Track financial movements (engineer balances, custody, balance movements).
-- Generate/print/share reporting documents (PDF workflows).
-- Log user/system activity at API level for auditability.
-
----
-
-## 2. System Architecture
-
-### High-level architecture
-The application follows a client-service-database architecture:
-
-1. **Flutter Presentation Layer**
-   - Screen-based UI with role-specific navigation and menus.
-   - Arabic-first localization with RTL-oriented usage.
-   - Stateful widgets handling screen-level state and async workflows.
-
-2. **Storage Abstraction Layer**
-   - `initStorage()` in `lib/services/storage_service.dart` chooses backend dynamically:
-     - `ApiStorageService` when `apiBaseUrl` is configured.
-     - `WebStorageService` fallback for web if no API URL.
-     - `DatabaseService` fallback for mobile/desktop if no API URL.
-
-3. **Backend API Layer**
-   - Express REST API in `backend/server.js`.
-   - Endpoint-oriented domain operations (users, projects, reports, stock, custody, etc.).
-   - Activity logging middleware captures request metadata and writes to `activity_logs`.
-   - Startup schema-guard methods ensure required columns/tables are available.
-
-4. **Persistence Layer**
-   - PostgreSQL schema initialized by `backend/init-db.sql` and extended via `backend/migrations/*.sql`.
-   - Relational model with foreign keys for most business entities.
-   - JSON text fields used for variable-length collections (expenses/material lines/images/attachments).
-
-### Component interaction
-- App startup (`lib/main.dart`) initializes Firebase and storage provider.
-- Auth gate restores persisted user, optionally validates user against API (`/users/by-email`) when in API mode.
-- UI screens call storage service methods.
-- In API mode, service methods map to REST endpoints in `backend/server.js`.
-- Backend processes data, applies business rules (e.g., stock deduction, balance updates), persists to PostgreSQL, and returns normalized JSON.
-
----
-
-## 3. Folder Structure Explanation
-
-### Root folders
-- `lib/`: Main Flutter application source.
-- `backend/`: Node.js API service and SQL database scripts.
-- `assets/`: App assets, including `assets/config.json` (non-web API configuration).
-- `web/`: Web entry assets and `web/config.json` (web API configuration).
-- `android/`, `ios/`, `windows/`, `linux/`, `macos/`: Platform runners/build configurations.
-- `.agents/`: Agent skill metadata (not part of runtime app behavior).
-
-### Root-level important files
-- `pubspec.yaml`: Flutter dependencies and assets declaration.
-- `README.md`: Primary run/setup guidance.
-- `docker-compose.yml`: Full stack orchestration (Postgres + API + web app).
-- `Dockerfile`: Flutter web build + Nginx serving container.
-- `BUILD_SIGN_README.md`, `RELEASE_APK_STEPS.md`, `DEPLOYMENT_GUIDE.md`: Build/deployment notes.
-
-### `lib/` substructure
-- `main.dart`: App bootstrap, theme/localization setup, auth gate, route restore entry.
-- `screens/`: UI screens (admin, engineer, manager, accountant, reporting, dashboards).
-- `services/`: Storage/API/database services, location service, auth persistence, route persistence/restore.
-- `models/`: Domain entities and DTO mapping.
-- `core/`: App theme and route observer.
-- `utils/`: PDF sharing abstractions for web/io.
-- `data/`: Default static data (e.g., default materials).
-- `firebase_options.dart`: Firebase platform configuration scaffold.
-
-### `backend/` substructure
-- `server.js`: Main API application and business logic.
-- `init-db.sql`: Base schema + seed data.
-- `migrations/`: Incremental SQL migrations.
-- `01-create-database.sql`, `00-drop-database.sql`: DB management utilities.
-- `Dockerfile`: Backend service image.
-- `package.json`: Backend dependencies and scripts.
-
----
-
-## 4. Features Breakdown
-
-### 4.1 Authentication and role-based access
-**User perspective**
-- User logs in via email/password.
-- Menu options and reachable features depend on role.
-
-**System perspective**
-- Login calls `POST /auth/login`.
-- Roles supported in models/seeds: `site_engineer`, `site_engineer_manager`, `app_admin`, `accountant`.
-- Session persisted locally via SharedPreferences.
-- In API mode, restored session is validated by querying user existence.
-
-### 4.2 Attendance tracking
-**User perspective**
-- Site engineer records check-in/check-out with optional location and notes.
-- Managers/admins can view attendance reports and related sub-reports.
-
-**System perspective**
-- Geolocation fetched via `geolocator` service.
-- Attendance stored via `POST /attendance`.
-- Reports read via `/attendance` and `/attendance/by-user/:userId`.
-
-### 4.3 Daily reports (multi-step)
-**User perspective**
-- Engineers fill report through steps (work details, materials, expenses, files/images).
-- Reports can be reviewed/exported/shared.
-
-**System perspective**
-- Persisted through `POST /daily-reports`.
-- Server calculates expense totals and adjusts engineer balance.
-- Server may deduct used materials from project stock and write stock ledger movements.
-
-### 4.4 Detailed reports (structured)
-**User perspective**
-- Engineer records structured line items by project/location/phase/contractor/worker counts.
-- Supports financial line details and file attachments.
-- Aggregated reports available across periods.
-
-**System perspective**
-- Persisted via `POST /detailed-reports`.
-- Child lines stored in `detailed_report_lines`.
-- Expenses can impact engineer balance.
-- Query supports filters by date/user/project (`GET /detailed-reports`).
-
-### 4.5 Project structure and master-data administration
-**User perspective**
-- Admin can maintain projects and their hierarchy:
-  - Project -> zones -> buildings -> units
-  - Project locations tree (`folder` / `work_site`)
-- Admin can manage users, contractors, supervisors, materials.
-
-**System perspective**
-- CRUD endpoint families: `/users`, `/projects`, `/zones`, `/buildings`, `/units`, `/project-locations`, `/contractors`, `/supervisors`, `/materials`.
-
-### 4.6 Warehouse and materials workflows
-**User perspective**
-- Manage project stock items and monitor movement history.
-- Assign materials per project location.
-- Execute one-time location withdrawal with permit attachments.
-
-**System perspective**
-- Stock entities: `project_stock`, `project_stock_ledger`.
-- Location material entities: `location_materials`, `location_withdrawal`.
-- Withdrawal flow deducts stock and writes ledger entries.
-- Rollback endpoint can restore stock and remove withdrawal ledger rows.
-
-### 4.7 Finance and custody
-**User perspective**
-- Managers/accountants can track engineer balances, add custody, and view records.
-- Additional financial forms/reports supported (e.g., salary deduction PDF output).
-
-**System perspective**
-- Balance/custody endpoints:
-  - `/engineer-balance/:userId`, `/engineer-balance`
-  - `/custody`, `/balance-movement`
-- Daily and detailed report expenses can automatically reduce balances.
-
-### 4.8 Activity logs and operational auditing
-**User perspective**
-- Authorized admin can view activity log feed.
-
-**System perspective**
-- Middleware records endpoint, method, user context, status code, and timing.
-- Queried via `GET /activity-logs` (email-restricted at backend level).
-
-### 4.9 Reporting and document export
-**User perspective**
-- Multiple report screens allow filtering, review, printing, and sharing.
-
-**System perspective**
-- PDF generated using `pdf` and `printing` packages.
-- Shared through `share_plus`.
-- Web/IO platform-specific share adapters in `lib/utils`.
-
----
-
-## 5. User Flow
-
-### Primary end-user flow
-1. Application starts and initializes Firebase + storage strategy.
-2. Auth gate restores local session (if present).
-3. In API mode, stored user is validated against backend.
-4. User logs in (if no valid session).
-5. Home screen shows role-appropriate navigation.
-6. User executes role-specific operations:
-   - Site engineer: attendance, daily/detailed reports, withdrawals.
-   - Manager/accountant: finance/custody and reports.
-   - Admin: master data and structure administration.
-7. User opens reports, filters by date/project/user, and exports as needed.
-8. Last route is saved/restored to improve continuity between sessions.
-
-### Example operational flow: engineer daily activity
-1. Check-in attendance (location + project).
-2. Submit daily report with narrative/materials/expenses.
-3. Optionally submit detailed report for structured productivity tracking.
-4. Withdraw location materials if required for assigned work site.
-5. Manager/accountant reviews resulting balances/reports.
-
----
-
-## 6. API / Backend Integration
-
-## Backend technology
-- Node.js, Express, CORS, `pg` PostgreSQL client.
-- JSON API with endpoint groups by domain.
-- No token-based auth middleware detected; role restrictions are mostly client flow and selective endpoint checks.
-
-## Endpoint catalog
-
-### Health / Root
-- `GET /` - API status/info.
-
-### Auth and system lock
-- `POST /auth/login`
-- `GET /system-lock`
-- `PUT /system-lock`
-
-### Users
-- `GET /users/by-email`
-- `GET /users`
-- `GET /users/site-engineers`
-- `POST /users`
-- `PUT /users/:id`
-- `DELETE /users/:id`
-
-### Projects and structure
-- `GET /projects`
-- `POST /projects`
-- `PUT /projects/:id`
-- `DELETE /projects/:id`
-- `GET /project-locations`
-- `POST /project-locations`
-- `PUT /project-locations/:id`
-- `DELETE /project-locations/:id`
-- `GET /zones`
-- `POST /zones`
-- `PUT /zones/:id`
-- `DELETE /zones/:id`
-- `GET /buildings`
-- `POST /buildings`
-- `PUT /buildings/:id`
-- `DELETE /buildings/:id`
-- `GET /units`
-- `POST /units`
-- `PUT /units/:id`
-- `DELETE /units/:id`
-
-### Attendance
-- `POST /attendance`
-- `GET /attendance`
-- `GET /attendance/by-user/:userId`
-- `DELETE /attendance/:id`
-
-### Materials and stock
-- `GET /materials`
-- `GET /materials/with-ids`
-- `POST /materials`
-- `PUT /materials/:id`
-- `DELETE /materials/:id`
-- `GET /project-stock`
-- `POST /project-stock`
-- `PUT /project-stock/:id`
-- `DELETE /project-stock/:id`
-- `POST /project-stock-ledger`
-- `GET /project-stock-ledger`
-
-### Daily reports
-- `POST /daily-reports`
-- `GET /daily-reports`
-- `DELETE /daily-reports/:id`
-
-### Detailed reports and phases
-- `GET /work-phases`
-- `POST /detailed-reports`
-- `GET /detailed-reports`
-- `DELETE /detailed-reports/:id`
-
-### Supervisors and contractors
-- `GET /supervisors`
-- `POST /supervisors`
-- `PUT /supervisors/:id`
-- `DELETE /supervisors/:id`
-- `GET /contractors`
-- `POST /contractors`
-- `PUT /contractors/:id`
-- `DELETE /contractors/:id`
-
-### Finance and custody
-- `GET /engineer-balance/:userId`
-- `POST /engineer-balance`
-- `POST /custody`
-- `POST /balance-movement`
-- `GET /custody`
-
-### Location materials and withdrawals
-- `GET /location-materials`
-- `POST /location-materials`
-- `PUT /location-materials/:id`
-- `DELETE /location-materials/:id`
-- `GET /location-withdrawal`
-- `POST /location-withdrawal`
-- `DELETE /location-withdrawal`
-- `GET /location-withdrawals-for-period`
-
-### Audit
-- `GET /activity-logs`
-
-## Data flow summary
-- Flutter screen -> `ApiStorageService` -> REST endpoint -> SQL operations -> JSON response -> model mapping -> UI rendering.
-- Some endpoints enforce additional domain logic:
-  - Report creation updates balance/stock.
-  - Withdrawal creation/rollback adjusts inventory and ledger.
-  - Startup ensures missing schema parts exist.
-
----
-
-## 7. Data Models
-
-## Core backend entities (PostgreSQL)
-- `users` (identity, role, password)
-- `projects`
-- `app_settings` (system lock flag)
-- `attendance_records`
-- `materials`
-- `daily_reports`
-- `zones`
-- `buildings`
-- `units`
-- `supervisors`
-- `contractors`
-- `project_locations` (tree: `parent_id`, `type`, `display_order`)
-- `project_stock`
-- `project_stock_ledger`
-- `building_materials`
-- `building_cutlist_images`
-- `engineer_balance`
-- `engineer_custody`
-- `work_phases`
-- `detailed_reports`
-- `detailed_report_lines`
-- `location_materials`
-- `location_withdrawal`
-- `activity_logs`
-
-## Flutter model layer (`lib/models`)
-- Access and identity: `UserModel`, `ActivityLogModel`
-- Structural entities: `ProjectModel`, `ZoneModel`, `BuildingModel`, `UnitModel`, `ProjectLocationModel`
-- Operations and reports: `AttendanceRecordModel`, `DailyReportData`, `DetailedReportModel`, `WorkPhaseModel`
-- Resource/warehouse: `ProjectStockModel`, `ProjectStockLedgerModel`, `LocationMaterialModel`, `LocationWithdrawalModel`, `LocationWithdrawalForPeriodModel`
-- Supporting entities: `SupervisorModel`, `ContractorModel`, `BuildingMaterialModel`, `BuildingCutlistModel`
-
-## Migration evolution
-- `001_add_engineer_custody_movement_type.sql`
-- `002_add_daily_reports_contractors_json.sql`
-- `003_detailed_reports.sql`
-- `004_project_locations.sql`
-- `005_detailed_reports_summary_and_location.sql`
-- `006_detailed_reports_project_name.sql`
-- `007_location_materials_and_withdrawal.sql`
-- `008_detailed_report_phases_and_contractor_nullable.sql`
-- `RUN_ME_create_detailed_reports.sql` (repair/create helper script)
-
----
-
-## 8. State Management
-
-## Current approach
-- Screen-local mutable state using Flutter `StatefulWidget` patterns.
-- Async loading via `FutureBuilder`, direct service invocations, and imperative updates.
-- No global state framework (e.g., BLoC/Riverpod/Provider) as the primary architecture.
-
-## Persistence/state continuity
-- User session and last route persisted in `SharedPreferences`.
-- Route history persistence handled by `route_persistence.dart`.
-- Route restoration mapping handled by `route_restore.dart`.
-- `main.dart` boot sequence ensures state providers are ready before UI starts.
-
-## Storage mode state behavior
-- API mode is authoritative for data persistence.
-- Fallback local modes (WebStorageService/DatabaseService) provide offline/local behavior if API base URL is absent.
-
----
-
-## 9. External Services
-
-## Integrated third-party services/libraries
-- **Firebase Core**: initialized at app startup (`Firebase.initializeApp`).
-- **Cloud Firestore / Firebase Auth**: dependencies present in `pubspec.yaml` (primary business flow currently uses REST backend + local persistence).
-- **Geolocation**: `geolocator` for attendance/location workflows.
-- **HTTP Client**: `http` for backend API communication.
-- **SQLite**: `sqflite` for non-API local persistence mode.
-- **Shared Preferences**: session and route persistence.
-- **PDF/Printing**: `pdf`, `printing` for document/report generation.
-- **Sharing**: `share_plus` for file/report sharing.
-- **File selection**: `file_picker` for attachments/images.
-- **URL launch**: `url_launcher` for map/location links.
-- **Localization**: Flutter localization delegates with Arabic/English support.
-
----
-
-## 10. Environment Setup
-
-## Prerequisites
-- Flutter SDK (Dart SDK compatible with project constraint).
-- Node.js LTS.
-- PostgreSQL (local or cloud, including Neon-compatible connection).
-
-## Option A: Local run (recommended for development)
-1. Create/use PostgreSQL database (recommended: `wood_more`).
-2. Run `backend/init-db.sql` against the app database.
-3. Start backend from `backend/`:
-   - `npm install`
-   - `node server.js`
-4. Set API URL:
-   - `web/config.json` for web runs.
-   - `assets/config.json` for desktop/mobile runs.
-5. Start Flutter app from project root:
-   - `flutter pub get`
-   - `flutter run -d chrome` or `flutter run -d windows` (or target device).
-
-## Option B: Docker stack
-1. From project root run: `docker compose up -d --build`
-2. Services:
-   - Postgres on `5432`
-   - API on internal `3000`
-   - Web app exposed at `http://localhost:8080`
-3. DB is initialized automatically via mounted `backend/init-db.sql`.
-
-## Configuration behavior
-- If `apiBaseUrl` is set -> app uses backend API and PostgreSQL.
-- If empty -> app falls back to local storage mode.
-
----
-
-## 11. Deployment Notes
-
-## Build and packaging considerations
-- Flutter web deployment is containerized via root `Dockerfile` and served by Nginx.
-- Backend is containerized separately via `backend/Dockerfile`.
-- `docker-compose.yml` defines service orchestration and startup ordering with DB health checks.
-
-## Operational notes
-- Backend startup includes schema guards (`ensure*` functions) to reduce migration drift risk.
-- Certain authorization checks are hardcoded on specific endpoints (e.g., activity logs requester email); broader API auth middleware is not present.
-- For production hardening, consider:
-  - Standard auth tokens and role middleware.
-  - Secret management for DB credentials.
-  - HTTPS termination and CORS tightening.
-  - Structured logging and monitoring.
-
-## Existing deployment docs in repository
-- `DEPLOYMENT_GUIDE.md`
-- `BUILD_SIGN_README.md`
-- `RELEASE_APK_STEPS.md`
-- `README.md` and `backend/README-DATABASE.md`
-
----
-
-## Additional Notes for Maintainers
-
-- The codebase includes some duplicated Windows-style path indexing artifacts (e.g., both `lib/screens/...` and `lib\\screens\\...` shown by tooling). Validate actual filesystem uniqueness before automation scripts rely on raw index output.
-- The repository contains both API-backed and local-storage operation modes; always confirm target mode in QA/testing.
-- The backend centralizes many business rules directly in route handlers; refactoring into service layers may improve long-term maintainability.
-
-# Wood & More — المستند المرجعي الشامل (الحالة الحالية)
-
-مستند مرجعي يلخّص **وظائف التطبيق** و**مسار البناء** من البداية حتى الوضع الحالي، وفقًا لبنية المشروع الحالية.
-
----
-
-## 1) تعريف سريع بالمشروع
-
-تطبيق **Wood & More** هو نظام تشغيل ميداني وإداري لمشاريع الأخشاب وWPC، ويغطي:
-
-- إدارة المستخدمين والأدوار.
-- الحضور والانصراف.
-- التقارير اليومية والتقارير المفصلة.
-- العهدة والماليات (أرصدة مهندسي الموقع).
-- مخازن المشاريع وحركة الخامات.
-- هيكلة مواقع العمل داخل المشروع.
-- سحب خامات من مواقع فرعية مع تتبع الحركة.
-- لوحة تحكم إدارية شاملة.
-
-التطبيق مبني بـ **Flutter** مع واجهة عربية افتراضيًا، ويدعم التشغيل حسب المنصة على:
-- Web
-- Android / iOS
-- Desktop
-
----
-
-## 2) المعمارية العامة (Architecture)
-
-### 2.1 طبقات التطبيق
-
-- **UI Layer**: شاشات Flutter داخل `lib/screens`.
-- **Domain Models**: نماذج البيانات داخل `lib/models`.
-- **Data/Storage Layer**: طبقة موحدة للوصول للبيانات عبر `getStorage()` في `lib/services/storage_service.dart`.
-
-### 2.2 آلية اختيار مصدر البيانات (Storage Strategy)
-
-عند بدء التطبيق (`lib/main.dart`):
-
-1. يتم تهيئة Firebase.
-2. يتم استدعاء `initStorage()`.
-3. اختيار مصدر البيانات يتم كالتالي:
-   - إذا يوجد `apiBaseUrl` في `assets/config.json` (أو `config.json` على الويب) ➜ استخدام `ApiStorageService` (REST API + PostgreSQL).
-   - إذا لا يوجد API وعلى الويب ➜ استخدام `WebStorageService` (SharedPreferences).
-   - إذا لا يوجد API وعلى الموبايل/سطح المكتب ➜ استخدام `DatabaseService` (SQLite).
-
-هذا التصميم يعطي نفس الوظائف تقريبًا في كل البيئات مع مرونة عالية.
-
----
-
-## 3) الأدوار وصلاحيات التشغيل
-
-النظام يعتمد الأدوار التالية:
-
-- `site_engineer` (مهندس موقع)
-- `site_engineer_manager` (مدير مهندسين)
-- `app_admin` (مسؤول تطبيق)
-- `accountant` (محاسب)
-
-ومنطق الصلاحيات يوزّع الشاشات والعمليات حسب الدور في `home_screen.dart` وباقي الشاشات.
-
----
-
-## 4) وظائف التطبيق (حسب الوحدات الوظيفية)
-
-## 4.1 المصادقة والدخول
-
-- شاشة الدخول: `login_screen.dart`
-- التحقق: بريد + كلمة سر.
-- الجلسة: حفظ المستخدم الحالي عبر `auth_persistence`.
-- استعادة آخر مسار شاشة: `route_persistence` + `route_restore`.
-- دعم وضع الصيانة/القفل العام:
-  - مفتاح تشغيل/إيقاف من لوحة الأدمن.
-  - عند القفل، أي محاولة تسجيل دخول (عدا حساب الأدمن المحدد) تؤدي لعرض صفحة مستقلة برسالة:
-    `System Locked for maintainance please try again later`
-
-## 4.2 الحضور والانصراف
-
-- تسجيل الحضور: `attendance_screen.dart`
-- تقارير الحضور:
-  - `attendance_reports_screen.dart`
-  - `attendance_sub_report_screen.dart`
-
-## 4.3 التقارير اليومية
-
-تدفق متعدد الخطوات:
-
-- `daily_report_step1_screen.dart`
-- `daily_report_step2_screen.dart`
-- `daily_report_step3_screen.dart`
-
-ويتضمن: المشروع، موقع العمل، ملخص التنفيذ، خطة الغد، المقاولين/العمال، مرفقات، خامات، مصروفات.
-
-## 4.4 التقارير المفصلة
-
-- `detailed_report_screen.dart`
-- `detailed_report_finances_screen.dart`
-- `aggregated_detailed_daily_report_screen.dart`
-- `site_engineer_reports_screen.dart`
-
-الهيكل يدعم:
-- بنود متعددة لكل تقرير.
-- مراحل عمل متعددة لنفس الموقع.
-- ربط بمواقع المشروع المهيكلة (`project_locations`).
-- دعم مصروفات ومرفقات.
-
-## 4.5 الماليات والعهدة
-
-- `accountant_finance_screen.dart`
-- `accountant_custody_screen.dart`
-- `finance_screen.dart`
-- `manager_custody_screen.dart`
-- `user_custody_report_screen.dart`
-- `salary_deduction_screen.dart`
-
-المنطق المالي يشمل:
-- رصيد كل مهندس.
-- تسجيل حركات (عهدة/إضافة رصيد/سحب رصيد).
-- تأثير المصروفات على الرصيد.
-
-## 4.6 إدارة المشاريع والبنية المكانية
-
-إداريًا:
-
-- `admin_projects_screen.dart`
-- `admin_zones_screen.dart`
-- `admin_buildings_screen.dart`
-- `admin_units_screen.dart`
-- `admin_project_structure_screen.dart`
-
-ويشمل:
-- مشروع > Zone > Building > Unit
-- هيكل شجري لمواقع المشروع عبر `project_locations` (folder/work_site)
-
-## 4.7 إدارة المخازن والخامات
-
-- أرصدة مخازن المشاريع: `admin_project_stores_screen.dart`
-- هيكلة مخازن المواقع الفرعية: `admin_warehouse_structure_screen.dart`
-- سحب خامات بواسطة مهندس الموقع: `engineer_withdraw_materials_screen.dart`
-- شاشة إدارية لإلغاء/استرجاع السحب: `admin_warehouse_withdraw_screen.dart`
-- إدارة خامات مرتبطة بالموقع: `admin_location_materials_screen.dart`
-
-المنطق:
-- خصم من مخزون المشروع عند السحب.
-- تسجيل حركة بالسجل.
-- دعم إلغاء السحب واستعادة المخزون (بصلاحيات محددة).
-
-## 4.8 إدارة البيانات المرجعية
-
-من لوحة الأدمن:
-
-- المستخدمون: `admin_users_screen.dart`
-- المشرفون: `admin_supervisors_screen.dart`
-- المقاولون: `admin_contractors_screen.dart`
-- الخامات: `admin_materials_screen.dart`
-- تشوينات المباني: `admin_building_materials_screen.dart`
-- قطعيات/صور: `admin_cutlists_screen.dart`
-
----
-
-## 5) لوحة التحكم الإدارية (Admin Dashboard)
-
-الشاشة: `admin_dashboard_screen.dart`
-
-تجمع كل أدوات الإدارة السابقة، وحاليًا تتضمن أيضًا:
-
-- **System Lock (Maintenance) On/Off** لمستخدم واحد فقط:
-  - البريد: `mouhammedhelal@gmail.com`
-- عند التفعيل:
-  - قفل تسجيل الدخول لباقي المستخدمين.
-  - إظهار صفحة الصيانة المنفصلة بعد محاولة الدخول.
-
----
-
-## 6) الخلفية (Backend) — Node.js + PostgreSQL
-
-المجلد: `backend/`
-
-### 6.1 الملف الرئيسي
-
-- `backend/server.js` (Express + pg)
-
-### 6.2 ما يقدمه الخادم
-
-- Endpoints للمصادقة والمستخدمين.
-- Endpoints لإدارة المشاريع والبنية (zones/buildings/units/project_locations).
-- Endpoints للحضور.
-- Endpoints للتقارير اليومية والمفصلة.
-- Endpoints للماليات والعهدة والأرصدة.
-- Endpoints للمخازن وحركة الخامات.
-- Endpoints لوضع القفل:
-  - `GET /system-lock`
-  - `PUT /system-lock`
-
-### 6.3 التهيئة والترقيات
-
-الخادم يحتوي دوال `ensure...` لإنشاء/ترقية الجداول تلقائيًا (مثل:
-`ensurePasswordColumn`, `ensureDetailedReportsTables`, `ensureLocationMaterialsTables`, `ensureSystemLockTable`).
-
----
-
-## 7) قاعدة البيانات والتهيئة الأولية
-
-### 7.1 PostgreSQL
-
-- ملف تأسيس: `backend/init-db.sql`
-- يحتوي إنشاء الجداول الأساسية + بيانات seed.
-- يتضمن `app_settings` وحقل `system_locked`.
-
-### 7.2 SQLite (تشغيل محلي)
-
-- داخل `DatabaseService`.
-- إصدار قاعدة البيانات وصل حاليًا إلى نسخة تدعم:
-  - التقرير المفصل ومرفقاته
-  - هيكلة مواقع المشروع
-  - هيكلة المخازن والسحب
-  - قفل النظام عبر `app_settings`
-
-### 7.3 Web Local Storage
-
-- داخل `WebStorageService`.
-- يحتفظ بنفس منطق البيانات تقريبًا مع مفاتيح SharedPreferences.
-
----
-
-## 8) المسار التطوري (من الأساس حتى الوضع الحالي)
-
-هذا التسلسل يوضح رحلة بناء المنتج وظيفيًا:
-
-1. **الأساس**: Flutter app + ثيم + تسجيل دخول + أدوار.
-2. **التخزين المحلي**: SQLite للموبايل/سطح المكتب.
-3. **تدفق الحضور**: تسجيل وقراءة تقارير الحضور.
-4. **التقارير اليومية**: نموذج متعدد الخطوات + حفظ بيانات تشغيلية.
-5. **الإدارة الأساسية**: مستخدمين/مشاريع/مناطق/مباني/خامات.
-6. **الماليات والعهدة**: أرصدة مهندسين + حركات محاسبية.
-7. **المخزن**: أرصدة مشروع + Ledger للحركات.
-8. **هيكلة مواقع المشروع**: شجرة مواقع لدعم تشغيل ميداني أدق.
-9. **التقرير المفصل**: خطوط عمل متعددة + مراحل + مواقع + مصروفات + مرفقات.
-10. **هيكلة مخازن المواقع الفرعية**: خامات لكل موقع مع سحب وتتبّع.
-11. **خادم API PostgreSQL**: توحيد البيانات مركزيًا مع نفس وظائف التطبيق.
-12. **وضع الصيانة System Lock**: تحكم مباشر من الأدمن المعتمد مع تجربة مستخدم مخصصة عند محاولة الدخول.
-
----
-
-## 9) الملفات والمجلدات الأهم حاليًا
-
-- `lib/main.dart` — نقطة البداية وتهيئة التخزين.
-- `lib/services/storage_service.dart` — اختيار مصدر البيانات.
-- `lib/services/database_service.dart` — SQLite implementation.
-- `lib/services/web_storage_service.dart` — Web local implementation.
-- `lib/services/api_storage_service.dart` — REST implementation.
-- `lib/screens/` — كل واجهات التشغيل.
-- `lib/models/` — نماذج البيانات.
-- `backend/server.js` — API server.
-- `backend/init-db.sql` — تهيئة قاعدة PostgreSQL.
-- `backend/migrations/` — ترحيلات SQL إضافية حسب التحديثات.
-
----
-
-## 10) الحالة الحالية (Current State)
-
-المشروع حاليًا في مرحلة **تشغيل متقدم** وليس MVP:
-
-- نظام أدوار متكامل.
-- وحدات تشغيل يومي + إداري + مالي.
-- دعم تخزين متعدد البيئات.
-- دعم backend PostgreSQL كامل تقريبًا.
-- دعم وضع صيانة مركزي قابل للتحكم.
-- جاهزية للتوسع مع الحفاظ على نفس واجهة الخدمات.
-
----
-
-## 11) ملاحظة تشغيلية مهمة
-
-عند العمل بنمط API:
-
-- أي تحديث في `backend/server.js` (مثل وضع القفل) يحتاج **Restart للـ backend**.
-- تأكد من صحة `apiBaseUrl` في ملف الإعدادات حتى يعمل التطبيق على الخادم بدل التخزين المحلي.
-
----
-
-**تم إعداد هذا المستند ليتوافق مع بنية المشروع الحالية كما هي داخل المستودع الآن.**
-# Wood & More — تفاصيل التطبيق ومراحل التطوير
-
-مستند مرجعي يلخص **وظائف التطبيق** و**مسار البناء** من الأساس حتى الوضع الحالي (حسب بنية المشروع الحالية في المستودع).
-
----
-
-## 1. نظرة عامة
-
-تطبيق **Wood & More** لإدارة عمل **مهندسي المواقع** في مشاريع إنشاءات/تشطيبات خشبية و WPC: حضور، تقارير يومية ومفصلة، عهدة وماليات، مخازن مشاريع، سحب خامات من مواقع فرعية، ولوحة تحكم لمسؤول التطبيق لإدارة البيانات المرجعية والهيكل.
-
-- **واجهة:** Flutter (عربي افتراضياً)، دعم Android / iOS / Web / Desktop حسب المنصة.
-- **مصادقة:** Firebase (تهيئة في `main.dart`؛ قد يتأثر الويب بتوفر `gstatic`).
-- **تخزين البيانات:**
-  - إن وُجد **`apiBaseUrl`** في `assets/config.json` (أو `config.json` على الويب) → **REST API** + **PostgreSQL** (خادم Node في `backend/`).
-  - وإلا على **الويب** → تخزين محلي بالمتصفح (`WebStorageService`).
-  - وإلا على **الجوال/سطح المكتب** → **SQLite** (`DatabaseService`).
-- **استعادة المسار:** حفظ آخر شاشة للمستخدم (`route_restore`).
-
----
-
-## 2. الأدوار (Roles)
-
-| الدور | الوصف المختصر |
-|--------|----------------|
-| `site_engineer` | مهندس موقع — التقارير، المشروعات، المخزن، الحضور |
-| `site_engineer_manager` | مدير مهندسين — تقارير حضور، تقارير يومية، عهدة؛ وقد يشترك مع المسؤول في بعض الشاشات |
-| `app_admin` | مسؤول التطبيق — لوحة التحكم + هيكلة مشروعات + صلاحيات إضافية محددة بالبريد حيث يُطبَّق |
-| `accountant` | محاسب — عهدة وماليات |
-
----
-
-## 3. وظائف التطبيق حسب المستخدم
-
-### 3.1 مهندس الموقع (`HomeScreen` → `_EngineerHome`)
-
-| الوظيفة | الشاشة / المسار | ملخص |
-|---------|------------------|------|
-| تسجيل الحضور والانصراف | `AttendanceScreen` | تسجيل مع مشروع/ملاحظات حسب التصميم |
-| التقرير اليومي | `DailyReportStep1Screen` → خطوات لاحقة | تقرير يومي بالمشروع، مكان العمل، المشرف، المقاولون وعدد العمال، تنفيذ اليوم، مرفقات، ثم خطوات إضافية حسب التدفق |
-| التقرير المفصل | `DetailedReportScreen` → `DetailedReportFinancesScreen` | مشروع (أو «أخرى»)، موقع عمل (هيكلة مواقع أو زون/مبنى)، مقاول، **عدة مراحل لنفس الموقع** (عدد عمال لكل مرحلة؛ عند إضافة مرحلة جديدة يُنسخ عدد العمال من آخر مرحلة لنفس الطاقم)، مشرف، ملخص، **مرفقات اختيارية** (صور/ملفات)، ثم بنود ماليات وحفظ |
-| المشروعات | `EngineerProjectsScreen` | مشروع → زون → مبنى → تشوينات، نماذج، قطعيات |
-| المخزن (سحب خامات) | `EngineerWithdrawMaterialsScreen` | مواقع فرعية بخامات؛ سحب مرة واحدة لكل موقع مع أذونات صرف/تسليم؛ خصم من مخزن المشروع |
-
-### 3.2 المحاسب
-
-| الوظيفة | الشاشة |
-|---------|--------|
-| العهدة | `AccountantCustodyScreen` — تقارير حسب المستخدم والمدة، PDF |
-| الماليات | `AccountantFinanceScreen` — أرصدة، إضافة/سحب رصيد، حركات |
-
-### 3.3 مدير المهندسين / مسؤول التطبيق (`_ManagerHome`)
-
-| الوظيفة | ملاحظات |
-|---------|----------|
-| تقارير الحضور والانصراف | `AttendanceReportsScreen` |
-| التقارير (اليومية) | `ReportsScreen` — فلترة مهندس/تاريخ/مشروع، PDF، صلاحيات تعديل/حذف لمستخدم محدد حسب الكود |
-| هيكلة المشروعات | لـ `app_admin`: `AdminProjectStructureScreen` — شجرة `project_locations` (مجلدات + مواقع عمل) |
-| لوح التحكم | لـ `app_admin`: `AdminDashboardScreen` |
-
-### 3.4 لوحة التحكم — مسؤول التطبيق (`AdminDashboardScreen`)
-
-إدارة مركزية لـ: المستخدمين، المشاريع، المناطق (زون)، المباني، الوحدات، التشوينات لكل مبنى، القطعيات، المشرفين، المقاولين، الخامات العامة، **أرصدة مخازن المشاريع**، **هيكلة المخازن** (خامات لكل موقع فرعي)، واختياريًا لحساب محدد: **المخزن (سحب الخامات)** لإلغاء سحب واسترجاع المخزن (`AdminWarehouseWithdrawScreen` + `canManageWarehouseWithdrawalReset`).
-
----
-
-## 4. شاشات ووظائف إضافية (في المشروع)
-
-تُستخدم حسب التوجيه والمسارات: `LoginScreen`، `SubReportsScreen`، `WorkersReportScreen`، `ContractorReportScreen`، `AttendanceSubReportScreen`، `SalaryDeductionScreen`، `FinanceScreen`، `ManagerCustodyScreen`، `UserCustodyReportScreen`، شاشات إدارية للمواد داخل موقع (`admin_location_materials_screen`)، إلخ.
-
----
-
-## 5. الخادم (Backend)
-
-- **ملف رئيسي:** `backend/server.js` (Express + `pg`).
-- **تهيئة جداول:** دوال مثل `ensureDetailedReportsTables` لإنشاء/تعديل جداول التقرير المفصل وغيرها عند التشغيل.
-- **مجلد migrations:** ملفات SQL مرقمة (حضور، تقارير يومية، تقرير مفصل، مواقع مشروع، خامات وسحب، إلخ) للتشغيل اليدوي على PostgreSQL عند الحاجة.
-- **init-db.sql:** لقطة أولية لقاعدة كاملة.
-
-**أمثلة مجالات API:** مستخدمون، مشاريع، مناطق، مباني، وحدات، تقارير يومية، تقارير مفصلة (مع `expenses_json`، `attachments_json`)، حضور، عهدة، أرصدة مهندسين، مخزون مشروع، سجل مخزون، مواقع مشروع، خامات مواقع، سحب مواقع، مراحل عمل، إلخ.
-
----
-
-## 6. نماذج بيانات مهمة
-
-- **تقرير مفصل:** رأس `DetailedReportModel` + سطور `DetailedReportLineModel` (مقاول، موقع، مرحلة، عدد عمال، …) + مصاريف + **مرفقات** `DetailedReportAttachment`.
-- **مخزن المشروع:** `project_stock` + `project_stock_ledger`.
-- **سحب خامات:** `location_withdrawal` + `location_materials` مرتبطة بـ `project_locations`.
-
----
-
-## 7. مراحل البناء والتطوير (منطقياً — حسب طبقات المشروع)
-
-1. **أساس التطبيق:** Flutter، ثيم، تسجيل دخول، جلسة مستخدم، توجيه حسب الدور.
-2. **تخزين مزدوج:** SQLite محلي + لاحقاً طبقة **API** و**ويب تخزين** مع `getStorage()` موحّد.
-3. **الحضور والتقارير اليومية:** جداول، شاشات متعددة الخطوات، PDF، تقارير للمدير.
-4. **الإدارة:** مشاريع، زون، مباني، وحدات، تشوينات، قطعيات، مشرفون، مقاولون، خامات.
-5. **المالية:** أرصدة مهندسين، عهدة، محاسب، خصم من التقارير عند الصرف.
-6. **مخازن المشاريع:** رصيد خامات باسم المشروع، سجل حركات.
-7. **هيكلة مواقع المشروع:** `project_locations` للتقرير المفصل والربط مع المخزن.
-8. **هيكلة المخازن + سحب الخامات:** خامات لكل موقع فرعي، سحب لمرة واحدة، خصم مخزن، ولوحة مسؤول لإلغاء السحب واسترجاع الرصيد (صلاحية محدودة).
-9. **التقرير المفصل:** تطور من سطور بسيطة إلى **مواقع متداخلة + عدة مراحل لنفس الموقع** + مراحل ثابتة بالواجهة + مرفقات + عمود `attachments_json` في القاعدة.
-10. **تقارير فرعية** (مقاولين، عمال، …) و**Firebase** كطبقة مصادقة/جاهزية.
-
----
-
-## 8. ملاحظة لتقارير المقاولين والمالية (لاحقاً)
-
-عند تجميع **عدد العمال أو تكلفة اليوم** لمقاول معيّن:
-
-- كل **سطر** في التقرير المفصل يمثل **مرحلة + عدد عمال** في نفس الموقع؛ طاقم واحد قد يظهر في **عدة سطور** (مراحل متتابعة) بنفس العدد إذا نُسخ عمداً — **لا يجب جمع الأعداد سطراً بسطر** كأنها عمال إضافيين.
-- يُنصح بتعريف قاعدة تقرير واضحة: مثلاً **أقصى عدد عمال** للمقاول في (مشروع + موقع + يوم)، أو **عدّ الطاقم مرة واحدة** ثم ربط المراحل به، حسب سياسة الشركة.
-
----
-
-## 9. ملفات إعداد
-
-- `assets/config.json` — `apiBaseUrl` للاتصال بالخادم.
-- `pubspec.yaml` — الاعتماديات (مثل `file_picker`, `pdf`, `printing`, Firebase, …).
-
----
-
-*آخر تحديث للمستند يتوافق مع تعديل سلوك «إضافة مرحلة» لنسخ عدد العمال من آخر مرحلة في نفس موقع العمل.*
+*End of document. Generated from static analysis of the repository at documentation time.*

@@ -444,6 +444,17 @@ async function ensureHomeIconsVisibilitySetting() {
         ir_mir: true,
         warehouses_view: true,
       },
+      general_supervisor: {
+        attendance: true,
+        attendance_reports: true,
+        work_plan_tracking_report: true,
+        new_icon: true,
+        operation_reports_tracking: true,
+        aggregated_detailed_daily: true,
+        contractor_report: true,
+        ir_mir: true,
+        warehouses_view: true,
+      },
       operation_manager: {
         attendance_reports: true,
         work_plan_tracking_report: true,
@@ -737,7 +748,7 @@ app.put('/users/:id/home-icon-order', async (req, res) => {
 app.put('/home-icons-visibility/:role', async (req, res) => {
   try {
     const role = String(req.params.role || '').trim();
-    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'operation_manager', 'app_admin', 'accountant']);
+    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'general_supervisor', 'operation_manager', 'app_admin', 'accountant']);
     if (!allowedRoles.has(role)) return res.status(400).json({ error: 'invalid role' });
 
     const requesterEmail = String(req.body?.requesterEmail || '').trim().toLowerCase();

@@ -71,6 +71,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                   items: const [
                     DropdownMenuItem(value: 'site_engineer', child: Text('مهندس موقع')),
                     DropdownMenuItem(value: 'site_engineer_manager', child: Text(UserModel.siteEngineerManagerRoleLabel)),
+                    DropdownMenuItem(value: 'general_supervisor', child: Text(UserModel.generalSupervisorRoleLabel)),
                     DropdownMenuItem(value: 'operation_manager', child: Text('مدير العمليات')),
                     DropdownMenuItem(value: 'accountant', child: Text('محاسب')),
                     DropdownMenuItem(value: 'app_admin', child: Text('مسؤول التطبيق')),
@@ -135,6 +136,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
   String _roleLabel(String r) {
     if (r == 'site_engineer') return 'مهندس موقع';
     if (r == 'site_engineer_manager') return UserModel.siteEngineerManagerRoleLabel;
+    if (r == 'general_supervisor') return UserModel.generalSupervisorRoleLabel;
     if (r == 'operation_manager') return 'مدير العمليات';
     if (r == 'accountant') return 'محاسب';
     if (r == 'app_admin') return 'مسؤول التطبيق';

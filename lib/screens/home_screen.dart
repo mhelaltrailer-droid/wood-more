@@ -31,10 +31,7 @@ class _HomeScreenState extends State<HomeScreen>
   Timer? _notificationsPollTimer;
   late final AnimationController _wrRotateController;
 
-  bool get _canUseNotifications =>
-      widget.currentUser.role == 'site_engineer_manager' ||
-      widget.currentUser.role == 'operation_manager' ||
-      widget.currentUser.role == 'app_admin';
+  bool get _canUseNotifications => widget.currentUser.canUseNotifications;
 
   @override
   void didChangeDependencies() {

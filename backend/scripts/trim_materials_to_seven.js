@@ -1,7 +1,16 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const { Pool } = require('pg');
 
+/** يطابق priorityMaterialNames في التطبيق (لم يعد حصراً على سبعة أسماء). */
 const ALLOWED = [
+  'WPC - WG - LIGHT GRAY - Cladding grove 15.6*2.1 cm - L= 3 m',
+  'WPC - WG - LIGHT GRAY - Cladding grove 15.6*2.1 cm - L= 2.9 m',
+  'WPC - WG - LIGHT GRAY - Cladding grove 15.6*2.1 cm - L= 2.7 m',
+  'WPC - WG - LIGHT GRAY - Cladding grove 15.6*2.1 cm - L= 2.4 m',
+  'WPC - WG - LIGHT GRAY - Cladding grove 15.6*2.1 cm - L= 2.3 m',
+  'ALU - KEEL - 40*20 - L= 6 m',
+  'ALU - Shadow gap - ETR11 - 21*10 - L= 6 m',
+  'ALU - Profile - ETR12 - 40*41 - L= 6 m',
   'WPC - WG - P06 - RHW 15*5 cm - L= 2.5m',
   'WPC - WG - P06 - RHW 15*5 cm - L= 1.4m',
   'WPC - WG - P06 - RHW 15*5 cm - L= 3.7m',

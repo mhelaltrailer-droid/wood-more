@@ -9,13 +9,35 @@ class IconVisibilityService {
   static const String roleAppAdmin = 'app_admin';
   static const String roleSiteEngineer = 'site_engineer';
   static const String roleSiteEngineerManager = 'site_engineer_manager';
+  static const String roleGeneralSupervisor = 'general_supervisor';
   static const String roleOperationManager = 'operation_manager';
   static const String roleAccountant = 'accountant';
+
+  static const List<HomeIconItem> _projectManagerHomeIcons = [
+    HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
+    HomeIconItem(
+      id: 'work_plan_tracking_report',
+      label: 'تقارير متابعة خطط اليوم/الغد',
+    ),
+    HomeIconItem(id: 'new_icon', label: 'New icon'),
+    HomeIconItem(
+      id: 'operation_reports_tracking',
+      label: 'متابعة تقارير التشغيل',
+    ),
+    HomeIconItem(
+      id: 'aggregated_detailed_daily',
+      label: 'التقرير اليومي المجمع',
+    ),
+    HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
+    HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
+    HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
+  ];
 
   static const Map<String, String> roleTitles = {
     roleAppAdmin: 'App admin',
     roleSiteEngineer: 'Site engineer',
     roleSiteEngineerManager: 'مدير المشروعات',
+    roleGeneralSupervisor: 'مشرف عام',
     roleOperationManager: 'Operation manager',
     roleAccountant: 'Accountant',
   };
@@ -39,24 +61,10 @@ class IconVisibilityService {
       HomeIconItem(id: 'accountant_custody', label: 'العهدة'),
       HomeIconItem(id: 'accountant_finance', label: 'الماليات'),
     ],
-    roleSiteEngineerManager: [
-      HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
-      HomeIconItem(
-        id: 'work_plan_tracking_report',
-        label: 'تقارير متابعة خطط اليوم/الغد',
-      ),
-      HomeIconItem(id: 'new_icon', label: 'New icon'),
-      HomeIconItem(
-        id: 'operation_reports_tracking',
-        label: 'متابعة تقارير التشغيل',
-      ),
-      HomeIconItem(
-        id: 'aggregated_detailed_daily',
-        label: 'التقرير اليومي المجمع',
-      ),
-      HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
-      HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
-      HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
+    roleSiteEngineerManager: _projectManagerHomeIcons,
+    roleGeneralSupervisor: [
+      HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),
+      ..._projectManagerHomeIcons,
     ],
     roleOperationManager: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
