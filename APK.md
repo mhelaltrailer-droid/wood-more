@@ -48,6 +48,12 @@ On Windows the full path is typically:
 2. Launch the **Wood & More** app from the launcher.
 3. If login or data fails, check: correct URL in `assets/config.json`, server running, firewall, and HTTPS / certificate issues.
 
+## هيكلة مشروع Z1_EMAAR_F على الهاتف
+
+التطبيق يعرض هيكلة المواقع من **الـ API + PostgreSQL** وليس من ملف SQL على الجهاز. عند كل تشغيل للخادم (`backend/server.js`) يُنفَّذ تلقائياً محتوى `backend/scripts/seed_z1_emaar_f_project_locations.sql` إذا وُجد المشروع **`Z1_EMAAR_F`** في جدول `projects`. **لا حاجة لإعادة بناء APK** بعد تحديث الخادم فقط؛ افتح **هيكلة المشروعات** واختر المشروع ثم اسحب للتحديث أو أعد فتح الشاشة.
+
+بعد أي تغيير في `backend`: **أعد نشر الخادم** (مثلاً Render) أو أعد التشغيل محلياً حتى تُطبَّق الـ seed.
+
 ## Optional: smaller or split APKs
 
 - **Per-ABI (smaller downloads):**  
@@ -62,3 +68,4 @@ On Windows the full path is typically:
 | Gradle / SDK errors | Run `flutter doctor -v`, install missing Android SDK components. |
 | `PathAccessException` / “file is being used by another process” during build | Close other Flutter/Android Studio processes, stop any running `flutter run`, then run `flutter build apk --release` again (or `flutter clean` first if the error persists). |
 | App has no data / cannot log in | Rebuild after fixing `assets/config.json`; confirm API is reachable from the phone’s network. |
+| هيكلة Z1 لا تظهر | تأكد أن المشروع `Z1_EMAAR_F` موجود في قاعدة البيانات؛ أعد **نشر/تشغيل** الـ API حتى يعمل الـ seed التلقائي؛ راجع سجلات الخادم لـ `ensureZ1EmaarFProjectLocationsSeeded`. |

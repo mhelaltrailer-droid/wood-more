@@ -29,6 +29,7 @@ import '../data/materials_display.dart';
 import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
+import 'attendance_duplicate_guard.dart';
 
 /// خدمة قاعدة البيانات المحلية
 class DatabaseService {
@@ -50,7 +51,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 30,
+      version: 31,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -84,6 +85,7 @@ class DatabaseService {
         user_name TEXT NOT NULL,
         type TEXT NOT NULL,
         date_time TEXT NOT NULL,
+        calendar_date TEXT,
         location TEXT NOT NULL,
         project_id INTEGER,
         project_name TEXT,
@@ -381,6 +383,11 @@ class DatabaseService {
     }
     if (oldVersion < 30) {
       await _trimMaterialsCatalog(db);
+    }
+    if (oldVersion < 31) {
+      await db.execute(
+        'ALTER TABLE attendance_records ADD COLUMN calendar_date TEXT',
+      );
     }
   }
 
@@ -1038,11 +1045,24 @@ class DatabaseService {
   /// إضافة سجل حضور
   Future<int> addAttendanceRecord(AttendanceRecordModel record) async {
     final db = await database;
+    final existing = await getAttendanceRecordsByUser(record.userId);
+    final dup = duplicateAttendanceMessageIfAny(
+      userRecords: existing,
+      userId: record.userId,
+      projectId: record.projectId,
+      projectName: record.projectName,
+      type: record.type,
+      onDate: record.dateTime,
+    );
+    if (dup != null) throw DuplicateAttendanceException(dup);
+
+    final cal = attendanceLocalCalendarDateKey(record.dateTime);
     final id = await db.insert('attendance_records', {
       'user_id': record.userId,
       'user_name': record.userName,
       'type': record.type,
       'date_time': record.dateTime.toIso8601String(),
+      'calendar_date': cal,
       'location': record.location,
       'project_id': record.projectId,
       'project_name': record.projectName,

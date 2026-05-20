@@ -28,6 +28,7 @@ import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
 import '../data/materials_display.dart';
+import 'attendance_duplicate_guard.dart';
 
 /// تخزين للويب باستخدام SharedPreferences
 class WebStorageService {
@@ -755,16 +756,29 @@ class WebStorageService {
   Future<void> addAttendanceRecord(AttendanceRecordModel record) async {
     await _initData();
     final prefs = await _prefs;
+    final existing = await getAttendanceRecordsByUser(record.userId);
+    final dup = duplicateAttendanceMessageIfAny(
+      userRecords: existing,
+      userId: record.userId,
+      projectId: record.projectId,
+      projectName: record.projectName,
+      type: record.type,
+      onDate: record.dateTime,
+    );
+    if (dup != null) throw DuplicateAttendanceException(dup);
+
     final list = jsonDecode(prefs.getString(_attendanceKey)!) as List;
     final nextId = list.isEmpty
         ? 1
         : (list.map((e) => e['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
+    final cal = attendanceLocalCalendarDateKey(record.dateTime);
     final map = {
       'id': nextId,
       'user_id': record.userId,
       'user_name': record.userName,
       'type': record.type,
       'date_time': record.dateTime.toIso8601String(),
+      'calendar_date': cal,
       'location': record.location,
       'project_id': record.projectId,
       'project_name': record.projectName,

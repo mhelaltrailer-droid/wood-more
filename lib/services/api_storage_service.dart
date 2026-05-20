@@ -30,6 +30,7 @@ import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
 import '../data/materials_display.dart';
+import 'attendance_duplicate_guard.dart';
 
 /// Storage implementation that uses the REST API (PostgreSQL backend).
 class ApiStorageService {
@@ -424,16 +425,38 @@ class ApiStorageService {
   }
 
   Future<int> addAttendanceRecord(AttendanceRecordModel record) async {
-    return _post('attendance', {
+    final uri = Uri.parse(_path('attendance'));
+    final body = jsonEncode({
       'userId': record.userId,
       'userName': record.userName,
       'type': record.type,
       'dateTime': record.dateTime.toIso8601String(),
+      'calendarDate': attendanceLocalCalendarDateKey(record.dateTime),
       'location': record.location,
       'projectId': record.projectId,
       'projectName': record.projectName,
       'notes': record.notes,
     });
+    final r = await http.post(
+      uri,
+      body: body,
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (r.statusCode == 409) {
+      String msg =
+          'تم التسجيل مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.';
+      try {
+        final decoded = jsonDecode(r.body);
+        if (decoded is Map && decoded['error'] != null) {
+          msg = decoded['error'].toString();
+        }
+      } catch (_) {}
+      throw DuplicateAttendanceException(msg);
+    }
+    if (r.statusCode >= 400) throw Exception(r.body);
+    if (r.body.isEmpty) return 0;
+    final decoded = jsonDecode(r.body);
+    return decoded is int ? decoded : int.tryParse(decoded.toString()) ?? 0;
   }
 
   Future<List<AttendanceRecordModel>> getAllAttendanceRecords() async {

@@ -7,6 +7,7 @@ import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import '../services/location_service.dart';
 import '../services/last_project_persistence.dart';
+import '../services/attendance_duplicate_guard.dart';
 import 'home_screen.dart';
 
 /// خيار «مشروع أخر» في الحضور — غير موجود في جدول المشاريع (`id = 0`).
@@ -197,6 +198,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ),
         (route) => false,
       );
+    } on DuplicateAttendanceException catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         setState(() {

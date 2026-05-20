@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   user_name TEXT NOT NULL,
   type TEXT NOT NULL,
   date_time TEXT NOT NULL,
+  calendar_date TEXT,
   location TEXT NOT NULL,
   project_id INTEGER,
   project_name TEXT,

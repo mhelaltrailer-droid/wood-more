@@ -1,4 +1,6 @@
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -413,6 +415,42 @@ async function ensureUserHomeIconOrderTable() {
     `);
   } catch (e) {
     console.warn('ensureUserHomeIconOrderTable:', e.message);
+  }
+}
+
+async function ensureAttendanceCalendarDateColumn() {
+  try {
+    await pool.query(
+      'ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS calendar_date TEXT'
+    );
+  } catch (e) {
+    console.warn('ensureAttendanceCalendarDateColumn:', e.message);
+  }
+}
+
+/** تطبيق seed هيكلة Z1_EMAAR_F من الملف (آمن للتكرار بفضل NOT EXISTS داخل SQL). */
+async function ensureZ1EmaarFProjectLocationsSeeded() {
+  try {
+    const sqlPath = path.join(__dirname, 'scripts', 'seed_z1_emaar_f_project_locations.sql');
+    if (!fs.existsSync(sqlPath)) {
+      console.warn('ensureZ1EmaarFProjectLocationsSeeded: file not found', sqlPath);
+      return;
+    }
+    let raw = fs.readFileSync(sqlPath, 'utf8');
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    const chunks = raw.split(/\n\n(?=INSERT INTO)/);
+    let ran = 0;
+    for (const chunk of chunks) {
+      const s = chunk.trim();
+      if (!s.startsWith('INSERT INTO')) continue;
+      await pool.query(s);
+      ran += 1;
+    }
+    if (ran > 0) {
+      console.log(`ensureZ1EmaarFProjectLocationsSeeded: executed ${ran} SQL chunk(s)`);
+    }
+  } catch (e) {
+    console.warn('ensureZ1EmaarFProjectLocationsSeeded:', e.message);
   }
 }
 
@@ -1074,14 +1112,76 @@ app.delete('/buildings/:id', async (req, res) => {
 app.post('/attendance', async (req, res) => {
   try {
     const b = req.body;
+    const userId = parseInt(String(b.userId || ''), 10);
+    const type = String(b.type || '');
+    let calendarDate = String(b.calendarDate || '').trim();
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRe.test(calendarDate) && b.dateTime) {
+      const m = String(b.dateTime).match(/^(\d{4}-\d{2}-\d{2})/);
+      if (m) calendarDate = m[1];
+    }
+    if (!Number.isInteger(userId) || (type !== 'check_in' && type !== 'check_out') || !dateRe.test(calendarDate)) {
+      return res.status(400).json({ error: 'userId ونوع التسجيل (check_in / check_out) وcalendarDate بصيغة YYYY-MM-DD مطلوبة' });
+    }
+    const rawPid = b.projectId;
+    const projectId =
+      rawPid === null || rawPid === undefined || rawPid === ''
+        ? null
+        : parseInt(String(rawPid), 10);
+    const projectName = b.projectName != null ? String(b.projectName) : '';
+
+    let dup;
+    if (projectId != null && !Number.isNaN(projectId)) {
+      dup = await pool.query(
+        `SELECT id FROM attendance_records
+         WHERE user_id = $1 AND type = $2
+         AND (
+           calendar_date = $3
+           OR (calendar_date IS NULL AND SUBSTRING(date_time, 1, 10) = $3)
+         )
+         AND project_id = $4
+         LIMIT 1`,
+        [userId, type, calendarDate, projectId]
+      );
+    } else {
+      dup = await pool.query(
+        `SELECT id FROM attendance_records
+         WHERE user_id = $1 AND type = $2
+         AND (
+           calendar_date = $3
+           OR (calendar_date IS NULL AND SUBSTRING(date_time, 1, 10) = $3)
+         )
+         AND project_id IS NULL AND TRIM(COALESCE(project_name, '')) = TRIM($4::text)
+         LIMIT 1`,
+        [userId, type, calendarDate, projectName]
+      );
+    }
+    if (dup.rows.length > 0) {
+      const msg =
+        type === 'check_in'
+          ? 'تم تسجيل الحضور مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.'
+          : 'تم تسجيل الانصراف مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.';
+      return res.status(409).json({ error: msg });
+    }
+
     const r = await pool.query(
-      'INSERT INTO attendance_records (user_id, user_name, type, date_time, location, project_id, project_name, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
-      [b.userId, b.userName, b.type, b.dateTime, b.location || '', b.projectId || null, b.projectName || null, b.notes || null]
+      'INSERT INTO attendance_records (user_id, user_name, type, date_time, calendar_date, location, project_id, project_name, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
+      [
+        userId,
+        b.userName,
+        b.type,
+        b.dateTime,
+        calendarDate,
+        b.location || '',
+        Number.isNaN(projectId) ? null : projectId,
+        b.projectName || null,
+        b.notes || null,
+      ]
     );
     const isCheckIn = String(b.type || '') === 'check_in';
     const actionLabel = isCheckIn ? 'الحضور' : 'الانصراف';
-    const projectName = String(b.projectName || '').trim() || 'بدون مشروع';
-    const body = `قام "${String(b.userName || '')}" بتسجيل ${actionLabel} بمشروع "${projectName}"`;
+    const projectNameDisplay = String(b.projectName || '').trim() || 'بدون مشروع';
+    const body = `قام "${String(b.userName || '')}" بتسجيل ${actionLabel} بمشروع "${projectNameDisplay}"`;
     await pool.query(
       `INSERT INTO notifications (
         recipient_user_id, recipient_role, title, body, event_type,
@@ -3617,6 +3717,7 @@ ensurePasswordColumn()
   .then(() => ensureSystemLockTable())
   .then(() => ensureHomeIconsVisibilitySetting())
   .then(() => ensureUserHomeIconOrderTable())
+  .then(() => ensureAttendanceCalendarDateColumn())
   .then(() => ensureDetailedReportsTables())
   .then(() => ensureLocationMaterialsTables())
   .then(() => ensureActivityLogsTable())
@@ -3626,6 +3727,7 @@ ensurePasswordColumn()
   .then(() => ensurePrivateChatMessagesTable())
   .then(() => ensureIrMirUploadsTable())
   .then(() => ensureWithdrawalRequestsTable())
+  .then(() => ensureZ1EmaarFProjectLocationsSeeded())
   .then(() => {
     app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));
   })
