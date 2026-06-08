@@ -1793,6 +1793,39 @@ class DatabaseService {
         WithdrawalRequestModel.statusApproved,
       ],
     );
+    final p = await db.query('projects', where: 'id = ?', whereArgs: [projectId]);
+    final projectName = p.isNotEmpty ? (p.first['name'] as String? ?? '') : '';
+    if (await _userRole(db, userId) == 'site_engineer') {
+      await _notifyAppAdmins(
+        db,
+        title: 'إتمام سحب خامات',
+        body:
+            'قام "$userName" بإتمام سحب خامات من موقع فرعي — مشروع "${projectName.isEmpty ? 'غير محدد' : projectName}" — مرحلة: $phase',
+        eventType: 'material_withdrawal_completed',
+        actorUserId: userId,
+        actorUserName: userName,
+        projectName: projectName.isEmpty ? null : projectName,
+      );
+    }
+    final hasPermitDocs =
+        (disbursementPermitImagesJson != null &&
+            disbursementPermitImagesJson.trim().isNotEmpty &&
+            disbursementPermitImagesJson.trim() != '[]') ||
+        (deliveryPermitImagesJson != null &&
+            deliveryPermitImagesJson.trim().isNotEmpty &&
+            deliveryPermitImagesJson.trim() != '[]');
+    if (hasPermitDocs) {
+      await _notifyAppAdmins(
+        db,
+        title: 'مرفقات سحب خامات',
+        body:
+            'قام "$userName" بإرفاق أذون صرف/تسليم مع سحب الخامات — مشروع "${projectName.isEmpty ? 'غير محدد' : projectName}"',
+        eventType: 'withdrawal_permit_upload',
+        actorUserId: userId,
+        actorUserName: userName,
+        projectName: projectName.isEmpty ? null : projectName,
+      );
+    }
   }
 
   /// إلغاء سحب الخامات: حذف السجل واسترجاع أرصدة المشروع وحذف حركات withdraw_location المرتبطة.
@@ -2311,6 +2344,7 @@ class DatabaseService {
       final current = await getEngineerBalance(report.userId);
       await setEngineerBalance(report.userId, current - total);
     }
+    await _notifyAppAdminsWorkPlanSaved(db, report: report, isUpdate: false);
     return id as int;
   }
 
@@ -2360,6 +2394,7 @@ class DatabaseService {
         });
       }
     });
+    await _notifyAppAdminsWorkPlanSaved(db, report: report, isUpdate: true);
   }
 
   /// تحديث بنود الماليات فقط (للتقارير المحفوظة مسبقاً دون صرف) مع تعديل رصيد المهندس بالفرق.
@@ -2422,6 +2457,19 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [reportId],
     );
+    final userName = rows.first['user_name'] as String? ?? '';
+    final projectName = rows.first['project_name'] as String?;
+    if (await _userRole(db, userId) == 'site_engineer') {
+      await _notifyAppAdmins(
+        db,
+        title: 'تحديث ماليات التقرير',
+        body: 'قام "$userName" بتحديث بنود الصرف في التقرير المفصل #$reportId',
+        eventType: 'detailed_report_expenses_updated',
+        actorUserId: userId,
+        actorUserName: userName,
+        projectName: projectName,
+      );
+    }
   }
 
   /// حذف تقرير مفصّل واسترجاع خصم الماليات من رصيد المهندس إن وُجد
@@ -2706,7 +2754,7 @@ class DatabaseService {
     String? notes,
   }) async {
     final db = await database;
-    return db.insert('ir_mir_uploads', {
+    final uploadId = await db.insert('ir_mir_uploads', {
       'project_id': projectId,
       'user_id': userId,
       'user_name': userName,
@@ -2720,6 +2768,26 @@ class DatabaseService {
       'notes': notes,
       'created_at': DateTime.now().toIso8601String(),
     });
+    final p = await db.query('projects', where: 'id = ?', whereArgs: [projectId]);
+    final projName = p.isNotEmpty ? (p.first['name'] as String? ?? '') : '';
+    final kindLabel = kind == IrMirUploadModel.kindMir ? 'MIR' : 'IR';
+    final extra = kind == IrMirUploadModel.kindMir && mirName != null
+        ? ' — اسم $kindLabel: $mirName'
+        : kind == IrMirUploadModel.kindIr && phase != null
+        ? ' — مرحلة: $phase'
+        : '';
+    await _notifyAppAdmins(
+      db,
+      title: 'رفع مستند $kindLabel',
+      body:
+          'قام "$userName" برفع ملف "$fileName" ($kindLabel) — مشروع "${projName.isEmpty ? 'غير محدد' : projName}"$extra\n'
+          'رقم المرفق: $uploadId',
+      eventType: kind == IrMirUploadModel.kindMir ? 'mir_upload' : 'ir_upload',
+      actorUserId: userId,
+      actorUserName: userName,
+      projectName: projName.isEmpty ? null : projName,
+    );
+    return uploadId as int;
   }
 
   /// حذف مرفق IR/MIR محلياً. التحقق من صلاحية المسؤول يتم في الواجهة.
@@ -2731,6 +2799,97 @@ class DatabaseService {
       whereArgs: [id],
     );
     if (n == 0) throw Exception('المرفق غير موجود');
+  }
+
+  Future<void> _notifyAppAdmins(
+    Database db, {
+    required String title,
+    required String body,
+    required String eventType,
+    int? actorUserId,
+    String? actorUserName,
+    String? projectName,
+  }) async {
+    await _wrNotifyRoles(
+      db,
+      ['app_admin'],
+      title: title,
+      body: body,
+      eventType: eventType,
+      actorUserId: actorUserId,
+      actorUserName: actorUserName,
+      projectName: projectName,
+    );
+  }
+
+  Future<String?> _userRole(Database db, int userId) async {
+    final u = await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [userId],
+      limit: 1,
+    );
+    if (u.isEmpty) return null;
+    return u.first['role'] as String?;
+  }
+
+  String _planDayLabel(DateTime reportDatetime) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+    final rd = DateTime(
+      reportDatetime.year,
+      reportDatetime.month,
+      reportDatetime.day,
+    );
+    if (rd == tomorrow) return 'خطة عمل الغد';
+    if (rd == today) return 'خطة عمل اليوم';
+    return 'خطة عمل (${rd.toIso8601String().substring(0, 10)})';
+  }
+
+  Future<void> _notifyAppAdminsWorkPlanSaved(
+    Database db, {
+    required DetailedReportModel report,
+    required bool isUpdate,
+  }) async {
+    final role = await _userRole(db, report.userId);
+    if (role != 'site_engineer') return;
+    final planLabel = _planDayLabel(report.reportDatetime);
+    final proj = (report.projectName ?? '').trim().isEmpty
+        ? 'غير محدد'
+        : report.projectName!.trim();
+    final action = isUpdate ? 'عدّل' : 'حفظ';
+    try {
+      await _notifyAppAdmins(
+        db,
+        title: 'تنبيه — $planLabel',
+        body:
+            'قام "${report.userName}" ب$action $planLabel بمشروع "$proj"\n'
+            'تاريخ الخطة: ${report.reportDatetime.toIso8601String().substring(0, 10)}',
+        eventType: isUpdate
+            ? (planLabel.contains('الغد')
+                ? 'tomorrow_work_plan_updated'
+                : 'today_work_plan_updated')
+            : (planLabel.contains('الغد')
+                ? 'tomorrow_work_plan_created'
+                : 'today_work_plan_saved'),
+        actorUserId: report.userId,
+        actorUserName: report.userName,
+        projectName: report.projectName,
+      );
+      if (report.attachments.isNotEmpty) {
+        await _notifyAppAdmins(
+          db,
+          title: 'رفع مرفقات مع خطة العمل',
+          body:
+              'قام "${report.userName}" بإرفاق مستند/صورة مع $planLabel — مشروع "$proj"',
+          eventType: 'work_plan_attachment',
+          actorUserId: report.userId,
+          actorUserName: report.userName,
+          projectName: report.projectName,
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> _wrNotifyRoles(
@@ -2883,7 +3042,7 @@ class DatabaseService {
         'رقم الطلب: $id';
     await _wrNotifyRoles(
       db,
-      ['site_engineer_manager', 'operation_manager'],
+      ['site_engineer_manager', 'operation_manager', 'app_admin'],
       title: 'طلب سحب خامات',
       body: bodyN,
       eventType: 'withdrawal_request_new',

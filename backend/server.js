@@ -1,6 +1,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const { splitSqlChunks } = require('./scripts/lib/xlsx_project_locations');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -244,6 +245,112 @@ async function withdrawalNotifyEngineer(pool, engineerUserId, fields) {
   );
 }
 
+async function notifyAppAdmins(pool, fields) {
+  await runNotificationSafely('notifyAppAdmins', async () => {
+    await withdrawalInsertNotificationsForRoles(pool, ['app_admin'], fields);
+  });
+}
+
+async function fetchUserRole(pool, userId) {
+  const id = parseInt(userId, 10);
+  if (Number.isNaN(id)) return null;
+  const r = await pool.query('SELECT role FROM users WHERE id = $1', [id]);
+  return r.rows.length ? String(r.rows[0].role || '') : null;
+}
+
+function formatDateYmd(value) {
+  if (!value) return '';
+  const s = String(value);
+  return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
+function serverLocalDateYmd(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function classifyPlanDay(reportDatetime) {
+  const d = formatDateYmd(reportDatetime);
+  const today = serverLocalDateYmd();
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = serverLocalDateYmd(tomorrowDate);
+  if (d === tomorrow) return 'tomorrow';
+  if (d === today) return 'today';
+  return 'other';
+}
+
+async function runNotificationSafely(label, fn) {
+  try {
+    await fn();
+  } catch (e) {
+    console.warn(`${label}:`, e.message);
+  }
+}
+
+async function notifyAppAdminsOnDocumentUpload(pool, userId, userName, details) {
+  await notifyAppAdmins(pool, {
+    title: details.title || 'رفع مستند',
+    body: details.body,
+    eventType: details.eventType ?? details.event_type,
+    actorUserId: userId,
+    actorUserName: userName,
+    projectName: details.projectName ?? details.project_name ?? null,
+  });
+}
+
+async function notifyAppAdminsIfSiteEngineer(pool, userId, fields) {
+  const role = await fetchUserRole(pool, userId);
+  if (role !== 'site_engineer') return;
+  await notifyAppAdmins(pool, fields);
+}
+
+async function notifyAppAdminsWorkPlanSaved(pool, {
+  userId,
+  userName,
+  projectName,
+  reportDatetime,
+  isUpdate = false,
+  hasAttachments = false,
+}) {
+  const role = await fetchUserRole(pool, userId);
+  if (role !== 'site_engineer') return;
+  const dayKind = classifyPlanDay(reportDatetime);
+  let planLabel;
+  let eventType;
+  if (dayKind === 'tomorrow') {
+    planLabel = 'خطة عمل الغد';
+    eventType = isUpdate ? 'tomorrow_work_plan_updated' : 'tomorrow_work_plan_created';
+  } else if (dayKind === 'today') {
+    planLabel = 'خطة عمل اليوم';
+    eventType = isUpdate ? 'today_work_plan_updated' : 'today_work_plan_saved';
+  } else {
+    planLabel = `خطة عمل (${formatDateYmd(reportDatetime)})`;
+    eventType = isUpdate ? 'work_plan_updated' : 'work_plan_saved';
+  }
+  const proj = String(projectName || '').trim() || 'غير محدد';
+  const action = isUpdate ? 'عدّل' : 'حفظ';
+  await notifyAppAdmins(pool, {
+    title: `تنبيه — ${planLabel}`,
+    body:
+      `قام "${userName}" ب${action} ${planLabel} بمشروع "${proj}"\n` +
+      `تاريخ الخطة: ${formatDateYmd(reportDatetime)}`,
+    eventType,
+    actorUserId: userId,
+    actorUserName: userName,
+    projectName: projectName || null,
+  });
+  if (hasAttachments) {
+    await notifyAppAdminsOnDocumentUpload(pool, userId, userName, {
+      title: 'رفع مرفقات مع خطة العمل',
+      body:
+        `قام "${userName}" بإرفاق مستند/صورة مع ${planLabel} — مشروع "${proj}"`,
+      eventType: 'work_plan_attachment',
+      projectName: projectName || null,
+    });
+  }
+}
+
 async function ensureIrMirUploadsTable() {
   try {
     await pool.query(`
@@ -436,9 +543,8 @@ async function ensureZ1EmaarFProjectLocationsSeeded() {
       console.warn('ensureZ1EmaarFProjectLocationsSeeded: file not found', sqlPath);
       return;
     }
-    let raw = fs.readFileSync(sqlPath, 'utf8');
-    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
-    const chunks = raw.split(/\n\n(?=INSERT INTO)/);
+    const raw = fs.readFileSync(sqlPath, 'utf8');
+    const chunks = splitSqlChunks(raw);
     let ran = 0;
     for (const chunk of chunks) {
       const s = chunk.trim();
@@ -496,16 +602,21 @@ async function ensureHomeIconsVisibilitySetting() {
       operation_manager: {
         attendance_reports: true,
         work_plan_tracking_report: true,
+        postpone_fines_reports: true,
         new_icon: true,
         operation_reports_tracking: true,
         aggregated_detailed_daily: true,
         contractor_report: true,
         ir_mir: true,
         warehouses_view: true,
+        ms_sd: true,
+        qs_invs: true,
+        mos_itp: true,
       },
       app_admin: {
         attendance_reports: true,
         work_plan_tracking_report: true,
+        postpone_fines_reports: true,
         new_icon: true,
         operation_reports_tracking: true,
         daily_movement: true,
@@ -518,6 +629,9 @@ async function ensureHomeIconsVisibilitySetting() {
         dashboard: true,
         ir_mir: true,
         warehouses_view: true,
+        ms_sd: true,
+        qs_invs: true,
+        mos_itp: true,
       },
     };
     await pool.query(
@@ -1484,7 +1598,25 @@ app.post('/ir-mir/uploads', async (req, res) => {
         new Date().toISOString(),
       ],
     );
-    res.json(parseInt(ins.rows[0].id, 10));
+    const uploadId = parseInt(ins.rows[0].id, 10);
+    const projRes = await pool.query('SELECT name FROM projects WHERE id = $1', [projectId]);
+    const projName = projRes.rows.length ? projRes.rows[0].name : null;
+    const kindLabel = kind === 'mir' ? 'MIR' : 'IR';
+    const extra =
+      kind === 'mir' && mirName
+        ? ` — اسم ${kindLabel}: ${mirName}`
+        : kind === 'ir' && phase
+          ? ` — مرحلة: ${phase}`
+          : '';
+    await notifyAppAdminsOnDocumentUpload(pool, userId, userName, {
+      title: `رفع مستند ${kindLabel}`,
+      body:
+        `قام "${userName}" برفع ملف "${fileName}" (${kindLabel}) — مشروع "${projName || 'غير محدد'}"${extra}\n` +
+        `رقم المرفق: ${uploadId}`,
+      eventType: kind === 'mir' ? 'mir_upload' : 'ir_upload',
+      projectName: projName,
+    });
+    res.json(uploadId);
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -1888,6 +2020,17 @@ app.post('/detailed-reports', async (req, res) => {
       const current = bal.rows.length ? parseFloat(bal.rows[0].balance) : 0;
       await pool.query('INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2', [b.userId, current - totalExpense]);
     }
+    const hasAttachments =
+      (Array.isArray(b.attachments) && b.attachments.length > 0) ||
+      (attachmentsJson != null && String(attachmentsJson).trim() !== '');
+    await notifyAppAdminsWorkPlanSaved(pool, {
+      userId: b.userId,
+      userName: b.userName,
+      projectName: projectName,
+      reportDatetime: b.reportDatetime || now,
+      isUpdate: false,
+      hasAttachments,
+    });
     res.json(reportId);
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -2034,6 +2177,20 @@ app.put('/detailed-reports/:id/expenses', async (req, res) => {
       expensesJson,
       id,
     ]);
+    const userRow = await pool.query(
+      'SELECT user_name, project_name FROM detailed_reports WHERE id = $1',
+      [id],
+    );
+    const userName = userRow.rows.length ? String(userRow.rows[0].user_name || '') : '';
+    const projectName = userRow.rows.length ? userRow.rows[0].project_name : null;
+    await notifyAppAdminsIfSiteEngineer(pool, rowUserId, {
+      title: 'تحديث ماليات التقرير',
+      body: `قام "${userName}" بتحديث بنود الصرف في التقرير المفصل #${id}`,
+      eventType: 'detailed_report_expenses_updated',
+      actorUserId: rowUserId,
+      actorUserName: userName,
+      projectName,
+    });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -2087,6 +2244,17 @@ app.put('/detailed-reports/:id', async (req, res) => {
         );
       }
       await pool.query('COMMIT');
+      const hasAttachments =
+        (Array.isArray(b.attachments) && b.attachments.length > 0) ||
+        (attachmentsJson != null && String(attachmentsJson).trim() !== '');
+      await notifyAppAdminsWorkPlanSaved(pool, {
+        userId: b.userId,
+        userName: b.userName,
+        projectName: projectName,
+        reportDatetime: b.reportDatetime || new Date().toISOString(),
+        isUpdate: true,
+        hasAttachments,
+      });
       res.json({ ok: true });
     } catch (err) {
       await pool.query('ROLLBACK');
@@ -2443,6 +2611,33 @@ app.post('/location-withdrawal', async (req, res) => {
          AND overall_status = 'approved' AND fulfilled_at IS NULL`,
       [now, locationId, phase, userId]
     );
+    const projRes = await pool.query('SELECT name FROM projects WHERE id = $1', [projectId]);
+    const projectName = projRes.rows.length ? projRes.rows[0].name : null;
+    await notifyAppAdminsIfSiteEngineer(pool, userId, {
+      title: 'إتمام سحب خامات',
+      body:
+        `قام "${userName}" بإتمام سحب خامات من موقع فرعي — مشروع "${projectName || 'غير محدد'}" — مرحلة: ${phase}`,
+      eventType: 'material_withdrawal_completed',
+      actorUserId: userId,
+      actorUserName: userName,
+      projectName,
+    });
+    const hasPermitDocs =
+      (disbursementPermitImagesJson != null &&
+        String(disbursementPermitImagesJson).trim() !== '' &&
+        String(disbursementPermitImagesJson).trim() !== '[]') ||
+      (deliveryPermitImagesJson != null &&
+        String(deliveryPermitImagesJson).trim() !== '' &&
+        String(deliveryPermitImagesJson).trim() !== '[]');
+    if (hasPermitDocs) {
+      await notifyAppAdminsOnDocumentUpload(pool, userId, userName, {
+        title: 'مرفقات سحب خامات',
+        body:
+          `قام "${userName}" بإرفاق أذون صرف/تسليم مع سحب الخامات — مشروع "${projectName || 'غير محدد'}"`,
+        eventType: 'withdrawal_permit_upload',
+        projectName,
+      });
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -2586,7 +2781,7 @@ app.post('/withdrawal-requests', async (req, res) => {
       `رقم الطلب: ${idNum}`;
     await withdrawalInsertNotificationsForRoles(
       pool,
-      ['site_engineer_manager', 'operation_manager'],
+      ['site_engineer_manager', 'operation_manager', 'app_admin'],
       {
         title: 'طلب سحب خامات',
         body: bodyN,
@@ -3162,6 +3357,42 @@ app.post('/executed-plans', async (req, res) => {
         title: 'تأجيل خطة عمل اليوم — يتطلب قرار الغرامة',
         body,
         eventType: 'work_plan_postponed',
+        actorUserId: userId,
+        actorUserName: userName,
+        projectName: projectName,
+      });
+      await notifyAppAdminsIfSiteEngineer(pool, userId, {
+        title: 'تأجيل خطة عمل اليوم',
+        body,
+        eventType: 'work_plan_postponed',
+        actorUserId: userId,
+        actorUserName: userName,
+        projectName: projectName,
+      });
+    } else if (status === 'confirmed') {
+      const displayProject = String(projectName || '').trim() || 'غير محدد';
+      await notifyAppAdminsIfSiteEngineer(pool, userId, {
+        title: 'تأكيد تنفيذ خطة اليوم',
+        body:
+          `قام "${userName}" بتأكيد تنفيذ خطة اليوم — مشروع "${displayProject}"\n` +
+          `تاريخ الخطة: ${formatDateYmd(planDate)}`,
+        eventType: 'work_plan_confirmed',
+        actorUserId: userId,
+        actorUserName: userName,
+        projectName: projectName,
+      });
+    } else if (status === 'confirmed_edited') {
+      const displayProject = String(projectName || '').trim() || 'غير محدد';
+      const modLine =
+        modificationSummary && String(modificationSummary).trim() !== ''
+          ? `\nملخص التعديل: ${String(modificationSummary).trim()}`
+          : '';
+      await notifyAppAdminsIfSiteEngineer(pool, userId, {
+        title: 'تعديل وتنفيذ خطة اليوم',
+        body:
+          `قام "${userName}" بتعديل خطة اليوم وتنفيذها — مشروع "${displayProject}"\n` +
+          `تاريخ الخطة: ${formatDateYmd(planDate)}${modLine}`,
+        eventType: 'work_plan_confirmed_edited',
         actorUserId: userId,
         actorUserName: userName,
         projectName: projectName,

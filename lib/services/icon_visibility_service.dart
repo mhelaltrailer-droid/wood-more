@@ -88,6 +88,9 @@ class IconVisibilityService {
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
       HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
       HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
+      HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
+      HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
+      HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -117,6 +120,9 @@ class IconVisibilityService {
       HomeIconItem(id: 'admin_dashboard', label: 'لوح التحكم'),
       HomeIconItem(id: 'activity_logs', label: 'سجل الحركة'),
       HomeIconItem(id: 'dashboard', label: 'Management Dashboard'),
+      HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
+      HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
+      HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
     ],
   };
 

@@ -27,6 +27,7 @@ import '../screens/postpone_fines_report_screen.dart';
 import '../screens/work_plan_tracking_report_screen.dart';
 import '../screens/icons_control_screen.dart';
 import '../screens/ir_mir_screen.dart';
+import '../screens/module_placeholder_screen.dart';
 import '../screens/warehouses_view_screen.dart';
 import 'route_persistence.dart';
 
@@ -92,6 +93,26 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return IrMirScreen(currentUser: user);
     case 'warehouses-view':
       return WarehousesViewScreen(currentUser: user);
+    case 'ms-sd':
+      return const ModulePlaceholderScreen(
+        title: 'MS-SD',
+        description:
+            'Material Submittal & Shop Drawing\nتقديم الخامات والرسومات التنفيذية',
+        icon: Icons.architecture_outlined,
+      );
+    case 'qs-invs':
+      return const ModulePlaceholderScreen(
+        title: 'QS-INV(s)',
+        description: 'Quantity Survey — Invoices\nحصر الكميات والفواتير',
+        icon: Icons.receipt_long_outlined,
+      );
+    case 'mos-itp':
+      return const ModulePlaceholderScreen(
+        title: 'MoS-ITP',
+        description:
+            'Method of Statement & Inspection and Test Plan\nمنهجية التنفيذ وخطة الفحص والاختبار',
+        icon: Icons.checklist_rtl_outlined,
+      );
     default:
       return null;
   }

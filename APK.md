@@ -50,9 +50,22 @@ On Windows the full path is typically:
 
 ## هيكلة مشروع Z1_EMAAR_F على الهاتف
 
-التطبيق يعرض هيكلة المواقع من **الـ API + PostgreSQL** وليس من ملف SQL على الجهاز. عند كل تشغيل للخادم (`backend/server.js`) يُنفَّذ تلقائياً محتوى `backend/scripts/seed_z1_emaar_f_project_locations.sql` إذا وُجد المشروع **`Z1_EMAAR_F`** في جدول `projects`. **لا حاجة لإعادة بناء APK** بعد تحديث الخادم فقط؛ افتح **هيكلة المشروعات** واختر المشروع ثم اسحب للتحديث أو أعد فتح الشاشة.
+التطبيق يعرض هيكلة المواقع من **الـ API + PostgreSQL** وليس من ملف SQL على الجهاز.
 
-بعد أي تغيير في `backend`: **أعد نشر الخادم** (مثلاً Render) أو أعد التشغيل محلياً حتى تُطبَّق الـ seed.
+**أداة عامة لأي ورقة Excel (كميات كبيرة):** راجع `backend/scripts/README_IMPORT_AR.md` — الأمر `import_project_locations_from_xlsx.js` مع `--file` و`--sheet` و`--project` وإمّا `--out` أو `--execute` (يتطلب `DATABASE_URL` من Render في `backend/.env`).
+
+1. في مجلد `backend` أنشئ `backend/.env` وضع فيه:  
+   `DATABASE_URL=` مع **سلسلة اتصال Neon** الكاملة (كما في لوحة Neon).
+2. نفّذ:
+   ```bash
+   cd backend
+   node scripts/run_z1_emaar_seed_neon.js
+   ```
+   السكربت يضمن وجود المشروع `Z1_EMAAR_F` ثم ينفّذ `scripts/seed_z1_emaar_f_project_locations.sql`.
+
+**بديل:** نسخ محتوى `seed_z1_emaar_f_project_locations.sql` إلى **Neon SQL Editor** وتشغيله يدوياً (بعد التأكد أن المشروع موجود في `projects`).
+
+عند كل تشغيل لخادم **`server.js`** (مثلاً بعد نشر Render)، يُحاول النظام أيضاً تنفيذ نفس الـ seed تلقائياً إذا وُجد الملف والمشروع. **لا حاجة لإعادة بناء APK** بعد تحديث الخادم/قاعدة البيانات فقط؛ افتح **هيكلة المشروعات** واختر المشروع ثم أعد فتح الشاشة.
 
 ## Optional: smaller or split APKs
 

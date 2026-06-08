@@ -17,6 +17,7 @@ import '../screens/engineer_projects_screen.dart';
 import '../screens/engineer_withdraw_materials_screen.dart';
 import '../screens/icons_control_screen.dart';
 import '../screens/ir_mir_screen.dart';
+import '../screens/module_placeholder_screen.dart';
 import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
 import '../screens/postpone_fines_report_screen.dart';
@@ -368,6 +369,57 @@ class HomeIconBuilder {
             context,
             'dashboard',
             const DashboardScreen(),
+          ),
+        );
+      case 'ms_sd':
+        return _lightCard(
+          icon: Icons.architecture_outlined,
+          title: 'MS-SD',
+          subtitle:
+              'Material Submittal & Shop Drawing — تقديم الخامات والرسومات التنفيذية',
+          onTap: () => pushAndSaveRoute(
+            context,
+            'ms-sd',
+            const ModulePlaceholderScreen(
+              title: 'MS-SD',
+              description:
+                  'Material Submittal & Shop Drawing\nتقديم الخامات والرسومات التنفيذية',
+              icon: Icons.architecture_outlined,
+            ),
+          ),
+        );
+      case 'qs_invs':
+        return _lightCard(
+          icon: Icons.receipt_long_outlined,
+          title: 'QS-INV(s)',
+          subtitle:
+              'Quantity Survey — Invoices — حصر الكميات والفواتير',
+          onTap: () => pushAndSaveRoute(
+            context,
+            'qs-invs',
+            const ModulePlaceholderScreen(
+              title: 'QS-INV(s)',
+              description:
+                  'Quantity Survey — Invoices\nحصر الكميات والفواتير',
+              icon: Icons.receipt_long_outlined,
+            ),
+          ),
+        );
+      case 'mos_itp':
+        return _lightCard(
+          icon: Icons.checklist_rtl_outlined,
+          title: 'MoS-ITP',
+          subtitle:
+              'Method of Statement & Inspection and Test Plan — منهجية التنفيذ وخطة الفحص والاختبار',
+          onTap: () => pushAndSaveRoute(
+            context,
+            'mos-itp',
+            const ModulePlaceholderScreen(
+              title: 'MoS-ITP',
+              description:
+                  'Method of Statement & Inspection and Test Plan\nمنهجية التنفيذ وخطة الفحص والاختبار',
+              icon: Icons.checklist_rtl_outlined,
+            ),
           ),
         );
       default:
