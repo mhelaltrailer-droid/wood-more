@@ -29,6 +29,141 @@ class DetailedReportAttachment {
   }
 }
 
+/// اسم مرفق داخلي لحفظ «ملخص ما تم تنفيذه اليوم» عندما لا يدعم الخادم العمود بعد.
+const String kExecutedTodaySummaryAttachmentName = '__executed_today_summary__';
+const String kManualWorkLocationsAttachmentName = '__manual_work_locations__';
+
+bool isExecutedTodaySummaryAttachment(DetailedReportAttachment a) =>
+    a.fileName == kExecutedTodaySummaryAttachmentName;
+
+bool isManualWorkLocationsAttachment(DetailedReportAttachment a) =>
+    a.fileName == kManualWorkLocationsAttachmentName;
+
+bool isReportMetadataAttachment(DetailedReportAttachment a) =>
+    isExecutedTodaySummaryAttachment(a) || isManualWorkLocationsAttachment(a);
+
+String? decodeExecutedTodaySummaryData(String data) {
+  final d = data.trim();
+  if (d.isEmpty) return null;
+  const utf8Prefix = 'data:text/plain;charset=utf-8,';
+  if (d.startsWith(utf8Prefix)) {
+    return Uri.decodeComponent(d.substring(utf8Prefix.length));
+  }
+  const b64Prefix = 'data:text/plain;base64,';
+  if (d.startsWith(b64Prefix)) {
+    try {
+      return utf8.decode(base64Decode(d.substring(b64Prefix.length)));
+    } catch (_) {}
+  }
+  return d;
+}
+
+String encodeExecutedTodaySummaryData(String text) =>
+    'data:text/plain;charset=utf-8,${Uri.encodeComponent(text)}';
+
+String? executedTodaySummaryFromAttachments(
+  List<DetailedReportAttachment> attachments,
+) {
+  for (final a in attachments) {
+    if (!isExecutedTodaySummaryAttachment(a)) continue;
+    final decoded = decodeExecutedTodaySummaryData(a.data);
+    if (decoded != null && decoded.trim().isNotEmpty) {
+      return decoded.trim();
+    }
+  }
+  return null;
+}
+
+List<DetailedReportAttachment> withExecutedTodaySummaryAttachment(
+  List<DetailedReportAttachment> attachments,
+  String? summary,
+) {
+  final kept = attachments
+      .where((a) => !isExecutedTodaySummaryAttachment(a))
+      .toList();
+  final text = summary?.trim();
+  if (text == null || text.isEmpty) return kept;
+  return [
+    ...kept,
+    DetailedReportAttachment(
+      kind: 'metadata',
+      fileName: kExecutedTodaySummaryAttachmentName,
+      data: encodeExecutedTodaySummaryData(text),
+    ),
+  ];
+}
+
+List<String> manualWorkLocationsFromAttachments(
+  List<DetailedReportAttachment> attachments,
+) {
+  for (final a in attachments) {
+    if (!isManualWorkLocationsAttachment(a)) continue;
+    final decoded = decodeExecutedTodaySummaryData(a.data);
+    if (decoded == null || decoded.trim().isEmpty) continue;
+    try {
+      final list = jsonDecode(decoded) as List<dynamic>;
+      return list.map((e) => e.toString()).toList();
+    } catch (_) {}
+  }
+  return const [];
+}
+
+List<DetailedReportLineModel> enrichLinesWithManualWorkLocations(
+  List<DetailedReportLineModel> lines,
+  List<DetailedReportAttachment> attachments,
+) {
+  final manualList = manualWorkLocationsFromAttachments(attachments);
+  if (manualList.isEmpty) return lines;
+  final out = <DetailedReportLineModel>[];
+  for (var i = 0; i < lines.length; i++) {
+    final line = lines[i];
+    final fromDb = line.manualWorkLocation?.trim();
+    if (fromDb != null && fromDb.isNotEmpty) {
+      out.add(line);
+      continue;
+    }
+    final fromMeta = i < manualList.length ? manualList[i].trim() : '';
+    if (fromMeta.isEmpty) {
+      out.add(line);
+      continue;
+    }
+    out.add(
+      DetailedReportLineModel(
+        id: line.id,
+        contractorId: line.contractorId,
+        contractorWorkersCount: line.contractorWorkersCount,
+        selfWorkersCount: line.selfWorkersCount,
+        zoneId: line.zoneId,
+        buildingId: line.buildingId,
+        locationId: line.locationId,
+        manualWorkLocation: fromMeta,
+        phaseId: line.phaseId,
+        workersCount: line.workersCount,
+      ),
+    );
+  }
+  return out;
+}
+
+List<DetailedReportAttachment> withManualWorkLocationsAttachment(
+  List<DetailedReportAttachment> attachments,
+  List<DetailedReportLineModel> lines,
+) {
+  final kept = attachments
+      .where((a) => !isManualWorkLocationsAttachment(a))
+      .toList();
+  final payload = lines.map((l) => (l.manualWorkLocation ?? '').trim()).toList();
+  if (payload.every((s) => s.isEmpty)) return kept;
+  return [
+    ...kept,
+    DetailedReportAttachment(
+      kind: 'metadata',
+      fileName: kManualWorkLocationsAttachmentName,
+      data: encodeExecutedTodaySummaryData(jsonEncode(payload)),
+    ),
+  ];
+}
+
 List<DetailedReportAttachment> parseDetailedReportAttachments(Map<String, dynamic> m) {
   dynamic raw = m['attachments'] ?? m['attachments_json'];
   if (raw is String && raw.trim().isNotEmpty) {
@@ -58,6 +193,8 @@ class DetailedReportLineModel {
   final int? zoneId;
   final int? buildingId;
   final int? locationId;
+  /// موقع عمل يدوي مؤقت عند غياب هيكلة المشروع (خطة عمل الغد).
+  final String? manualWorkLocation;
   final int phaseId;
   final int workersCount;
 
@@ -69,6 +206,7 @@ class DetailedReportLineModel {
     this.zoneId,
     this.buildingId,
     this.locationId,
+    this.manualWorkLocation,
     required this.phaseId,
     required this.workersCount,
   });
@@ -80,6 +218,10 @@ class DetailedReportLineModel {
         if (zoneId != null) 'zoneId': zoneId,
         if (buildingId != null) 'buildingId': buildingId,
         if (locationId != null) 'locationId': locationId,
+        if (manualWorkLocation != null && manualWorkLocation!.trim().isNotEmpty) ...{
+          'manualWorkLocation': manualWorkLocation!.trim(),
+          'manual_work_location': manualWorkLocation!.trim(),
+        },
         'phaseId': phaseId,
         'workersCount': workersCount,
       };
@@ -95,6 +237,9 @@ class DetailedReportLineModel {
       zoneId: m['zone_id'] != null || m['zoneId'] != null ? parse(m['zone_id'] ?? m['zoneId']) : null,
       buildingId: m['building_id'] != null || m['buildingId'] != null ? parse(m['building_id'] ?? m['buildingId']) : null,
       locationId: m['location_id'] != null || m['locationId'] != null ? parse(m['location_id'] ?? m['locationId']) : null,
+      manualWorkLocation:
+          m['manual_work_location']?.toString() ??
+          m['manualWorkLocation']?.toString(),
       phaseId: parse(m['phase_id'] ?? m['phaseId']),
       workersCount: parse(m['workers_count'] ?? m['workersCount']),
     );
@@ -115,6 +260,8 @@ class DetailedReportModel {
   final int? supervisorId;
   final DateTime? createdAt;
   final String? summary;
+  /// ملخص ما تم تنفيذه اليوم (خطة عمل الغد).
+  final String? executedTodaySummary;
   final List<DetailedReportLineModel> lines;
   /// بنود الماليات (اختياري، عند استخدام صفحة التقرير المفصل - الماليات)
   final List<ExpenseItem> expenses;
@@ -131,6 +278,7 @@ class DetailedReportModel {
     this.supervisorId,
     this.createdAt,
     this.summary,
+    this.executedTodaySummary,
     this.lines = const [],
     this.expenses = const [],
     this.attachments = const [],
@@ -144,10 +292,42 @@ class DetailedReportModel {
         if (projectName != null && projectName!.trim().isNotEmpty) 'projectName': projectName!.trim(),
         'supervisorId': supervisorId,
         if (summary != null && summary!.trim().isNotEmpty) 'summary': summary!.trim(),
+        ...executedTodaySummaryJsonEntries(),
         'lines': lines.map((e) => e.toJson()).toList(),
         if (expenses.isNotEmpty) 'expenses': expenses.map((e) => e.toJson()).toList(),
         if (attachments.isNotEmpty) 'attachments': attachments.map((e) => e.toJson()).toList(),
       };
+
+  /// إرسال الحقل بصيغتي camelCase و snake_case لتوافق الخادم.
+  Map<String, String> executedTodaySummaryJsonEntries() {
+    final t = executedTodaySummary?.trim();
+    if (t == null || t.isEmpty) return const {};
+    return {
+      'executedTodaySummary': t,
+      'executed_today_summary': t,
+    };
+  }
+
+  static String? parseExecutedTodaySummary(
+    Map<String, dynamic> m, {
+    List<DetailedReportAttachment>? attachments,
+  }) {
+    for (final key in ['executed_today_summary', 'executedTodaySummary']) {
+      final raw = m[key];
+      if (raw == null) continue;
+      final t = raw.toString().trim();
+      if (t.isNotEmpty) return t;
+    }
+    final fromAttachments = executedTodaySummaryFromAttachments(
+      attachments ?? parseDetailedReportAttachments(m),
+    );
+    if (fromAttachments != null) return fromAttachments;
+    final plan = m['plan'];
+    if (plan is Map) {
+      return parseExecutedTodaySummary(Map<String, dynamic>.from(plan));
+    }
+    return null;
+  }
 
   factory DetailedReportModel.fromMap(Map<String, dynamic> m) {
     int parse(dynamic v) => v is int ? v : int.parse(v.toString());
@@ -173,7 +353,14 @@ class DetailedReportModel {
           : null,
       createdAt: m['created_at'] != null ? DateTime.tryParse(m['created_at'].toString()) : null,
       summary: m['summary']?.toString(),
-      lines: lineModels,
+      executedTodaySummary: parseExecutedTodaySummary(
+        m,
+        attachments: attachmentModels,
+      ),
+      lines: enrichLinesWithManualWorkLocations(
+        lineModels,
+        attachmentModels,
+      ),
       expenses: expenseModels,
       attachments: attachmentModels,
     );

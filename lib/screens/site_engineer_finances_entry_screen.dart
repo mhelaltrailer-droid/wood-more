@@ -85,6 +85,7 @@ class _SiteEngineerFinancesEntryScreenState extends State<SiteEngineerFinancesEn
             supervisorId: cloned.supervisorId,
             createdAt: cloned.createdAt,
             summary: cloned.summary,
+            executedTodaySummary: cloned.executedTodaySummary,
             lines: cloned.lines,
             expenses: cloned.expenses,
             attachments: cloned.attachments,

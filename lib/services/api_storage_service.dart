@@ -23,6 +23,8 @@ import '../models/activity_log_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
+import '../models/ms_sd_record_model.dart';
+import '../models/mos_itp_record_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../models/pending_postpone_fine_action_model.dart';
 import '../models/postpone_fine_report_row_model.dart';
@@ -40,6 +42,33 @@ class ApiStorageService {
 
   String _path(String segment) =>
       baseUrl.endsWith('/') ? '$baseUrl$segment' : '$baseUrl/$segment';
+
+  Exception _apiHttpException(http.Response r, {String? path}) {
+    final body = r.body.trim();
+    final htmlRouteMissing = body.contains('<pre>Cannot GET') ||
+        body.contains('<pre>Cannot POST') ||
+        body.contains('<pre>Cannot PATCH') ||
+        body.contains('<pre>Cannot DELETE');
+    final isHtml = body.startsWith('<!DOCTYPE') ||
+        body.startsWith('<html') ||
+        htmlRouteMissing;
+    final p = path ?? '';
+    if (r.statusCode == 404 && isHtml) {
+      if (p.contains('ms-sd') || p.contains('mos-itp')) {
+        return Exception(
+          'الخادم على Render لا يتضمن مسارات MS-SD / MoS-ITP بعد (404).\n'
+          'يجب نشر آخر نسخة من backend/server.js على خدمة wood-more-api ثم إعادة المحاولة.',
+        );
+      }
+      return Exception(
+        'المسار غير موجود على الخادم (404)${p.isNotEmpty ? ': $p' : ''}',
+      );
+    }
+    if (isHtml) {
+      return Exception('خطأ من الخادم (${r.statusCode}). تحقق من نشر API محدّث.');
+    }
+    return Exception(body.isNotEmpty ? body : 'HTTP ${r.statusCode}');
+  }
 
   Future<http.Response> _httpGet(Uri uri, {int attempts = 3}) async {
     Object? lastError;
@@ -101,7 +130,7 @@ class ApiStorageService {
       body: jsonEncode(body),
       headers: {'Content-Type': 'application/json'},
     );
-    if (r.statusCode >= 400) throw Exception(r.body);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
     if (r.body.isEmpty) return 0;
     final decoded = jsonDecode(r.body);
     return decoded is int ? decoded : int.tryParse(decoded.toString()) ?? 0;
@@ -283,10 +312,29 @@ class ApiStorageService {
         },
       );
       final r = await http.delete(uri);
-      if (r.statusCode >= 400) throw Exception(r.body);
+      if (r.statusCode >= 400) {
+        throw Exception(_deleteUserErrorMessage(r));
+      }
       return;
     }
-    await _delete('users/$id');
+    final uri = Uri.parse(_path('users/$id'));
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) {
+      throw Exception(_deleteUserErrorMessage(r));
+    }
+  }
+
+  String _deleteUserErrorMessage(http.Response r) {
+    try {
+      final decoded = jsonDecode(r.body);
+      if (decoded is Map) {
+        final message = decoded['message']?.toString();
+        if (message != null && message.trim().isNotEmpty) return message.trim();
+        final error = decoded['error']?.toString();
+        if (error != null && error.trim().isNotEmpty) return error.trim();
+      }
+    } catch (_) {}
+    return r.body;
   }
 
   Future<List<ProjectModel>> getProjects() async {
@@ -935,6 +983,7 @@ class ApiStorageService {
   Future<int> addDetailedReport(DetailedReportModel report) async {
     final body = report.toJson();
     body['lines'] = report.lines.map((e) => e.toJson()).toList();
+    body.addAll(report.executedTodaySummaryJsonEntries());
     return _post('detailed-reports', body);
   }
 
@@ -953,6 +1002,7 @@ class ApiStorageService {
       if (report.supervisorId != null) 'supervisorId': report.supervisorId,
       if (report.summary != null && report.summary!.trim().isNotEmpty)
         'summary': report.summary!.trim(),
+      ...report.executedTodaySummaryJsonEntries(),
       'lines': report.lines.map((e) => e.toJson()).toList(),
       'expenses': report.expenses.map((e) => e.toJson()).toList(),
       'attachments': report.attachments.map((e) => e.toJson()).toList(),
@@ -1515,6 +1565,232 @@ class ApiStorageService {
       throw Exception('المرفق غير موجود');
     }
     if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  Future<List<MsSdRecordModel>> listMsSdRecords({
+    required int projectId,
+    required String kind,
+    String? requesterEmail,
+  }) async {
+    final params = <String, String>{
+      'projectId': projectId.toString(),
+      'kind': kind,
+    };
+    final email = requesterEmail?.trim();
+    if (email != null && email.isNotEmpty) {
+      params['requesterEmail'] = email.toLowerCase();
+    }
+    const path = 'ms-sd/records';
+    final uri = Uri.parse(_path(path)).replace(queryParameters: params);
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) => MsSdRecordModel.fromMap(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+  }
+
+  Future<int> addMsSdRecord({
+    required int projectId,
+    required int userId,
+    required String userName,
+    required String kind,
+    required String recordName,
+    String? notes,
+    required List<Map<String, String>> attachments,
+  }) async {
+    return _post('ms-sd/records', {
+      'projectId': projectId,
+      'userId': userId,
+      'userName': userName,
+      'kind': kind,
+      'recordName': recordName,
+      'notes': notes,
+      'attachments': attachments
+          .map(
+            (a) => {
+              'fileName': a['fileName'],
+              'fileMime': a['fileMime'],
+              'fileData': a['fileData'],
+            },
+          )
+          .toList(),
+    });
+  }
+
+  Future<void> updateMsSdRecord(
+    int id, {
+    required String requesterEmail,
+    String? recordName,
+    String? notes,
+    List<int>? removeAttachmentIds,
+    List<Map<String, String>>? addAttachments,
+  }) async {
+    final uri = Uri.parse(_path('ms-sd/records/$id')).replace(
+      queryParameters: {
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
+      },
+    );
+    final body = <String, dynamic>{};
+    if (recordName != null) body['recordName'] = recordName;
+    if (notes != null) body['notes'] = notes;
+    if (removeAttachmentIds != null && removeAttachmentIds.isNotEmpty) {
+      body['removeAttachmentIds'] = removeAttachmentIds;
+    }
+    if (addAttachments != null && addAttachments.isNotEmpty) {
+      body['addAttachments'] = addAttachments
+          .map(
+            (a) => {
+              'fileName': a['fileName'],
+              'fileMime': a['fileMime'],
+              'fileData': a['fileData'],
+            },
+          )
+          .toList();
+    }
+    final r = await http.patch(
+      uri,
+      body: jsonEncode(body),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (r.statusCode == 403) {
+      throw Exception('غير مصرح بتعديل السجل');
+    }
+    if (r.statusCode == 404) {
+      throw _apiHttpException(r, path: 'ms-sd/records/$id');
+    }
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'ms-sd/records/$id');
+  }
+
+  Future<void> deleteMsSdRecord(int id, {required String requesterEmail}) async {
+    final uri = Uri.parse(_path('ms-sd/records/$id')).replace(
+      queryParameters: {
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
+      },
+    );
+    final r = await http.delete(uri);
+    if (r.statusCode == 403) {
+      throw Exception('غير مصرح بحذف السجل');
+    }
+    if (r.statusCode == 404) {
+      throw _apiHttpException(r, path: 'ms-sd/records/$id');
+    }
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'ms-sd/records/$id');
+  }
+
+  Future<List<MosItpRecordModel>> listMosItpRecords({
+    required int projectId,
+    required String kind,
+    String? requesterEmail,
+  }) async {
+    final params = <String, String>{
+      'projectId': projectId.toString(),
+      'kind': kind,
+    };
+    final email = requesterEmail?.trim();
+    if (email != null && email.isNotEmpty) {
+      params['requesterEmail'] = email.toLowerCase();
+    }
+    const path = 'mos-itp/records';
+    final uri = Uri.parse(_path(path)).replace(queryParameters: params);
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) => MosItpRecordModel.fromMap(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+  }
+
+  Future<int> addMosItpRecord({
+    required int projectId,
+    required int userId,
+    required String userName,
+    required String kind,
+    required String recordName,
+    String? notes,
+    required List<Map<String, String>> attachments,
+  }) async {
+    return _post('mos-itp/records', {
+      'projectId': projectId,
+      'userId': userId,
+      'userName': userName,
+      'kind': kind,
+      'recordName': recordName,
+      'notes': notes,
+      'attachments': attachments
+          .map(
+            (a) => {
+              'fileName': a['fileName'],
+              'fileMime': a['fileMime'],
+              'fileData': a['fileData'],
+            },
+          )
+          .toList(),
+    });
+  }
+
+  Future<void> updateMosItpRecord(
+    int id, {
+    required String requesterEmail,
+    String? recordName,
+    String? notes,
+    List<int>? removeAttachmentIds,
+    List<Map<String, String>>? addAttachments,
+  }) async {
+    final uri = Uri.parse(_path('mos-itp/records/$id')).replace(
+      queryParameters: {
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
+      },
+    );
+    final body = <String, dynamic>{};
+    if (recordName != null) body['recordName'] = recordName;
+    if (notes != null) body['notes'] = notes;
+    if (removeAttachmentIds != null && removeAttachmentIds.isNotEmpty) {
+      body['removeAttachmentIds'] = removeAttachmentIds;
+    }
+    if (addAttachments != null && addAttachments.isNotEmpty) {
+      body['addAttachments'] = addAttachments
+          .map(
+            (a) => {
+              'fileName': a['fileName'],
+              'fileMime': a['fileMime'],
+              'fileData': a['fileData'],
+            },
+          )
+          .toList();
+    }
+    final r = await http.patch(
+      uri,
+      body: jsonEncode(body),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (r.statusCode == 403) {
+      throw Exception('غير مصرح بتعديل السجل');
+    }
+    if (r.statusCode == 404) {
+      throw _apiHttpException(r, path: 'mos-itp/records/$id');
+    }
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'mos-itp/records/$id');
+  }
+
+  Future<void> deleteMosItpRecord(int id, {required String requesterEmail}) async {
+    final uri = Uri.parse(_path('mos-itp/records/$id')).replace(
+      queryParameters: {
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
+      },
+    );
+    final r = await http.delete(uri);
+    if (r.statusCode == 403) {
+      throw Exception('غير مصرح بحذف السجل');
+    }
+    if (r.statusCode == 404) {
+      throw _apiHttpException(r, path: 'mos-itp/records/$id');
+    }
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'mos-itp/records/$id');
   }
 
   Future<Map<String, dynamic>> _postReturnMap(

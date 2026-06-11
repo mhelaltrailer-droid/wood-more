@@ -3,14 +3,13 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import '../models/ir_mir_upload_model.dart';
 import '../models/project_location_model.dart';
 import '../models/project_model.dart';
 import '../models/user_model.dart';
 import '../services/storage_service.dart';
 import '../utils/image_upload_compress.dart';
+import '../utils/open_stored_attachment.dart';
 
 /// IR-MIR: مهندس موقع يرفع، المدير/المسؤول/مدير العمليات يعرضون.
 class IrMirScreen extends StatefulWidget {
@@ -35,7 +34,7 @@ class _IrMirScreenState extends State<IrMirScreen> {
 
   bool get _viewerMode =>
       !widget.currentUser.isSiteEngineer &&
-      (widget.currentUser.isManager || widget.currentUser.isAdmin);
+      widget.currentUser.canViewUploadedDocuments;
 
   int? get _currentParentId =>
       _folderPath.isEmpty ? null : _folderPath.last;
@@ -652,7 +651,7 @@ class _IrMirScreenState extends State<IrMirScreen> {
             ),
             onTap: imageBytes != null
                 ? () => _showImagePreview(u, imageBytes)
-                : null,
+                : () => _openAttachment(u),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -676,12 +675,29 @@ class _IrMirScreenState extends State<IrMirScreen> {
   }
 
   Future<void> _openAttachment(IrMirUploadModel u) async {
-    final uri = Uri.tryParse(u.fileData);
-    if (uri != null && await canLaunchUrl(uri)) {
-      await launchUrl(uri, webOnlyWindowName: '_blank');
-    } else if (mounted) {
+    final bytes = _bytesFromDataUrl(u.fileData);
+    if (bytes == null || bytes.isEmpty) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تعذر فتح الملف')),
+        const SnackBar(content: Text('تعذر فتح الملف: بيانات الملف غير صالحة')),
+      );
+      return;
+    }
+    try {
+      final err = await openStoredAttachment(
+        bytes: bytes,
+        fileName: u.fileName,
+        dataUrl: u.fileData,
+      );
+      if (err != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر فتح الملف: $err')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر فتح الملف: $e')),
       );
     }
   }

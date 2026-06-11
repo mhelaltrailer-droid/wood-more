@@ -20,5 +20,15 @@ void main() {
     expect(engineer.canUseNotifications, isFalse);
     expect(admin.isAdmin, isTrue);
     expect(admin.canUseNotifications, isTrue);
+
+    const docController = UserModel(
+      id: 3,
+      name: 'DC',
+      email: 'dc@example.com',
+      role: 'document_controller',
+    );
+    expect(docController.isDocumentController, isTrue);
+    expect(docController.canViewUploadedDocuments, isTrue);
+    expect(docController.canUseNotifications, isFalse);
   });
 }

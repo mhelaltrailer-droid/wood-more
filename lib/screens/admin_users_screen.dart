@@ -74,6 +74,10 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                     DropdownMenuItem(value: 'general_supervisor', child: Text(UserModel.generalSupervisorRoleLabel)),
                     DropdownMenuItem(value: 'operation_manager', child: Text('مدير العمليات')),
                     DropdownMenuItem(value: 'accountant', child: Text('محاسب')),
+                    DropdownMenuItem(
+                      value: 'document_controller',
+                      child: Text(UserModel.documentControllerRoleLabel),
+                    ),
                     DropdownMenuItem(value: 'app_admin', child: Text('مسؤول التطبيق')),
                   ],
                   onChanged: (v) => setDialog(() => role = v ?? role),
@@ -125,11 +129,23 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: const Text('تأكيد'), content: Text('حذف "${u.name}"؟'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حذف'))]));
     if (ok != true || !mounted) return;
     try {
-      await _db.deleteUser(u.id);
+      await _db.deleteUser(
+        u.id,
+        requesterEmail: widget.admin.email,
+      );
       _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحذف'), backgroundColor: Colors.green));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
+      if (!mounted) return;
+      final raw = e.toString();
+      final friendly = raw.contains('user_has_linked_data') ||
+              raw.contains('foreign key') ||
+              raw.contains('violates')
+          ? 'تعذر حذف المستخدم لوجود بيانات مرتبطة به (حضور، تقارير، مخزن…)'
+          : 'خطأ: $e';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(friendly), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -139,6 +155,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     if (r == 'general_supervisor') return UserModel.generalSupervisorRoleLabel;
     if (r == 'operation_manager') return 'مدير العمليات';
     if (r == 'accountant') return 'محاسب';
+    if (r == 'document_controller') return UserModel.documentControllerRoleLabel;
     if (r == 'app_admin') return 'مسؤول التطبيق';
     return r;
   }

@@ -8,7 +8,7 @@ const { Pool } = require('pg');
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '30mb' }));
 const PRIMARY_APP_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 
 async function ensureActivityLogsTable() {
@@ -351,6 +351,109 @@ async function notifyAppAdminsWorkPlanSaved(pool, {
   }
 }
 
+const MS_SD_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+function _estimateBase64PayloadBytes(dataUrl) {
+  let b64 = String(dataUrl || '').trim();
+  if (!b64) return 0;
+  if (b64.startsWith('data:')) {
+    const idx = b64.indexOf(',');
+    if (idx >= 0) b64 = b64.slice(idx + 1);
+  }
+  return Math.floor((b64.length * 3) / 4);
+}
+
+function _normalizeMsSdFileData(fileMime, fileData) {
+  let mime = String(fileMime || '').trim();
+  let data = String(fileData || '').trim();
+  if (!data) return { mime, data };
+  if (!data.startsWith('data:')) {
+    data = `data:${mime || 'application/octet-stream'};base64,${data}`;
+  } else if (!mime) {
+    const m = /^data:([^;]+);/i.exec(data);
+    if (m) mime = m[1];
+  }
+  return { mime, data };
+}
+
+function _isPrimaryAppAdminEmail(email) {
+  return String(email || '')
+    .trim()
+    .toLowerCase() === PRIMARY_APP_ADMIN_EMAIL.toLowerCase();
+}
+
+async function ensureMsSdTables() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ms_sd_records (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('ms', 'sd')),
+        record_name TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ms_sd_attachments (
+        id SERIAL PRIMARY KEY,
+        record_id INTEGER NOT NULL REFERENCES ms_sd_records(id) ON DELETE CASCADE,
+        file_name TEXT NOT NULL,
+        file_mime TEXT NOT NULL,
+        file_data TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_ms_sd_records_project_kind ON ms_sd_records(project_id, kind)',
+    ).catch(() => {});
+    await pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_ms_sd_attachments_record_id ON ms_sd_attachments(record_id)',
+    ).catch(() => {});
+    console.log('ensureMsSdTables: ok');
+  } catch (e) {
+    console.warn('ensureMsSdTables:', e.message);
+  }
+}
+
+async function ensureMosItpTables() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS mos_itp_records (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('mos', 'itp')),
+        record_name TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS mos_itp_attachments (
+        id SERIAL PRIMARY KEY,
+        record_id INTEGER NOT NULL REFERENCES mos_itp_records(id) ON DELETE CASCADE,
+        file_name TEXT NOT NULL,
+        file_mime TEXT NOT NULL,
+        file_data TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_mos_itp_records_project_kind ON mos_itp_records(project_id, kind)',
+    ).catch(() => {});
+    await pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_mos_itp_attachments_record_id ON mos_itp_attachments(record_id)',
+    ).catch(() => {});
+    console.log('ensureMosItpTables: ok');
+  } catch (e) {
+    console.warn('ensureMosItpTables:', e.message);
+  }
+}
+
 async function ensureIrMirUploadsTable() {
   try {
     await pool.query(`
@@ -573,6 +676,8 @@ async function ensureHomeIconsVisibilitySetting() {
         detailed_report: true,
         engineer_projects: true,
         ir_mir: true,
+        ms_sd: true,
+        mos_itp: true,
       },
       accountant: {
         accountant_custody: true,
@@ -587,6 +692,8 @@ async function ensureHomeIconsVisibilitySetting() {
         contractor_report: true,
         ir_mir: true,
         warehouses_view: true,
+        ms_sd: true,
+        mos_itp: true,
       },
       general_supervisor: {
         attendance: true,
@@ -598,6 +705,8 @@ async function ensureHomeIconsVisibilitySetting() {
         contractor_report: true,
         ir_mir: true,
         warehouses_view: true,
+        ms_sd: true,
+        mos_itp: true,
       },
       operation_manager: {
         attendance_reports: true,
@@ -632,6 +741,14 @@ async function ensureHomeIconsVisibilitySetting() {
         ms_sd: true,
         qs_invs: true,
         mos_itp: true,
+      },
+      document_controller: {
+        ir_mir: true,
+        ms_sd: true,
+        qs_invs: true,
+        mos_itp: true,
+        warehouses_view: true,
+        admin_dashboard: true,
       },
     };
     await pool.query(
@@ -693,10 +810,12 @@ async function ensureDetailedReportsTables() {
     await pool.query(`ALTER TABLE detailed_reports ADD COLUMN IF NOT EXISTS summary TEXT`);
     await pool.query(`ALTER TABLE detailed_reports ADD COLUMN IF NOT EXISTS expenses_json TEXT`);
     await pool.query(`ALTER TABLE detailed_reports ADD COLUMN IF NOT EXISTS attachments_json TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE detailed_reports ADD COLUMN IF NOT EXISTS executed_today_summary TEXT`).catch(() => {});
     try {
       await pool.query(`ALTER TABLE detailed_reports ALTER COLUMN project_id DROP NOT NULL`);
     } catch (_) {}
     await pool.query(`ALTER TABLE detailed_report_lines ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES project_locations(id)`).catch(() => {});
+    await pool.query(`ALTER TABLE detailed_report_lines ADD COLUMN IF NOT EXISTS manual_work_location TEXT`).catch(() => {});
     // قواعد قديمة: كان contractor_id إجبارياً — الواجهة تسمح بـ «لايوجد مقاول»
     try {
       await pool.query(`ALTER TABLE detailed_report_lines ALTER COLUMN contractor_id DROP NOT NULL`);
@@ -900,7 +1019,7 @@ app.put('/users/:id/home-icon-order', async (req, res) => {
 app.put('/home-icons-visibility/:role', async (req, res) => {
   try {
     const role = String(req.params.role || '').trim();
-    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'general_supervisor', 'operation_manager', 'app_admin', 'accountant']);
+    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'general_supervisor', 'operation_manager', 'app_admin', 'accountant', 'document_controller']);
     if (!allowedRoles.has(role)) return res.status(400).json({ error: 'invalid role' });
 
     const requesterEmail = String(req.body?.requesterEmail || '').trim().toLowerCase();
@@ -1013,19 +1132,60 @@ app.put('/users/:id', async (req, res) => {
   }
 });
 
+async function deleteUserAndDependencies(client, userId) {
+  const id = parseInt(userId, 10);
+  if (Number.isNaN(id)) throw new Error('invalid user id');
+
+  await client.query('DELETE FROM executed_plans WHERE user_id = $1', [id]);
+  await client.query(
+    'UPDATE executed_plans SET sem_resolved_by_user_id = NULL WHERE sem_resolved_by_user_id = $1',
+    [id],
+  );
+  await client.query('DELETE FROM detailed_reports WHERE user_id = $1', [id]);
+  await client.query('DELETE FROM attendance_records WHERE user_id = $1', [id]);
+  await client.query('DELETE FROM daily_reports WHERE user_id = $1', [id]);
+  await client.query('DELETE FROM engineer_custody WHERE user_id = $1', [id]);
+  await client.query('DELETE FROM engineer_balance WHERE user_id = $1', [id]);
+  await client.query('DELETE FROM location_withdrawal WHERE user_id = $1', [id]);
+  await client.query('DELETE FROM withdrawal_requests WHERE engineer_user_id = $1', [id]);
+  await client.query('DELETE FROM ir_mir_uploads WHERE user_id = $1', [id]);
+  await client.query('DELETE FROM notifications WHERE recipient_user_id = $1', [id]);
+  await client.query('DELETE FROM user_home_icon_orders WHERE user_id = $1', [id]);
+  await client.query('UPDATE project_stock_ledger SET user_id = NULL WHERE user_id = $1', [id]);
+  await client.query('UPDATE activity_logs SET user_id = NULL WHERE user_id = $1', [id]);
+}
+
 app.delete('/users/:id', async (req, res) => {
+  const client = await pool.connect();
   try {
     const requesterEmail = String(req.query.requesterEmail || req.body?.requesterEmail || '').trim().toLowerCase();
-    const target = await pool.query('SELECT email FROM users WHERE id = $1', [req.params.id]);
+    const userId = parseInt(req.params.id, 10);
+    if (Number.isNaN(userId)) return res.status(400).json({ error: 'invalid id' });
+    const target = await client.query('SELECT email FROM users WHERE id = $1', [userId]);
     if (target.rows.length === 0) return res.status(404).json({ error: 'not found' });
     const targetEmail = String(target.rows[0].email || '').trim().toLowerCase();
     if (targetEmail === PRIMARY_APP_ADMIN_EMAIL && requesterEmail !== PRIMARY_APP_ADMIN_EMAIL) {
       return res.status(403).json({ error: 'forbidden_primary_admin' });
     }
-    await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+    await client.query('BEGIN');
+    await deleteUserAndDependencies(client, userId);
+    await client.query('DELETE FROM users WHERE id = $1', [userId]);
+    await client.query('COMMIT');
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: String(e.message) });
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    const msg = String(e.message || e);
+    if (msg.includes('foreign key') || msg.includes('violates')) {
+      return res.status(409).json({
+        error: 'user_has_linked_data',
+        message: 'تعذر حذف المستخدم لوجود بيانات مرتبطة به في النظام',
+      });
+    }
+    res.status(500).json({ error: msg });
+  } finally {
+    client.release();
   }
 });
 
@@ -1644,6 +1804,532 @@ app.delete('/ir-mir/uploads/:id', async (req, res) => {
   }
 });
 
+async function _mapMsSdRecordRow(row, attachments, includeAudit) {
+  const out = {
+    id: parseInt(row.id, 10),
+    project_id: parseInt(row.project_id, 10),
+    kind: row.kind,
+    record_name: row.record_name,
+    notes: row.notes,
+    attachments: (attachments || []).map((a) => ({
+      id: parseInt(a.id, 10),
+      record_id: parseInt(a.record_id, 10),
+      file_name: a.file_name,
+      file_mime: a.file_mime,
+      file_data: a.file_data,
+      created_at: a.created_at,
+    })),
+  };
+  if (includeAudit) {
+    out.user_id = parseInt(row.user_id, 10);
+    out.user_name = row.user_name;
+    out.created_at = row.created_at;
+  }
+  return out;
+}
+
+app.get('/ms-sd/records', async (req, res) => {
+  try {
+    const projectId = parseInt(req.query.projectId ?? req.query.project_id ?? '', 10);
+    if (Number.isNaN(projectId)) {
+      return res.status(400).json({ error: 'projectId required' });
+    }
+    const kind = String(req.query.kind ?? '').trim().toLowerCase();
+    if (kind !== 'ms' && kind !== 'sd') {
+      return res.status(400).json({ error: 'kind must be ms or sd' });
+    }
+    const requesterEmail = String(req.query.requesterEmail ?? '').trim();
+    const includeAudit = _isPrimaryAppAdminEmail(requesterEmail);
+
+    const recs = await pool.query(
+      `SELECT id, project_id, user_id, user_name, kind, record_name, notes, created_at
+       FROM ms_sd_records
+       WHERE project_id = $1 AND kind = $2
+       ORDER BY created_at DESC, id DESC`,
+      [projectId, kind],
+    );
+    const out = [];
+    for (const row of recs.rows) {
+      const att = await pool.query(
+        `SELECT id, record_id, file_name, file_mime, file_data, created_at
+         FROM ms_sd_attachments WHERE record_id = $1 ORDER BY id ASC`,
+        [row.id],
+      );
+      out.push(await _mapMsSdRecordRow(row, att.rows, includeAudit));
+    }
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/ms-sd/records', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const projectId = parseInt(b.projectId ?? b.project_id ?? '', 10);
+    const userId = parseInt(b.userId ?? b.user_id ?? '', 10);
+    const userName = String(b.userName ?? b.user_name ?? '').trim();
+    const kind = String(b.kind ?? '').trim().toLowerCase();
+    const recordName = String(b.recordName ?? b.record_name ?? '').trim();
+    const notes = b.notes != null ? String(b.notes).trim() : null;
+    const attachments = Array.isArray(b.attachments) ? b.attachments : [];
+
+    if (
+      Number.isNaN(projectId) ||
+      Number.isNaN(userId) ||
+      !userName ||
+      !recordName ||
+      (kind !== 'ms' && kind !== 'sd') ||
+      attachments.length === 0
+    ) {
+      return res.status(400).json({ error: 'missing required fields' });
+    }
+
+    const usr = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
+    if (usr.rows.length === 0) return res.status(400).json({ error: 'user not found' });
+    if (String(usr.rows[0].role) !== 'document_controller') {
+      return res.status(403).json({ error: 'only document controller can upload' });
+    }
+
+    const proj = await pool.query('SELECT id FROM projects WHERE id = $1', [projectId]);
+    if (proj.rows.length === 0) return res.status(400).json({ error: 'project not found' });
+
+    const prepared = [];
+    for (const raw of attachments) {
+      const fileName = String(raw.fileName ?? raw.file_name ?? '').trim();
+      let fileMime = String(raw.fileMime ?? raw.file_mime ?? '').trim();
+      let fileData = String(raw.fileData ?? raw.file_data ?? '').trim();
+      if (!fileName || !fileData) {
+        return res.status(400).json({ error: 'invalid attachment' });
+      }
+      const norm = _normalizeMsSdFileData(fileMime, fileData);
+      fileMime = norm.mime;
+      fileData = norm.data;
+      if (_estimateBase64PayloadBytes(fileData) > MS_SD_MAX_FILE_BYTES) {
+        return res.status(400).json({ error: `file too large (max ${MS_SD_MAX_FILE_BYTES} bytes)` });
+      }
+      prepared.push({ fileName, fileMime, fileData });
+    }
+
+    const createdAt = new Date().toISOString();
+    const ins = await pool.query(
+      `INSERT INTO ms_sd_records (
+        project_id, user_id, user_name, kind, record_name, notes, created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [projectId, userId, userName, kind, recordName, notes || null, createdAt],
+    );
+    const recordId = parseInt(ins.rows[0].id, 10);
+    for (const att of prepared) {
+      await pool.query(
+        `INSERT INTO ms_sd_attachments (
+          record_id, file_name, file_mime, file_data, created_at
+        ) VALUES ($1,$2,$3,$4,$5)`,
+        [recordId, att.fileName, att.fileMime, att.fileData, createdAt],
+      );
+    }
+
+    const projRes = await pool.query('SELECT name FROM projects WHERE id = $1', [projectId]);
+    const projName = projRes.rows.length ? projRes.rows[0].name : null;
+    const kindLabel = kind === 'sd' ? 'SD' : 'MS';
+    await notifyAppAdminsOnDocumentUpload(pool, userId, userName, {
+      title: `رفع ${kindLabel} جديد`,
+      body:
+        `قام "${userName}" بإضافة "${recordName}" (${kindLabel}) — مشروع "${projName || 'غير محدد'}"\n` +
+        `رقم السجل: ${recordId}`,
+      eventType: kind === 'sd' ? 'sd_upload' : 'ms_upload',
+      projectName: projName,
+    });
+
+    res.json(recordId);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.patch('/ms-sd/records/:id', async (req, res) => {
+  try {
+    const requesterEmail = String(
+      req.query.requesterEmail ?? req.body?.requesterEmail ?? '',
+    ).trim();
+    if (!_isPrimaryAppAdminEmail(requesterEmail)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+
+    const existing = await pool.query('SELECT * FROM ms_sd_records WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'not found' });
+
+    const b = req.body || {};
+    const recordName =
+      b.recordName != null
+        ? String(b.recordName).trim()
+        : b.record_name != null
+          ? String(b.record_name).trim()
+          : null;
+    const notes = b.notes !== undefined ? (b.notes != null ? String(b.notes).trim() : null) : undefined;
+    const removeIds = Array.isArray(b.removeAttachmentIds)
+      ? b.removeAttachmentIds
+      : Array.isArray(b.remove_attachment_ids)
+        ? b.remove_attachment_ids
+        : [];
+    const addAttachments = Array.isArray(b.addAttachments)
+      ? b.addAttachments
+      : Array.isArray(b.add_attachments)
+        ? b.add_attachments
+        : [];
+
+    if (recordName !== null && recordName === '') {
+      return res.status(400).json({ error: 'recordName cannot be empty' });
+    }
+
+    if (recordName !== null || notes !== undefined) {
+      const fields = [];
+      const params = [];
+      let i = 1;
+      if (recordName !== null) {
+        fields.push(`record_name = $${i}`);
+        params.push(recordName);
+        i += 1;
+      }
+      if (notes !== undefined) {
+        fields.push(`notes = $${i}`);
+        params.push(notes || null);
+        i += 1;
+      }
+      params.push(id);
+      await pool.query(
+        `UPDATE ms_sd_records SET ${fields.join(', ')} WHERE id = $${i}`,
+        params,
+      );
+    }
+
+    for (const rawId of removeIds) {
+      const attId = parseInt(rawId, 10);
+      if (Number.isNaN(attId)) continue;
+      await pool.query(
+        'DELETE FROM ms_sd_attachments WHERE id = $1 AND record_id = $2',
+        [attId, id],
+      );
+    }
+
+    const now = new Date().toISOString();
+    for (const raw of addAttachments) {
+      const fileName = String(raw.fileName ?? raw.file_name ?? '').trim();
+      let fileMime = String(raw.fileMime ?? raw.file_mime ?? '').trim();
+      let fileData = String(raw.fileData ?? raw.file_data ?? '').trim();
+      if (!fileName || !fileData) {
+        return res.status(400).json({ error: 'invalid attachment' });
+      }
+      const norm = _normalizeMsSdFileData(fileMime, fileData);
+      fileMime = norm.mime;
+      fileData = norm.data;
+      if (_estimateBase64PayloadBytes(fileData) > MS_SD_MAX_FILE_BYTES) {
+        return res.status(400).json({ error: `file too large (max ${MS_SD_MAX_FILE_BYTES} bytes)` });
+      }
+      await pool.query(
+        `INSERT INTO ms_sd_attachments (
+          record_id, file_name, file_mime, file_data, created_at
+        ) VALUES ($1,$2,$3,$4,$5)`,
+        [id, fileName, fileMime, fileData, now],
+      );
+    }
+
+    const remain = await pool.query(
+      'SELECT COUNT(*)::int AS c FROM ms_sd_attachments WHERE record_id = $1',
+      [id],
+    );
+    if (parseInt(remain.rows[0].c, 10) === 0) {
+      return res.status(400).json({ error: 'record must have at least one attachment' });
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.delete('/ms-sd/records/:id', async (req, res) => {
+  try {
+    const requesterEmail = String(
+      req.query.requesterEmail ?? req.body?.requesterEmail ?? '',
+    ).trim();
+    if (!_isPrimaryAppAdminEmail(requesterEmail)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+    const del = await pool.query('DELETE FROM ms_sd_records WHERE id = $1 RETURNING id', [id]);
+    if (del.rowCount === 0) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+async function _mapMosItpRecordRow(row, attachments, includeAudit) {
+  const out = {
+    id: parseInt(row.id, 10),
+    project_id: parseInt(row.project_id, 10),
+    kind: row.kind,
+    record_name: row.record_name,
+    notes: row.notes,
+    attachments: (attachments || []).map((a) => ({
+      id: parseInt(a.id, 10),
+      record_id: parseInt(a.record_id, 10),
+      file_name: a.file_name,
+      file_mime: a.file_mime,
+      file_data: a.file_data,
+      created_at: a.created_at,
+    })),
+  };
+  if (includeAudit) {
+    out.user_id = parseInt(row.user_id, 10);
+    out.user_name = row.user_name;
+    out.created_at = row.created_at;
+  }
+  return out;
+}
+
+app.get('/mos-itp/records', async (req, res) => {
+  try {
+    const projectId = parseInt(req.query.projectId ?? req.query.project_id ?? '', 10);
+    if (Number.isNaN(projectId)) {
+      return res.status(400).json({ error: 'projectId required' });
+    }
+    const kind = String(req.query.kind ?? '').trim().toLowerCase();
+    if (kind !== 'mos' && kind !== 'itp') {
+      return res.status(400).json({ error: 'kind must be mos or itp' });
+    }
+    const requesterEmail = String(req.query.requesterEmail ?? '').trim();
+    const includeAudit = _isPrimaryAppAdminEmail(requesterEmail);
+
+    const recs = await pool.query(
+      `SELECT id, project_id, user_id, user_name, kind, record_name, notes, created_at
+       FROM mos_itp_records
+       WHERE project_id = $1 AND kind = $2
+       ORDER BY created_at DESC, id DESC`,
+      [projectId, kind],
+    );
+    const out = [];
+    for (const row of recs.rows) {
+      const att = await pool.query(
+        `SELECT id, record_id, file_name, file_mime, file_data, created_at
+         FROM mos_itp_attachments WHERE record_id = $1 ORDER BY id ASC`,
+        [row.id],
+      );
+      out.push(await _mapMosItpRecordRow(row, att.rows, includeAudit));
+    }
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/mos-itp/records', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const projectId = parseInt(b.projectId ?? b.project_id ?? '', 10);
+    const userId = parseInt(b.userId ?? b.user_id ?? '', 10);
+    const userName = String(b.userName ?? b.user_name ?? '').trim();
+    const kind = String(b.kind ?? '').trim().toLowerCase();
+    const recordName = String(b.recordName ?? b.record_name ?? '').trim();
+    const notes = b.notes != null ? String(b.notes).trim() : null;
+    const attachments = Array.isArray(b.attachments) ? b.attachments : [];
+
+    if (
+      Number.isNaN(projectId) ||
+      Number.isNaN(userId) ||
+      !userName ||
+      !recordName ||
+      (kind !== 'mos' && kind !== 'itp') ||
+      attachments.length === 0
+    ) {
+      return res.status(400).json({ error: 'missing required fields' });
+    }
+
+    const usr = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
+    if (usr.rows.length === 0) return res.status(400).json({ error: 'user not found' });
+    if (String(usr.rows[0].role) !== 'document_controller') {
+      return res.status(403).json({ error: 'only document controller can upload' });
+    }
+
+    const proj = await pool.query('SELECT id FROM projects WHERE id = $1', [projectId]);
+    if (proj.rows.length === 0) return res.status(400).json({ error: 'project not found' });
+
+    const prepared = [];
+    for (const raw of attachments) {
+      const fileName = String(raw.fileName ?? raw.file_name ?? '').trim();
+      let fileMime = String(raw.fileMime ?? raw.file_mime ?? '').trim();
+      let fileData = String(raw.fileData ?? raw.file_data ?? '').trim();
+      if (!fileName || !fileData) {
+        return res.status(400).json({ error: 'invalid attachment' });
+      }
+      const norm = _normalizeMsSdFileData(fileMime, fileData);
+      fileMime = norm.mime;
+      fileData = norm.data;
+      if (_estimateBase64PayloadBytes(fileData) > MS_SD_MAX_FILE_BYTES) {
+        return res.status(400).json({ error: `file too large (max ${MS_SD_MAX_FILE_BYTES} bytes)` });
+      }
+      prepared.push({ fileName, fileMime, fileData });
+    }
+
+    const createdAt = new Date().toISOString();
+    const ins = await pool.query(
+      `INSERT INTO mos_itp_records (
+        project_id, user_id, user_name, kind, record_name, notes, created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+      [projectId, userId, userName, kind, recordName, notes || null, createdAt],
+    );
+    const recordId = parseInt(ins.rows[0].id, 10);
+    for (const att of prepared) {
+      await pool.query(
+        `INSERT INTO mos_itp_attachments (
+          record_id, file_name, file_mime, file_data, created_at
+        ) VALUES ($1,$2,$3,$4,$5)`,
+        [recordId, att.fileName, att.fileMime, att.fileData, createdAt],
+      );
+    }
+
+    const projRes = await pool.query('SELECT name FROM projects WHERE id = $1', [projectId]);
+    const projName = projRes.rows.length ? projRes.rows[0].name : null;
+    const kindLabel = kind === 'itp' ? 'ITP' : 'MoS';
+    await notifyAppAdminsOnDocumentUpload(pool, userId, userName, {
+      title: `رفع ${kindLabel} جديد`,
+      body:
+        `قام "${userName}" بإضافة "${recordName}" (${kindLabel}) — مشروع "${projName || 'غير محدد'}"\n` +
+        `رقم السجل: ${recordId}`,
+      eventType: kind === 'itp' ? 'itp_upload' : 'mos_upload',
+      projectName: projName,
+    });
+
+    res.json(recordId);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.patch('/mos-itp/records/:id', async (req, res) => {
+  try {
+    const requesterEmail = String(
+      req.query.requesterEmail ?? req.body?.requesterEmail ?? '',
+    ).trim();
+    if (!_isPrimaryAppAdminEmail(requesterEmail)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+
+    const existing = await pool.query('SELECT * FROM mos_itp_records WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'not found' });
+
+    const b = req.body || {};
+    const recordName =
+      b.recordName != null
+        ? String(b.recordName).trim()
+        : b.record_name != null
+          ? String(b.record_name).trim()
+          : null;
+    const notes = b.notes !== undefined ? (b.notes != null ? String(b.notes).trim() : null) : undefined;
+    const removeIds = Array.isArray(b.removeAttachmentIds)
+      ? b.removeAttachmentIds
+      : Array.isArray(b.remove_attachment_ids)
+        ? b.remove_attachment_ids
+        : [];
+    const addAttachments = Array.isArray(b.addAttachments)
+      ? b.addAttachments
+      : Array.isArray(b.add_attachments)
+        ? b.add_attachments
+        : [];
+
+    if (recordName !== null && recordName === '') {
+      return res.status(400).json({ error: 'recordName cannot be empty' });
+    }
+
+    if (recordName !== null || notes !== undefined) {
+      const fields = [];
+      const params = [];
+      let i = 1;
+      if (recordName !== null) {
+        fields.push(`record_name = $${i}`);
+        params.push(recordName);
+        i += 1;
+      }
+      if (notes !== undefined) {
+        fields.push(`notes = $${i}`);
+        params.push(notes || null);
+        i += 1;
+      }
+      params.push(id);
+      await pool.query(
+        `UPDATE mos_itp_records SET ${fields.join(', ')} WHERE id = $${i}`,
+        params,
+      );
+    }
+
+    for (const rawId of removeIds) {
+      const attId = parseInt(rawId, 10);
+      if (Number.isNaN(attId)) continue;
+      await pool.query(
+        'DELETE FROM mos_itp_attachments WHERE id = $1 AND record_id = $2',
+        [attId, id],
+      );
+    }
+
+    const now = new Date().toISOString();
+    for (const raw of addAttachments) {
+      const fileName = String(raw.fileName ?? raw.file_name ?? '').trim();
+      let fileMime = String(raw.fileMime ?? raw.file_mime ?? '').trim();
+      let fileData = String(raw.fileData ?? raw.file_data ?? '').trim();
+      if (!fileName || !fileData) {
+        return res.status(400).json({ error: 'invalid attachment' });
+      }
+      const norm = _normalizeMsSdFileData(fileMime, fileData);
+      fileMime = norm.mime;
+      fileData = norm.data;
+      if (_estimateBase64PayloadBytes(fileData) > MS_SD_MAX_FILE_BYTES) {
+        return res.status(400).json({ error: `file too large (max ${MS_SD_MAX_FILE_BYTES} bytes)` });
+      }
+      await pool.query(
+        `INSERT INTO mos_itp_attachments (
+          record_id, file_name, file_mime, file_data, created_at
+        ) VALUES ($1,$2,$3,$4,$5)`,
+        [id, fileName, fileMime, fileData, now],
+      );
+    }
+
+    const remain = await pool.query(
+      'SELECT COUNT(*)::int AS c FROM mos_itp_attachments WHERE record_id = $1',
+      [id],
+    );
+    if (parseInt(remain.rows[0].c, 10) === 0) {
+      return res.status(400).json({ error: 'record must have at least one attachment' });
+    }
+
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.delete('/mos-itp/records/:id', async (req, res) => {
+  try {
+    const requesterEmail = String(
+      req.query.requesterEmail ?? req.body?.requesterEmail ?? '',
+    ).trim();
+    if (!_isPrimaryAppAdminEmail(requesterEmail)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+    const del = await pool.query('DELETE FROM mos_itp_records WHERE id = $1 RETURNING id', [id]);
+    if (del.rowCount === 0) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 app.get('/attendance', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM attendance_records ORDER BY date_time DESC');
@@ -1981,11 +2667,19 @@ app.get('/work-phases', async (req, res) => {
 });
 
 // ——— Detailed reports (التقرير المفصل) ———
+function parseExecutedTodaySummaryFromBody(b) {
+  const raw = b.executedTodaySummary ?? b.executed_today_summary;
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  return s !== '' ? s : null;
+}
+
 app.post('/detailed-reports', async (req, res) => {
   try {
     const b = req.body;
     const now = new Date().toISOString();
     const summary = (b.summary != null && String(b.summary).trim() !== '') ? String(b.summary).trim() : null;
+    const executedTodaySummary = parseExecutedTodaySummaryFromBody(b);
     const projectId = b.projectId != null ? parseInt(b.projectId) : null;
     const projectName = (b.projectName != null && String(b.projectName).trim() !== '') ? String(b.projectName).trim() : null;
     const expensesJson = (b.expenses != null && Array.isArray(b.expenses) && b.expenses.length > 0)
@@ -1993,8 +2687,8 @@ app.post('/detailed-reports', async (req, res) => {
     const attachmentsJson = (b.attachments != null && Array.isArray(b.attachments) && b.attachments.length > 0)
       ? JSON.stringify(b.attachments) : null;
     const r = await pool.query(
-      'INSERT INTO detailed_reports (user_id, user_name, report_datetime, project_id, project_name, supervisor_id, created_at, summary, expenses_json, attachments_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id',
-      [b.userId, b.userName, b.reportDatetime || now, projectId, projectName, b.supervisorId || null, now, summary, expensesJson, attachmentsJson]
+      'INSERT INTO detailed_reports (user_id, user_name, report_datetime, project_id, project_name, supervisor_id, created_at, summary, executed_today_summary, expenses_json, attachments_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id',
+      [b.userId, b.userName, b.reportDatetime || now, projectId, projectName, b.supervisorId || null, now, summary, executedTodaySummary, expensesJson, attachmentsJson]
     );
     const reportId = parseInt(r.rows[0].id);
     const lines = Array.isArray(b.lines) ? b.lines : [];
@@ -2004,8 +2698,8 @@ app.post('/detailed-reports', async (req, res) => {
       const buildingId = line.buildingId != null ? parseInt(line.buildingId) : null;
       const contractorId = line.contractorId != null ? parseInt(line.contractorId) : null;
       await pool.query(
-        'INSERT INTO detailed_report_lines (detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, phase_id, workers_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-        [reportId, contractorId, line.contractorWorkersCount ?? 0, line.selfWorkersCount ?? 0, zoneId, buildingId, locationId, line.phaseId, line.workersCount]
+        'INSERT INTO detailed_report_lines (detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, manual_work_location, phase_id, workers_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+        [reportId, contractorId, line.contractorWorkersCount ?? 0, line.selfWorkersCount ?? 0, zoneId, buildingId, locationId, (line.manualWorkLocation != null && String(line.manualWorkLocation).trim() !== '') ? String(line.manualWorkLocation).trim() : null, line.phaseId, line.workersCount]
       );
     }
     // خصم إجمالي بنود الماليات من رصيد مهندس الموقع (مستخدم كاتب التقرير)
@@ -2051,6 +2745,7 @@ app.get('/detailed-reports', async (req, res) => {
         dr.supervisor_id,
         dr.created_at,
         dr.summary,
+        dr.executed_today_summary,
         dr.expenses_json,
         dr.attachments_json
       FROM detailed_reports dr
@@ -2096,6 +2791,7 @@ app.get('/detailed-reports', async (req, res) => {
         supervisor_id: row.supervisor_id != null ? parseInt(row.supervisor_id) : null,
         created_at: row.created_at,
         summary: row.summary != null ? row.summary : null,
+        executed_today_summary: row.executed_today_summary != null ? row.executed_today_summary : null,
         expenses: expenses,
         attachments: attachments,
       };
@@ -2103,7 +2799,7 @@ app.get('/detailed-reports', async (req, res) => {
     // Load lines for each report
     for (const report of reports) {
       const linesRes = await pool.query(
-        'SELECT id, detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, phase_id, workers_count FROM detailed_report_lines WHERE detailed_report_id = $1 ORDER BY id',
+        'SELECT id, detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, manual_work_location, phase_id, workers_count FROM detailed_report_lines WHERE detailed_report_id = $1 ORDER BY id',
         [report.id]
       );
       report.lines = linesRes.rows.map(l => ({
@@ -2115,6 +2811,7 @@ app.get('/detailed-reports', async (req, res) => {
         zone_id: l.zone_id != null ? parseInt(l.zone_id) : null,
         building_id: l.building_id != null ? parseInt(l.building_id) : null,
         location_id: l.location_id != null ? parseInt(l.location_id) : null,
+        manual_work_location: l.manual_work_location != null ? l.manual_work_location : null,
         phase_id: parseInt(l.phase_id),
         workers_count: parseInt(l.workers_count),
       }));
@@ -2205,6 +2902,7 @@ app.put('/detailed-reports/:id', async (req, res) => {
     if (exists.rows.length === 0) return res.status(404).json({ error: 'not found' });
     const b = req.body || {};
     const summary = (b.summary != null && String(b.summary).trim() !== '') ? String(b.summary).trim() : null;
+    const executedTodaySummary = parseExecutedTodaySummaryFromBody(b);
     const projectId = b.projectId != null ? parseInt(b.projectId, 10) : null;
     const projectName = (b.projectName != null && String(b.projectName).trim() !== '') ? String(b.projectName).trim() : null;
     const expensesJson = (b.expenses != null && Array.isArray(b.expenses) && b.expenses.length > 0)
@@ -2217,8 +2915,8 @@ app.put('/detailed-reports/:id', async (req, res) => {
       await pool.query(
         `UPDATE detailed_reports SET
           user_id = $1, user_name = $2, report_datetime = $3, project_id = $4, project_name = $5,
-          supervisor_id = $6, summary = $7, expenses_json = $8, attachments_json = $9
-         WHERE id = $10`,
+          supervisor_id = $6, summary = $7, executed_today_summary = $8, expenses_json = $9, attachments_json = $10
+         WHERE id = $11`,
         [
           b.userId,
           b.userName,
@@ -2227,6 +2925,7 @@ app.put('/detailed-reports/:id', async (req, res) => {
           projectName,
           b.supervisorId || null,
           summary,
+          executedTodaySummary,
           expensesJson,
           attachmentsJson,
           id,
@@ -2239,8 +2938,8 @@ app.put('/detailed-reports/:id', async (req, res) => {
         const buildingId = line.buildingId != null ? parseInt(line.buildingId, 10) : null;
         const contractorId = line.contractorId != null ? parseInt(line.contractorId, 10) : null;
         await pool.query(
-          'INSERT INTO detailed_report_lines (detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, phase_id, workers_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-          [id, contractorId, line.contractorWorkersCount ?? 0, line.selfWorkersCount ?? 0, zoneId, buildingId, locationId, line.phaseId, line.workersCount]
+          'INSERT INTO detailed_report_lines (detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, manual_work_location, phase_id, workers_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+          [id, contractorId, line.contractorWorkersCount ?? 0, line.selfWorkersCount ?? 0, zoneId, buildingId, locationId, (line.manualWorkLocation != null && String(line.manualWorkLocation).trim() !== '') ? String(line.manualWorkLocation).trim() : null, line.phaseId, line.workersCount]
         );
       }
       await pool.query('COMMIT');
@@ -3957,6 +4656,8 @@ ensurePasswordColumn()
   .then(() => ensureNotificationsTable())
   .then(() => ensurePrivateChatMessagesTable())
   .then(() => ensureIrMirUploadsTable())
+  .then(() => ensureMsSdTables())
+  .then(() => ensureMosItpTables())
   .then(() => ensureWithdrawalRequestsTable())
   .then(() => ensureZ1EmaarFProjectLocationsSeeded())
   .then(() => {

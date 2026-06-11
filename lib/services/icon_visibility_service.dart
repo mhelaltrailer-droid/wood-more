@@ -12,6 +12,16 @@ class IconVisibilityService {
   static const String roleGeneralSupervisor = 'general_supervisor';
   static const String roleOperationManager = 'operation_manager';
   static const String roleAccountant = 'accountant';
+  static const String roleDocumentController = 'document_controller';
+
+  static const List<HomeIconItem> _documentControllerHomeIcons = [
+    HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
+    HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
+    HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
+    HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
+    HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
+    HomeIconItem(id: 'admin_dashboard', label: 'لوح التحكم'),
+  ];
 
   static const List<HomeIconItem> _projectManagerHomeIcons = [
     HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -31,6 +41,8 @@ class IconVisibilityService {
     HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
     HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
     HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
+    HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
+    HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
   ];
 
   static const Map<String, String> roleTitles = {
@@ -40,6 +52,7 @@ class IconVisibilityService {
     roleGeneralSupervisor: 'مشرف عام',
     roleOperationManager: 'Operation manager',
     roleAccountant: 'Accountant',
+    roleDocumentController: 'Document Controller',
   };
 
   static const Map<String, List<HomeIconItem>> roleIcons = {
@@ -56,11 +69,14 @@ class IconVisibilityService {
       HomeIconItem(id: 'detailed_report', label: 'التقرير اليومي'),
       HomeIconItem(id: 'engineer_projects', label: 'المشروعات'),
       HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
+      HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
+      HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
     ],
     roleAccountant: [
       HomeIconItem(id: 'accountant_custody', label: 'العهدة'),
       HomeIconItem(id: 'accountant_finance', label: 'الماليات'),
     ],
+    roleDocumentController: _documentControllerHomeIcons,
     roleSiteEngineerManager: _projectManagerHomeIcons,
     roleGeneralSupervisor: [
       HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),

@@ -23,6 +23,8 @@ import '../models/location_withdrawal_for_period_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
+import '../models/ms_sd_record_model.dart';
+import '../models/mos_itp_record_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../data/default_materials.dart';
 import '../data/materials_display.dart';
@@ -51,7 +53,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 31,
+      version: 35,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -388,6 +390,26 @@ class DatabaseService {
       await db.execute(
         'ALTER TABLE attendance_records ADD COLUMN calendar_date TEXT',
       );
+    }
+    if (oldVersion < 32) {
+      try {
+        await db.execute(
+          'ALTER TABLE detailed_reports ADD COLUMN executed_today_summary TEXT',
+        );
+      } catch (_) {}
+    }
+    if (oldVersion < 33) {
+      try {
+        await db.execute(
+          'ALTER TABLE detailed_report_lines ADD COLUMN manual_work_location TEXT',
+        );
+      } catch (_) {}
+    }
+    if (oldVersion < 34) {
+      await _createMsSdTables(db);
+    }
+    if (oldVersion < 35) {
+      await _createMosItpTables(db);
     }
   }
 
@@ -771,7 +793,65 @@ class DatabaseService {
     ''');
     await _createWithdrawalRequestsTable(db);
     await _createIrMirUploadsTable(db);
+    await _createMsSdTables(db);
+    await _createMosItpTables(db);
     await _seedWorkPhases(db);
+  }
+
+  Future<void> _createMosItpTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS mos_itp_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        user_name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        record_name TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects (id),
+        FOREIGN KEY (user_id) REFERENCES users (id)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS mos_itp_attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_id INTEGER NOT NULL,
+        file_name TEXT NOT NULL,
+        file_mime TEXT NOT NULL,
+        file_data TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (record_id) REFERENCES mos_itp_records (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  Future<void> _createMsSdTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ms_sd_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        user_name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        record_name TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects (id),
+        FOREIGN KEY (user_id) REFERENCES users (id)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ms_sd_attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_id INTEGER NOT NULL,
+        file_name TEXT NOT NULL,
+        file_mime TEXT NOT NULL,
+        file_data TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (record_id) REFERENCES ms_sd_records (id) ON DELETE CASCADE
+      )
+    ''');
   }
 
   Future<void> _createWithdrawalRequestsTable(Database db) async {
@@ -1477,9 +1557,45 @@ class DatabaseService {
     await db.update('users', data, where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<void> deleteUser(int id) async {
+  Future<void> deleteUser(int id, {String? requesterEmail}) async {
     final db = await database;
-    await db.delete('users', where: 'id = ?', whereArgs: [id]);
+    await db.transaction((txn) async {
+      final reportRows = await txn.query(
+        'detailed_reports',
+        columns: ['id'],
+        where: 'user_id = ?',
+        whereArgs: [id],
+      );
+      for (final row in reportRows) {
+        await txn.delete(
+          'detailed_report_lines',
+          where: 'detailed_report_id = ?',
+          whereArgs: [row['id']],
+        );
+      }
+      for (final table in [
+        'withdrawal_requests',
+        'location_withdrawal',
+        'ir_mir_uploads',
+        'notifications',
+        'user_home_icon_order',
+        'engineer_custody',
+        'engineer_balance',
+        'daily_reports',
+        'attendance_records',
+        'detailed_reports',
+      ]) {
+        final col = table == 'withdrawal_requests' ? 'engineer_user_id' : 'user_id';
+        await txn.delete(table, where: '$col = ?', whereArgs: [id]);
+      }
+      await txn.update(
+        'project_stock_ledger',
+        {'user_id': null},
+        where: 'user_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete('users', where: 'id = ?', whereArgs: [id]);
+    });
   }
 
   // ——— إدارة المشاريع ———
@@ -2315,6 +2431,7 @@ class DatabaseService {
       'supervisor_id': report.supervisorId,
       'created_at': (report.createdAt ?? DateTime.now()).toIso8601String(),
       'summary': report.summary,
+      'executed_today_summary': report.executedTodaySummary,
       'expenses_json': report.expenses.isEmpty
           ? null
           : jsonEncode(report.expenses.map((e) => e.toJson()).toList()),
@@ -2331,6 +2448,7 @@ class DatabaseService {
         'zone_id': line.zoneId,
         'building_id': line.buildingId,
         'location_id': line.locationId,
+        'manual_work_location': line.manualWorkLocation,
         'phase_id': line.phaseId,
         'workers_count': line.workersCount,
       });
@@ -2370,6 +2488,7 @@ class DatabaseService {
           'project_name': report.projectName,
           'supervisor_id': report.supervisorId,
           'summary': report.summary,
+          'executed_today_summary': report.executedTodaySummary,
           'expenses_json': report.expenses.isEmpty
               ? null
               : jsonEncode(report.expenses.map((e) => e.toJson()).toList()),
@@ -2389,6 +2508,7 @@ class DatabaseService {
           'zone_id': line.zoneId,
           'building_id': line.buildingId,
           'location_id': line.locationId,
+          'manual_work_location': line.manualWorkLocation,
           'phase_id': line.phaseId,
           'workers_count': line.workersCount,
         });
@@ -2583,6 +2703,7 @@ class DatabaseService {
               'zone_id': l['zone_id'],
               'building_id': l['building_id'],
               'location_id': l['location_id'],
+              'manual_work_location': l['manual_work_location'],
               'phase_id': l['phase_id'],
               'workers_count': l['workers_count'],
             }),
@@ -2640,6 +2761,7 @@ class DatabaseService {
               ? DateTime.tryParse(row['created_at'] as String)
               : null,
           summary: row['summary']?.toString(),
+          executedTodaySummary: row['executed_today_summary']?.toString(),
           lines: lines,
           expenses: expenses,
           attachments: attachments,
@@ -2799,6 +2921,352 @@ class DatabaseService {
       whereArgs: [id],
     );
     if (n == 0) throw Exception('المرفق غير موجود');
+  }
+
+  bool _includeMsSdAudit(String? requesterEmail) =>
+      (requesterEmail ?? '').trim().toLowerCase() ==
+      UserModel.primaryAppAdminEmail.toLowerCase();
+
+  Future<List<MsSdRecordModel>> listMsSdRecords({
+    required int projectId,
+    required String kind,
+    String? requesterEmail,
+  }) async {
+    final db = await database;
+    final includeAudit = _includeMsSdAudit(requesterEmail);
+    final recMaps = await db.query(
+      'ms_sd_records',
+      where: 'project_id = ? AND kind = ?',
+      whereArgs: [projectId, kind],
+      orderBy: 'created_at DESC, id DESC',
+    );
+    final out = <MsSdRecordModel>[];
+    for (final rec in recMaps) {
+      final recordId = rec['id'] as int;
+      final attMaps = await db.query(
+        'ms_sd_attachments',
+        where: 'record_id = ?',
+        whereArgs: [recordId],
+        orderBy: 'id ASC',
+      );
+      final attachments = attMaps
+          .map((m) => MsSdAttachmentModel.fromMap(m))
+          .toList();
+      out.add(
+        MsSdRecordModel(
+          id: recordId,
+          projectId: rec['project_id'] as int,
+          userId: includeAudit ? rec['user_id'] as int? : null,
+          userName: includeAudit ? rec['user_name'] as String? : null,
+          kind: rec['kind'] as String,
+          recordName: rec['record_name'] as String,
+          notes: rec['notes'] as String?,
+          createdAt: includeAudit
+              ? DateTime.tryParse(rec['created_at'] as String? ?? '')
+              : null,
+          attachments: attachments,
+        ),
+      );
+    }
+    return out;
+  }
+
+  Future<int> addMsSdRecord({
+    required int projectId,
+    required int userId,
+    required String userName,
+    required String kind,
+    required String recordName,
+    String? notes,
+    required List<Map<String, String>> attachments,
+  }) async {
+    final db = await database;
+    final createdAt = DateTime.now().toIso8601String();
+    final recordId = await db.insert('ms_sd_records', {
+      'project_id': projectId,
+      'user_id': userId,
+      'user_name': userName,
+      'kind': kind,
+      'record_name': recordName,
+      'notes': notes,
+      'created_at': createdAt,
+    });
+    for (final att in attachments) {
+      await db.insert('ms_sd_attachments', {
+        'record_id': recordId,
+        'file_name': att['fileName'],
+        'file_mime': att['fileMime'],
+        'file_data': att['fileData'],
+        'created_at': createdAt,
+      });
+    }
+    final p = await db.query('projects', where: 'id = ?', whereArgs: [projectId]);
+    final projName = p.isNotEmpty ? (p.first['name'] as String? ?? '') : '';
+    final kindLabel = kind == MsSdRecordModel.kindSd ? 'SD' : 'MS';
+    await _notifyAppAdmins(
+      db,
+      title: 'رفع $kindLabel جديد',
+      body:
+          'قام "$userName" بإضافة "$recordName" ($kindLabel) — مشروع "${projName.isEmpty ? 'غير محدد' : projName}"\n'
+          'رقم السجل: $recordId',
+      eventType: kind == MsSdRecordModel.kindSd ? 'sd_upload' : 'ms_upload',
+      actorUserId: userId,
+      actorUserName: userName,
+      projectName: projName.isEmpty ? null : projName,
+    );
+    return recordId as int;
+  }
+
+  Future<void> updateMsSdRecord(
+    int id, {
+    required String requesterEmail,
+    String? recordName,
+    String? notes,
+    List<int>? removeAttachmentIds,
+    List<Map<String, String>>? addAttachments,
+  }) async {
+    if (!_includeMsSdAudit(requesterEmail)) {
+      throw Exception('غير مصرح بتعديل السجل');
+    }
+    final db = await database;
+    final existing = await db.query(
+      'ms_sd_records',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (existing.isEmpty) throw Exception('السجل غير موجود');
+
+    final values = <String, Object?>{};
+    if (recordName != null) values['record_name'] = recordName;
+    if (notes != null) values['notes'] = notes;
+    if (values.isNotEmpty) {
+      await db.update('ms_sd_records', values, where: 'id = ?', whereArgs: [id]);
+    }
+
+    if (removeAttachmentIds != null) {
+      for (final attId in removeAttachmentIds) {
+        await db.delete(
+          'ms_sd_attachments',
+          where: 'id = ? AND record_id = ?',
+          whereArgs: [attId, id],
+        );
+      }
+    }
+
+    final now = DateTime.now().toIso8601String();
+    if (addAttachments != null) {
+      for (final att in addAttachments) {
+        await db.insert('ms_sd_attachments', {
+          'record_id': id,
+          'file_name': att['fileName'],
+          'file_mime': att['fileMime'],
+          'file_data': att['fileData'],
+          'created_at': now,
+        });
+      }
+    }
+
+    final remain = Sqflite.firstIntValue(
+      await db.rawQuery(
+        'SELECT COUNT(*) FROM ms_sd_attachments WHERE record_id = ?',
+        [id],
+      ),
+    );
+    if ((remain ?? 0) == 0) {
+      throw Exception('يجب أن يبقى مرفق واحد على الأقل');
+    }
+  }
+
+  Future<void> deleteMsSdRecord(int id, {required String requesterEmail}) async {
+    if (!_includeMsSdAudit(requesterEmail)) {
+      throw Exception('غير مصرح بحذف السجل');
+    }
+    final db = await database;
+    await db.delete(
+      'ms_sd_attachments',
+      where: 'record_id = ?',
+      whereArgs: [id],
+    );
+    final n = await db.delete(
+      'ms_sd_records',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (n == 0) throw Exception('السجل غير موجود');
+  }
+
+  bool _includeMosItpAudit(String? requesterEmail) =>
+      (requesterEmail ?? '').trim().toLowerCase() ==
+      UserModel.primaryAppAdminEmail.toLowerCase();
+
+  Future<List<MosItpRecordModel>> listMosItpRecords({
+    required int projectId,
+    required String kind,
+    String? requesterEmail,
+  }) async {
+    final db = await database;
+    final includeAudit = _includeMosItpAudit(requesterEmail);
+    final recMaps = await db.query(
+      'mos_itp_records',
+      where: 'project_id = ? AND kind = ?',
+      whereArgs: [projectId, kind],
+      orderBy: 'created_at DESC, id DESC',
+    );
+    final out = <MosItpRecordModel>[];
+    for (final rec in recMaps) {
+      final recordId = rec['id'] as int;
+      final attMaps = await db.query(
+        'mos_itp_attachments',
+        where: 'record_id = ?',
+        whereArgs: [recordId],
+        orderBy: 'id ASC',
+      );
+      final attachments = attMaps
+          .map((m) => MosItpAttachmentModel.fromMap(m))
+          .toList();
+      out.add(
+        MosItpRecordModel(
+          id: recordId,
+          projectId: rec['project_id'] as int,
+          userId: includeAudit ? rec['user_id'] as int? : null,
+          userName: includeAudit ? rec['user_name'] as String? : null,
+          kind: rec['kind'] as String,
+          recordName: rec['record_name'] as String,
+          notes: rec['notes'] as String?,
+          createdAt: includeAudit
+              ? DateTime.tryParse(rec['created_at'] as String? ?? '')
+              : null,
+          attachments: attachments,
+        ),
+      );
+    }
+    return out;
+  }
+
+  Future<int> addMosItpRecord({
+    required int projectId,
+    required int userId,
+    required String userName,
+    required String kind,
+    required String recordName,
+    String? notes,
+    required List<Map<String, String>> attachments,
+  }) async {
+    final db = await database;
+    final createdAt = DateTime.now().toIso8601String();
+    final recordId = await db.insert('mos_itp_records', {
+      'project_id': projectId,
+      'user_id': userId,
+      'user_name': userName,
+      'kind': kind,
+      'record_name': recordName,
+      'notes': notes,
+      'created_at': createdAt,
+    });
+    for (final att in attachments) {
+      await db.insert('mos_itp_attachments', {
+        'record_id': recordId,
+        'file_name': att['fileName'],
+        'file_mime': att['fileMime'],
+        'file_data': att['fileData'],
+        'created_at': createdAt,
+      });
+    }
+    final p = await db.query('projects', where: 'id = ?', whereArgs: [projectId]);
+    final projName = p.isNotEmpty ? (p.first['name'] as String? ?? '') : '';
+    final kindLabel = kind == MosItpRecordModel.kindItp ? 'ITP' : 'MoS';
+    await _notifyAppAdmins(
+      db,
+      title: 'رفع $kindLabel جديد',
+      body:
+          'قام "$userName" بإضافة "$recordName" ($kindLabel) — مشروع "${projName.isEmpty ? 'غير محدد' : projName}"\n'
+          'رقم السجل: $recordId',
+      eventType: kind == MosItpRecordModel.kindItp ? 'itp_upload' : 'mos_upload',
+      actorUserId: userId,
+      actorUserName: userName,
+      projectName: projName.isEmpty ? null : projName,
+    );
+    return recordId as int;
+  }
+
+  Future<void> updateMosItpRecord(
+    int id, {
+    required String requesterEmail,
+    String? recordName,
+    String? notes,
+    List<int>? removeAttachmentIds,
+    List<Map<String, String>>? addAttachments,
+  }) async {
+    if (!_includeMosItpAudit(requesterEmail)) {
+      throw Exception('غير مصرح بتعديل السجل');
+    }
+    final db = await database;
+    final existing = await db.query(
+      'mos_itp_records',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (existing.isEmpty) throw Exception('السجل غير موجود');
+
+    final values = <String, Object?>{};
+    if (recordName != null) values['record_name'] = recordName;
+    if (notes != null) values['notes'] = notes;
+    if (values.isNotEmpty) {
+      await db.update('mos_itp_records', values, where: 'id = ?', whereArgs: [id]);
+    }
+
+    if (removeAttachmentIds != null) {
+      for (final attId in removeAttachmentIds) {
+        await db.delete(
+          'mos_itp_attachments',
+          where: 'id = ? AND record_id = ?',
+          whereArgs: [attId, id],
+        );
+      }
+    }
+
+    final now = DateTime.now().toIso8601String();
+    if (addAttachments != null) {
+      for (final att in addAttachments) {
+        await db.insert('mos_itp_attachments', {
+          'record_id': id,
+          'file_name': att['fileName'],
+          'file_mime': att['fileMime'],
+          'file_data': att['fileData'],
+          'created_at': now,
+        });
+      }
+    }
+
+    final remain = Sqflite.firstIntValue(
+      await db.rawQuery(
+        'SELECT COUNT(*) FROM mos_itp_attachments WHERE record_id = ?',
+        [id],
+      ),
+    );
+    if ((remain ?? 0) == 0) {
+      throw Exception('يجب أن يبقى مرفق واحد على الأقل');
+    }
+  }
+
+  Future<void> deleteMosItpRecord(int id, {required String requesterEmail}) async {
+    if (!_includeMosItpAudit(requesterEmail)) {
+      throw Exception('غير مصرح بحذف السجل');
+    }
+    final db = await database;
+    await db.delete(
+      'mos_itp_attachments',
+      where: 'record_id = ?',
+      whereArgs: [id],
+    );
+    final n = await db.delete(
+      'mos_itp_records',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (n == 0) throw Exception('السجل غير موجود');
   }
 
   Future<void> _notifyAppAdmins(

@@ -42,6 +42,16 @@ class DetailedReportScreen extends StatefulWidget {
 
   /// إذا كان `true` و`showSummaryField` مفعّلاً، لا يُقبل النموذج بدون نص في حقل الملخص (عند التحرير فقط).
   final bool summaryRequired;
+
+  /// حقل «ملخص ما تم تنفيذه اليوم» (خطة عمل الغد) — يُخزَّن في `executedTodaySummary`.
+  final bool showExecutedTodaySummaryField;
+  final String executedTodaySummaryLabel;
+  final int executedTodaySummaryMaxLines;
+  final bool executedTodaySummaryRequired;
+
+  /// عند غياب هيكلة المشروع: حقل يدوي إلزامي «مكان / موقع العمل» (خطة عمل الغد).
+  final bool allowManualWorkLocationWhenNoStructure;
+
   final bool showAttachmentsSection;
   final bool showPlannedExecutionDate;
   final bool showCraftsmanAndAssistantCounts;
@@ -96,6 +106,11 @@ class DetailedReportScreen extends StatefulWidget {
     this.summaryFieldLabel = 'ملخص الأعمال اليوم',
     this.summaryMaxLines = 3,
     this.summaryRequired = false,
+    this.showExecutedTodaySummaryField = false,
+    this.executedTodaySummaryLabel = 'ملخص ما تم تنفيذه اليوم',
+    this.executedTodaySummaryMaxLines = 4,
+    this.executedTodaySummaryRequired = false,
+    this.allowManualWorkLocationWhenNoStructure = false,
     this.showAttachmentsSection = true,
     this.showPlannedExecutionDate = false,
     this.showCraftsmanAndAssistantCounts = false,
@@ -124,6 +139,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
   final _db = getStorage();
   final _formKey = GlobalKey<FormState>();
   final _summaryController = TextEditingController();
+  final _executedTodaySummaryController = TextEditingController();
   final _otherProjectNameController = TextEditingController();
 
   List<ProjectModel> _projects = [];
@@ -167,6 +183,13 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
 
   bool get _projectHasWorkSites => _projectLocs.any((l) => l.isWorkSite);
 
+  bool get _useManualWorkLocation =>
+      widget.allowManualWorkLocationWhenNoStructure &&
+      !_isOtherProject &&
+      !_loadingStructure &&
+      _projectLocs.isEmpty &&
+      _zones.isEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -198,6 +221,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
   @override
   void dispose() {
     _summaryController.dispose();
+    _executedTodaySummaryController.dispose();
     _otherProjectNameController.dispose();
     _modificationSummaryController.dispose();
     super.dispose();
@@ -386,6 +410,10 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
         report.reportDatetime.day,
       );
       _summaryController.text = report.summary ?? '';
+      _executedTodaySummaryController.text =
+          report.executedTodaySummary ??
+          executedTodaySummaryFromAttachments(report.attachments) ??
+          '';
     });
 
     if (projectId != null) {
@@ -398,7 +426,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     final grouped = <String, WorkSiteBlockRow>{};
     for (final line in report.lines) {
       final key =
-          '${line.contractorId ?? 0}|${line.locationId ?? 0}|${line.zoneId ?? 0}|${line.buildingId ?? 0}';
+          '${line.contractorId ?? 0}|${line.locationId ?? 0}|${line.zoneId ?? 0}|${line.buildingId ?? 0}|${line.manualWorkLocation ?? ''}';
       final row = grouped.putIfAbsent(
         key,
         () =>
@@ -408,6 +436,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
               )
               ..contractorId = line.contractorId
               ..locationId = line.locationId
+              ..manualWorkLocation = line.manualWorkLocation ?? ''
               ..zoneId = line.zoneId
               ..buildingId = line.buildingId
               ..phaseSlots = [],
@@ -587,6 +616,9 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
 
   bool _rowPlaceOk(WorkSiteBlockRow row) {
     if (_isOtherProject) return true;
+    if (_useManualWorkLocation) {
+      return row.manualWorkLocation.trim().isNotEmpty;
+    }
     if (_projectLocs.isNotEmpty) {
       if (row.locationPath.isEmpty) return false;
       final last = _nodeById(row.locationPath.last);
@@ -717,11 +749,13 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                _projectLocs.isNotEmpty
-                    ? (_projectHasWorkSites
-                          ? 'أكمل اختيار الموقع الفرعي حتى «موقع العمل» لكل موقع عمل تُدخل له مراحل'
-                          : 'اختر الموقع الفرعي من الهيكلة لكل موقع عمل')
-                    : 'اختر المنطقة (زون) والمبنى لكل موقع عمل تُدخل له مراحل',
+                _useManualWorkLocation
+                    ? 'اكتب «مكان / موقع العمل» لكل موقع عمل تُدخل له مراحل'
+                    : (_projectLocs.isNotEmpty
+                          ? (_projectHasWorkSites
+                                ? 'أكمل اختيار الموقع الفرعي حتى «موقع العمل» لكل موقع عمل تُدخل له مراحل'
+                                : 'اختر الموقع الفرعي من الهيكلة لكل موقع عمل')
+                          : 'اختر المنطقة (زون) والمبنى لكل موقع عمل تُدخل له مراحل'),
               ),
               backgroundColor: Colors.orange,
             ),
@@ -747,6 +781,10 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
             locationId: _isOtherProject || _projectLocs.isEmpty
                 ? null
                 : block.locationId,
+            manualWorkLocation: _useManualWorkLocation &&
+                    block.manualWorkLocation.trim().isNotEmpty
+                ? block.manualWorkLocation.trim()
+                : null,
             phaseId: slot.phaseId!,
             contractorWorkersCount: widget.showCraftsmanAndAssistantCounts
                 ? slot.craftsmanCount
@@ -786,11 +824,19 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     final exp = widget.editingReportId != null && widget.initialReport != null
         ? List<ExpenseItem>.from(widget.initialReport!.expenses)
         : const <ExpenseItem>[];
-    final att = widget.editingReportId != null && widget.initialReport != null
+    var att = widget.editingReportId != null && widget.initialReport != null
         ? List<DetailedReportAttachment>.from(widget.initialReport!.attachments)
         : (widget.showAttachmentsSection
               ? List<DetailedReportAttachment>.from(_attachments)
               : const <DetailedReportAttachment>[]);
+    if (widget.showExecutedTodaySummaryField) {
+      final executedText = _executedTodaySummaryController.text.trim();
+      att = withExecutedTodaySummaryAttachment(
+        att,
+        executedText.isNotEmpty ? executedText : null,
+      );
+    }
+    att = withManualWorkLocationsAttachment(att, lines);
 
     return DetailedReportModel(
       id: widget.editingReportId,
@@ -809,6 +855,10 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       summary:
           widget.showSummaryField && _summaryController.text.trim().isNotEmpty
           ? _summaryController.text.trim()
+          : null,
+      executedTodaySummary: widget.showExecutedTodaySummaryField &&
+              _executedTodaySummaryController.text.trim().isNotEmpty
+          ? _executedTodaySummaryController.text.trim()
           : null,
       lines: lines,
       expenses: exp,
@@ -1372,6 +1422,36 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                 ),
                 const SizedBox(height: 8),
                 _buildZoneBuildingFields(row),
+              ] else if (_useManualWorkLocation) ...[
+                const Text(
+                  'لا توجد هيكلة للمشروع حالياً؛ اكتب موقع العمل يدوياً مؤقتاً حتى اكتمال الهيكلة.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  key: ValueKey('manual_work_location_$index'),
+                  initialValue: row.manualWorkLocation.isEmpty
+                      ? null
+                      : row.manualWorkLocation,
+                  readOnly: _isReadOnlyNow,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'مكان / موقع العمل *',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                  onChanged: _isReadOnlyNow
+                      ? null
+                      : (v) => row.manualWorkLocation = v,
+                  validator: _isReadOnlyNow
+                      ? null
+                      : (v) {
+                          if (v == null || v.trim().isEmpty) {
+                            return 'حقل «مكان / موقع العمل» إلزامي';
+                          }
+                          return null;
+                        },
+                ),
               ] else ...[
                 const Text(
                   'لا توجد هيكلة مواقع ولا مناطق لهذا المشروع؛ أضفها من مسؤول التطبيق.',
@@ -1924,10 +2004,14 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
           readOnly: false,
           showExecutionActions: false,
           appBarTitle: 'تعديل خطة العمل',
+          allowManualWorkLocationWhenNoStructure:
+              widget.allowManualWorkLocationWhenNoStructure,
+          showExecutedTodaySummaryField: widget.showExecutedTodaySummaryField,
+          executedTodaySummaryRequired: widget.executedTodaySummaryRequired,
           showSummaryField: true,
-          summaryFieldLabel: 'تفاصيل خطة العمل',
-          summaryMaxLines: 6,
-          summaryRequired: true,
+          summaryFieldLabel: widget.summaryFieldLabel,
+          summaryMaxLines: widget.summaryMaxLines,
+          summaryRequired: widget.summaryRequired,
           showAttachmentsSection: false,
           showPlannedExecutionDate: true,
           showCraftsmanAndAssistantCounts: true,
@@ -2172,6 +2256,31 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                     : (v) => setState(() => _selectedSupervisor = v),
               ),
               const SizedBox(height: 24),
+              if (widget.showExecutedTodaySummaryField) ...[
+                TextFormField(
+                  controller: _executedTodaySummaryController,
+                  maxLines: widget.executedTodaySummaryMaxLines,
+                  readOnly: _isReadOnlyNow,
+                  decoration: InputDecoration(
+                    labelText: widget.executedTodaySummaryRequired &&
+                            !_isReadOnlyNow
+                        ? '${widget.executedTodaySummaryLabel} *'
+                        : widget.executedTodaySummaryLabel,
+                    border: const OutlineInputBorder(),
+                    alignLabelWithHint: true,
+                  ),
+                  validator: widget.executedTodaySummaryRequired &&
+                          !_isReadOnlyNow
+                      ? (v) {
+                          if (v == null || v.trim().isEmpty) {
+                            return 'حقل «${widget.executedTodaySummaryLabel}» إلزامي';
+                          }
+                          return null;
+                        }
+                      : null,
+                ),
+                const SizedBox(height: 20),
+              ],
               if (widget.showSummaryField) ...[
                 TextFormField(
                   controller: _summaryController,
@@ -2514,6 +2623,7 @@ class PhaseSlot {
 class WorkSiteBlockRow {
   List<int> locationPath;
   int? locationId;
+  String manualWorkLocation;
   int? zoneId;
   int? buildingId;
   int? contractorId;
@@ -2522,6 +2632,7 @@ class WorkSiteBlockRow {
   WorkSiteBlockRow({
     List<int>? locationPath,
     this.locationId,
+    this.manualWorkLocation = '',
     this.zoneId,
     this.buildingId,
     this.contractorId,

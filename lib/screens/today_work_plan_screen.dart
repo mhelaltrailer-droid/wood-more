@@ -277,6 +277,7 @@ class _TodayWorkPlanScreenState extends State<TodayWorkPlanScreen> {
               supervisorId: cloned.supervisorId,
               createdAt: cloned.createdAt,
               summary: cloned.summary,
+              executedTodaySummary: cloned.executedTodaySummary,
               lines: cloned.lines,
               expenses: cloned.expenses,
               attachments: cloned.attachments,

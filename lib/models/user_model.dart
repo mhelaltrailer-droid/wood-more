@@ -2,11 +2,13 @@
 class UserModel {
   static const String siteEngineerManagerRoleLabel = 'مدير المشروعات';
   static const String generalSupervisorRoleLabel = 'مشرف عام';
+  static const String documentControllerRoleLabel = 'Document Controller';
+  static const String primaryAppAdminEmail = 'mouhammedhelal@gmail.com';
 
   final int id;
   final String name;
   final String email;
-  final String role; // 'site_engineer' | 'site_engineer_manager' | 'general_supervisor' | 'operation_manager' | 'app_admin' | 'accountant'
+  final String role; // 'site_engineer' | 'site_engineer_manager' | 'general_supervisor' | 'operation_manager' | 'app_admin' | 'accountant' | 'document_controller'
 
   const UserModel({
     required this.id,
@@ -16,7 +18,40 @@ class UserModel {
   });
 
   bool get isSiteEngineer => role == 'site_engineer';
+  bool get isDocumentController => role == 'document_controller';
   bool get isGeneralSupervisor => role == 'general_supervisor';
+
+  /// رفع سجلات MS-SD (Document Controller فقط).
+  bool get canUploadMsSd => isDocumentController;
+
+  /// عرض سجلات MS-SD (DC + مهندس/مدير/مشرف/عمليات).
+  bool get canViewMsSd =>
+      isDocumentController ||
+      isSiteEngineer ||
+      isManager ||
+      isGeneralSupervisor;
+
+  /// تعديل/حذف سجلات MS-SD بعد الحفظ — المسؤول المحدد فقط.
+  bool get canManageMsSdRecords =>
+      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+
+  /// رفع سجلات MoS-ITP (Document Controller فقط).
+  bool get canUploadMosItp => isDocumentController;
+
+  /// عرض سجلات MoS-ITP (DC + مهندس/مدير/مشرف/عمليات).
+  bool get canViewMosItp =>
+      isDocumentController ||
+      isSiteEngineer ||
+      isManager ||
+      isGeneralSupervisor;
+
+  /// تعديل/حذف سجلات MoS-ITP بعد الحفظ — المسؤول المحدد فقط.
+  bool get canManageMosItpRecords =>
+      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+
+  /// عرض مرفقات IR/MIR ووحدات المستندات (بدون رفع من مهندس الموقع).
+  bool get canViewUploadedDocuments =>
+      isManager || isAdmin || isDocumentController;
   bool get isManager =>
       role == 'site_engineer_manager' ||
       role == 'general_supervisor' ||

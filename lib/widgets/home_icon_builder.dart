@@ -17,6 +17,8 @@ import '../screens/engineer_projects_screen.dart';
 import '../screens/engineer_withdraw_materials_screen.dart';
 import '../screens/icons_control_screen.dart';
 import '../screens/ir_mir_screen.dart';
+import '../screens/ms_sd_screen.dart';
+import '../screens/mos_itp_screen.dart';
 import '../screens/module_placeholder_screen.dart';
 import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
@@ -372,21 +374,28 @@ class HomeIconBuilder {
           ),
         );
       case 'ms_sd':
+        final msSdScreen = MsSdScreen(currentUser: user);
+        final msSdSubtitle = user.canUploadMsSd
+            ? 'تقديم الخامات والرسومات التنفيذية — إضافة MS و SD'
+            : 'عرض سجلات MS-SD المرفوعة من Document Controller';
+        if (user.isSiteEngineer && !user.canUploadMsSd) {
+          return _lightCard(
+            icon: Icons.architecture_outlined,
+            title: 'MS-SD',
+            subtitle: msSdSubtitle,
+            onTap: () => _openAfterAttendanceCheck(
+              context: context,
+              user: user,
+              routeName: 'ms-sd',
+              screen: msSdScreen,
+            ),
+          );
+        }
         return _lightCard(
           icon: Icons.architecture_outlined,
           title: 'MS-SD',
-          subtitle:
-              'Material Submittal & Shop Drawing — تقديم الخامات والرسومات التنفيذية',
-          onTap: () => pushAndSaveRoute(
-            context,
-            'ms-sd',
-            const ModulePlaceholderScreen(
-              title: 'MS-SD',
-              description:
-                  'Material Submittal & Shop Drawing\nتقديم الخامات والرسومات التنفيذية',
-              icon: Icons.architecture_outlined,
-            ),
-          ),
+          subtitle: msSdSubtitle,
+          onTap: () => pushAndSaveRoute(context, 'ms-sd', msSdScreen),
         );
       case 'qs_invs':
         return _lightCard(
@@ -406,21 +415,28 @@ class HomeIconBuilder {
           ),
         );
       case 'mos_itp':
+        final mosItpScreen = MosItpScreen(currentUser: user);
+        final mosItpSubtitle = user.canUploadMosItp
+            ? 'منهجية التنفيذ وخطة الفحص — إضافة MoS و ITP'
+            : 'عرض سجلات MoS-ITP المرفوعة من Document Controller';
+        if (user.isSiteEngineer && !user.canUploadMosItp) {
+          return _lightCard(
+            icon: Icons.checklist_rtl_outlined,
+            title: 'MoS-ITP',
+            subtitle: mosItpSubtitle,
+            onTap: () => _openAfterAttendanceCheck(
+              context: context,
+              user: user,
+              routeName: 'mos-itp',
+              screen: mosItpScreen,
+            ),
+          );
+        }
         return _lightCard(
           icon: Icons.checklist_rtl_outlined,
           title: 'MoS-ITP',
-          subtitle:
-              'Method of Statement & Inspection and Test Plan — منهجية التنفيذ وخطة الفحص والاختبار',
-          onTap: () => pushAndSaveRoute(
-            context,
-            'mos-itp',
-            const ModulePlaceholderScreen(
-              title: 'MoS-ITP',
-              description:
-                  'Method of Statement & Inspection and Test Plan\nمنهجية التنفيذ وخطة الفحص والاختبار',
-              icon: Icons.checklist_rtl_outlined,
-            ),
-          ),
+          subtitle: mosItpSubtitle,
+          onTap: () => pushAndSaveRoute(context, 'mos-itp', mosItpScreen),
         );
       default:
         return const SizedBox.shrink();

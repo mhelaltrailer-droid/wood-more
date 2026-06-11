@@ -325,7 +325,8 @@ CREATE TABLE IF NOT EXISTS detailed_reports (
   project_name TEXT,
   supervisor_id INTEGER REFERENCES supervisors(id),
   created_at TEXT NOT NULL,
-  summary TEXT
+  summary TEXT,
+  executed_today_summary TEXT
 );
 
 CREATE TABLE IF NOT EXISTS detailed_report_lines (
@@ -425,6 +426,54 @@ CREATE TABLE IF NOT EXISTS ir_mir_uploads (
 
 CREATE INDEX IF NOT EXISTS idx_ir_mir_project_kind ON ir_mir_uploads(project_id, kind);
 CREATE INDEX IF NOT EXISTS idx_ir_mir_location_phase ON ir_mir_uploads(location_id, phase);
+
+-- MS-SD: سجلات Material Submittal و Shop Drawing
+CREATE TABLE IF NOT EXISTS ms_sd_records (
+  id SERIAL PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('ms', 'sd')),
+  record_name TEXT NOT NULL,
+  notes TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ms_sd_attachments (
+  id SERIAL PRIMARY KEY,
+  record_id INTEGER NOT NULL REFERENCES ms_sd_records(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  file_mime TEXT NOT NULL,
+  file_data TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ms_sd_records_project_kind ON ms_sd_records(project_id, kind);
+CREATE INDEX IF NOT EXISTS idx_ms_sd_attachments_record_id ON ms_sd_attachments(record_id);
+
+-- MoS-ITP: سجلات Method of Statement و Inspection and Test Plan
+CREATE TABLE IF NOT EXISTS mos_itp_records (
+  id SERIAL PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('mos', 'itp')),
+  record_name TEXT NOT NULL,
+  notes TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mos_itp_attachments (
+  id SERIAL PRIMARY KEY,
+  record_id INTEGER NOT NULL REFERENCES mos_itp_records(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  file_mime TEXT NOT NULL,
+  file_data TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mos_itp_records_project_kind ON mos_itp_records(project_id, kind);
+CREATE INDEX IF NOT EXISTS idx_mos_itp_attachments_record_id ON mos_itp_attachments(record_id);
 
 -- بيانات تجريبية للتقرير المفصل: فيلات D1–D5 وبرجولات shed01, shed02 لمشروع Cairo gate_ACC_W
 DO $$

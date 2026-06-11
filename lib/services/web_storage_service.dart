@@ -22,6 +22,8 @@ import '../models/location_withdrawal_for_period_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/private_chat_message_model.dart';
 import '../models/ir_mir_upload_model.dart';
+import '../models/ms_sd_record_model.dart';
+import '../models/mos_itp_record_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../data/default_materials.dart';
 import 'home_icon_order_service.dart';
@@ -56,6 +58,8 @@ class WebStorageService {
   static const _notificationsKey = 'wood_notifications';
   static const _privateChatMessagesKey = 'wood_private_chat_messages';
   static const _irMirUploadsKey = 'wood_ir_mir_uploads';
+  static const _msSdRecordsKey = 'wood_ms_sd_records';
+  static const _mosItpRecordsKey = 'wood_mos_itp_records';
 
   Future<SharedPreferences> get _prefs async =>
       await SharedPreferences.getInstance();
@@ -298,6 +302,12 @@ class WebStorageService {
     }
     if (prefs.getString(_irMirUploadsKey) == null) {
       await prefs.setString(_irMirUploadsKey, jsonEncode(<Map<String, dynamic>>[]));
+    }
+    if (prefs.getString(_msSdRecordsKey) == null) {
+      await prefs.setString(_msSdRecordsKey, jsonEncode(<Map<String, dynamic>>[]));
+    }
+    if (prefs.getString(_mosItpRecordsKey) == null) {
+      await prefs.setString(_mosItpRecordsKey, jsonEncode(<Map<String, dynamic>>[]));
     }
     if (prefs.getString(_attendanceKey) == null) {
       await prefs.setString(_attendanceKey, jsonEncode([]));
@@ -1088,7 +1098,7 @@ class WebStorageService {
     await prefs.setString(_usersKey, jsonEncode(list));
   }
 
-  Future<void> deleteUser(int id) async {
+  Future<void> deleteUser(int id, {String? requesterEmail}) async {
     await _initData();
     final prefs = await _prefs;
     final list = (jsonDecode(prefs.getString(_usersKey)!) as List)
@@ -2355,6 +2365,410 @@ class WebStorageService {
     }
     if (!found) throw Exception('المرفق غير موجود');
     await prefs.setString(_irMirUploadsKey, jsonEncode(next));
+  }
+
+  bool _includeMsSdAudit(String? requesterEmail) =>
+      (requesterEmail ?? '').trim().toLowerCase() ==
+      UserModel.primaryAppAdminEmail.toLowerCase();
+
+  List<Map<String, dynamic>> _readMsSdRecordsRaw(SharedPreferences prefs) {
+    final raw = prefs.getString(_msSdRecordsKey) ?? '[]';
+    return (jsonDecode(raw) as List<dynamic>)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<void> _writeMsSdRecordsRaw(
+    SharedPreferences prefs,
+    List<Map<String, dynamic>> list,
+  ) async {
+    await prefs.setString(_msSdRecordsKey, jsonEncode(list));
+  }
+
+  Future<List<MsSdRecordModel>> listMsSdRecords({
+    required int projectId,
+    required String kind,
+    String? requesterEmail,
+  }) async {
+    final prefs = await _prefs;
+    final includeAudit = _includeMsSdAudit(requesterEmail);
+    final rows = _readMsSdRecordsRaw(prefs)
+        .where(
+          (m) =>
+              (m['project_id'] == projectId || m['projectId'] == projectId) &&
+              (m['kind']?.toString().toLowerCase() ?? '') == kind.toLowerCase(),
+        )
+        .toList();
+    rows.sort((a, b) {
+      final da = DateTime.tryParse(a['created_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final db = DateTime.tryParse(b['created_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final c = db.compareTo(da);
+      if (c != 0) return c;
+      final ia = a['id'] is int
+          ? a['id'] as int
+          : int.tryParse(a['id']?.toString() ?? '') ?? 0;
+      final ib = b['id'] is int
+          ? b['id'] as int
+          : int.tryParse(b['id']?.toString() ?? '') ?? 0;
+      return ib.compareTo(ia);
+    });
+    return rows.map((m) {
+      final map = Map<String, dynamic>.from(m);
+      if (!includeAudit) {
+        map.remove('user_id');
+        map.remove('userId');
+        map.remove('user_name');
+        map.remove('userName');
+        map.remove('created_at');
+        map.remove('createdAt');
+      }
+      return MsSdRecordModel.fromMap(map);
+    }).toList();
+  }
+
+  Future<int> addMsSdRecord({
+    required int projectId,
+    required int userId,
+    required String userName,
+    required String kind,
+    required String recordName,
+    String? notes,
+    required List<Map<String, String>> attachments,
+  }) async {
+    final prefs = await _prefs;
+    final list = _readMsSdRecordsRaw(prefs);
+    var nextId = 1;
+    if (list.isNotEmpty) {
+      nextId = list
+              .map(
+                (e) => e['id'] is int
+                    ? e['id'] as int
+                    : int.tryParse(e['id']?.toString() ?? '') ?? 0,
+              )
+              .reduce((a, b) => a > b ? a : b) +
+          1;
+    }
+    final createdAt = DateTime.now().toIso8601String();
+    var nextAttId = 1;
+    for (final rec in list) {
+      final atts = rec['attachments'];
+      if (atts is List) {
+        for (final a in atts) {
+          if (a is Map) {
+            final id = a['id'] is int
+                ? a['id'] as int
+                : int.tryParse(a['id']?.toString() ?? '') ?? 0;
+            if (id >= nextAttId) nextAttId = id + 1;
+          }
+        }
+      }
+    }
+    final attOut = <Map<String, dynamic>>[];
+    for (final att in attachments) {
+      attOut.add({
+        'id': nextAttId,
+        'record_id': nextId,
+        'file_name': att['fileName'],
+        'file_mime': att['fileMime'],
+        'file_data': att['fileData'],
+        'created_at': createdAt,
+      });
+      nextAttId += 1;
+    }
+    list.add({
+      'id': nextId,
+      'project_id': projectId,
+      'user_id': userId,
+      'user_name': userName,
+      'kind': kind,
+      'record_name': recordName,
+      'notes': notes,
+      'created_at': createdAt,
+      'attachments': attOut,
+    });
+    await _writeMsSdRecordsRaw(prefs, list);
+    return nextId;
+  }
+
+  Future<void> updateMsSdRecord(
+    int id, {
+    required String requesterEmail,
+    String? recordName,
+    String? notes,
+    List<int>? removeAttachmentIds,
+    List<Map<String, String>>? addAttachments,
+  }) async {
+    if (!_includeMsSdAudit(requesterEmail)) {
+      throw Exception('غير مصرح بتعديل السجل');
+    }
+    final prefs = await _prefs;
+    final list = _readMsSdRecordsRaw(prefs);
+    final idx = list.indexWhere((m) {
+      final eid = m['id'] is int
+          ? m['id'] as int
+          : int.tryParse(m['id']?.toString() ?? '') ?? 0;
+      return eid == id;
+    });
+    if (idx < 0) throw Exception('السجل غير موجود');
+    final rec = Map<String, dynamic>.from(list[idx]);
+    if (recordName != null) rec['record_name'] = recordName;
+    if (notes != null) rec['notes'] = notes;
+    final atts = (rec['attachments'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    if (removeAttachmentIds != null && removeAttachmentIds.isNotEmpty) {
+      atts.removeWhere((a) {
+        final aid = a['id'] is int
+            ? a['id'] as int
+            : int.tryParse(a['id']?.toString() ?? '') ?? 0;
+        return removeAttachmentIds.contains(aid);
+      });
+    }
+    if (addAttachments != null && addAttachments.isNotEmpty) {
+      var nextAttId = 1;
+      for (final a in atts) {
+        final aid = a['id'] is int
+            ? a['id'] as int
+            : int.tryParse(a['id']?.toString() ?? '') ?? 0;
+        if (aid >= nextAttId) nextAttId = aid + 1;
+      }
+      final now = DateTime.now().toIso8601String();
+      for (final att in addAttachments) {
+        atts.add({
+          'id': nextAttId,
+          'record_id': id,
+          'file_name': att['fileName'],
+          'file_mime': att['fileMime'],
+          'file_data': att['fileData'],
+          'created_at': now,
+        });
+        nextAttId += 1;
+      }
+    }
+    if (atts.isEmpty) {
+      throw Exception('يجب أن يبقى مرفق واحد على الأقل');
+    }
+    rec['attachments'] = atts;
+    list[idx] = rec;
+    await _writeMsSdRecordsRaw(prefs, list);
+  }
+
+  Future<void> deleteMsSdRecord(int id, {required String requesterEmail}) async {
+    if (!_includeMsSdAudit(requesterEmail)) {
+      throw Exception('غير مصرح بحذف السجل');
+    }
+    final prefs = await _prefs;
+    final list = _readMsSdRecordsRaw(prefs);
+    final next = list.where((m) {
+      final eid = m['id'] is int
+          ? m['id'] as int
+          : int.tryParse(m['id']?.toString() ?? '') ?? 0;
+      return eid != id;
+    }).toList();
+    if (next.length == list.length) throw Exception('السجل غير موجود');
+    await _writeMsSdRecordsRaw(prefs, next);
+  }
+
+  List<Map<String, dynamic>> _readMosItpRecordsRaw(SharedPreferences prefs) {
+    final raw = prefs.getString(_mosItpRecordsKey) ?? '[]';
+    return (jsonDecode(raw) as List<dynamic>)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<void> _writeMosItpRecordsRaw(
+    SharedPreferences prefs,
+    List<Map<String, dynamic>> list,
+  ) async {
+    await prefs.setString(_mosItpRecordsKey, jsonEncode(list));
+  }
+
+  Future<List<MosItpRecordModel>> listMosItpRecords({
+    required int projectId,
+    required String kind,
+    String? requesterEmail,
+  }) async {
+    final prefs = await _prefs;
+    final includeAudit = _includeMsSdAudit(requesterEmail);
+    final rows = _readMosItpRecordsRaw(prefs)
+        .where(
+          (m) =>
+              (m['project_id'] == projectId || m['projectId'] == projectId) &&
+              (m['kind']?.toString().toLowerCase() ?? '') == kind.toLowerCase(),
+        )
+        .toList();
+    rows.sort((a, b) {
+      final da = DateTime.tryParse(a['created_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final db = DateTime.tryParse(b['created_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final c = db.compareTo(da);
+      if (c != 0) return c;
+      final ia = a['id'] is int
+          ? a['id'] as int
+          : int.tryParse(a['id']?.toString() ?? '') ?? 0;
+      final ib = b['id'] is int
+          ? b['id'] as int
+          : int.tryParse(b['id']?.toString() ?? '') ?? 0;
+      return ib.compareTo(ia);
+    });
+    return rows.map((m) {
+      final map = Map<String, dynamic>.from(m);
+      if (!includeAudit) {
+        map.remove('user_id');
+        map.remove('userId');
+        map.remove('user_name');
+        map.remove('userName');
+        map.remove('created_at');
+        map.remove('createdAt');
+      }
+      return MosItpRecordModel.fromMap(map);
+    }).toList();
+  }
+
+  Future<int> addMosItpRecord({
+    required int projectId,
+    required int userId,
+    required String userName,
+    required String kind,
+    required String recordName,
+    String? notes,
+    required List<Map<String, String>> attachments,
+  }) async {
+    final prefs = await _prefs;
+    final list = _readMosItpRecordsRaw(prefs);
+    var nextId = 1;
+    if (list.isNotEmpty) {
+      nextId = list
+              .map(
+                (e) => e['id'] is int
+                    ? e['id'] as int
+                    : int.tryParse(e['id']?.toString() ?? '') ?? 0,
+              )
+              .reduce((a, b) => a > b ? a : b) +
+          1;
+    }
+    final createdAt = DateTime.now().toIso8601String();
+    var nextAttId = 1;
+    for (final rec in list) {
+      final atts = rec['attachments'];
+      if (atts is List) {
+        for (final a in atts) {
+          if (a is Map) {
+            final id = a['id'] is int
+                ? a['id'] as int
+                : int.tryParse(a['id']?.toString() ?? '') ?? 0;
+            if (id >= nextAttId) nextAttId = id + 1;
+          }
+        }
+      }
+    }
+    final attOut = <Map<String, dynamic>>[];
+    for (final att in attachments) {
+      attOut.add({
+        'id': nextAttId,
+        'record_id': nextId,
+        'file_name': att['fileName'],
+        'file_mime': att['fileMime'],
+        'file_data': att['fileData'],
+        'created_at': createdAt,
+      });
+      nextAttId += 1;
+    }
+    list.add({
+      'id': nextId,
+      'project_id': projectId,
+      'user_id': userId,
+      'user_name': userName,
+      'kind': kind,
+      'record_name': recordName,
+      'notes': notes,
+      'created_at': createdAt,
+      'attachments': attOut,
+    });
+    await _writeMosItpRecordsRaw(prefs, list);
+    return nextId;
+  }
+
+  Future<void> updateMosItpRecord(
+    int id, {
+    required String requesterEmail,
+    String? recordName,
+    String? notes,
+    List<int>? removeAttachmentIds,
+    List<Map<String, String>>? addAttachments,
+  }) async {
+    if (!_includeMsSdAudit(requesterEmail)) {
+      throw Exception('غير مصرح بتعديل السجل');
+    }
+    final prefs = await _prefs;
+    final list = _readMosItpRecordsRaw(prefs);
+    final idx = list.indexWhere((m) {
+      final eid = m['id'] is int
+          ? m['id'] as int
+          : int.tryParse(m['id']?.toString() ?? '') ?? 0;
+      return eid == id;
+    });
+    if (idx < 0) throw Exception('السجل غير موجود');
+    final rec = Map<String, dynamic>.from(list[idx]);
+    if (recordName != null) rec['record_name'] = recordName;
+    if (notes != null) rec['notes'] = notes;
+    final atts = (rec['attachments'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    if (removeAttachmentIds != null && removeAttachmentIds.isNotEmpty) {
+      atts.removeWhere((a) {
+        final aid = a['id'] is int
+            ? a['id'] as int
+            : int.tryParse(a['id']?.toString() ?? '') ?? 0;
+        return removeAttachmentIds.contains(aid);
+      });
+    }
+    if (addAttachments != null && addAttachments.isNotEmpty) {
+      var nextAttId = 1;
+      for (final a in atts) {
+        final aid = a['id'] is int
+            ? a['id'] as int
+            : int.tryParse(a['id']?.toString() ?? '') ?? 0;
+        if (aid >= nextAttId) nextAttId = aid + 1;
+      }
+      final now = DateTime.now().toIso8601String();
+      for (final att in addAttachments) {
+        atts.add({
+          'id': nextAttId,
+          'record_id': id,
+          'file_name': att['fileName'],
+          'file_mime': att['fileMime'],
+          'file_data': att['fileData'],
+          'created_at': now,
+        });
+        nextAttId += 1;
+      }
+    }
+    if (atts.isEmpty) {
+      throw Exception('يجب أن يبقى مرفق واحد على الأقل');
+    }
+    rec['attachments'] = atts;
+    list[idx] = rec;
+    await _writeMosItpRecordsRaw(prefs, list);
+  }
+
+  Future<void> deleteMosItpRecord(int id, {required String requesterEmail}) async {
+    if (!_includeMsSdAudit(requesterEmail)) {
+      throw Exception('غير مصرح بحذف السجل');
+    }
+    final prefs = await _prefs;
+    final list = _readMosItpRecordsRaw(prefs);
+    final next = list.where((m) {
+      final eid = m['id'] is int
+          ? m['id'] as int
+          : int.tryParse(m['id']?.toString() ?? '') ?? 0;
+      return eid != id;
+    }).toList();
+    if (next.length == list.length) throw Exception('السجل غير موجود');
+    await _writeMosItpRecordsRaw(prefs, next);
   }
 
   Never _withdrawalRequestsUnsupported() {

@@ -32,8 +32,11 @@ class TomorrowWorkPlanScreen extends StatelessWidget {
     return DetailedReportScreen(
       user: user,
       appBarTitle: 'خطة عمل الغد',
+      allowManualWorkLocationWhenNoStructure: true,
+      showExecutedTodaySummaryField: true,
+      executedTodaySummaryRequired: true,
       showSummaryField: true,
-      summaryFieldLabel: 'تفاصيل خطة العمل',
+      summaryFieldLabel: 'تفاصيل خطة عمل الغد',
       summaryMaxLines: 6,
       summaryRequired: true,
       showAttachmentsSection: false,
