@@ -26,6 +26,7 @@ import '../models/ir_mir_upload_model.dart';
 import '../models/ms_sd_record_model.dart';
 import '../models/mos_itp_record_model.dart';
 import '../models/withdrawal_request_model.dart';
+import '../models/reports_sys_model.dart';
 import '../data/default_materials.dart';
 import '../data/materials_display.dart';
 import 'home_icon_order_service.dart';
@@ -3804,4 +3805,74 @@ class DatabaseService {
     });
     return before;
   }
+
+  Future<bool> checkReportsSysNameAvailable({
+    required String name,
+    int? excludeId,
+  }) async =>
+      throw UnsupportedError('Reports-SYS requires API mode');
+
+  Future<int> countPendingReportsSys(int userId) async => 0;
+
+  Future<List<ReportsSysModel>> listReportsSysInbox({
+    required int userId,
+    required String tab,
+    String? requesterEmail,
+    String? searchQuery,
+  }) async =>
+      throw UnsupportedError('Reports-SYS requires API mode');
+
+  Future<ReportsSysModel> getReportsSysDetail(int reportId) async =>
+      throw UnsupportedError('Reports-SYS requires API mode');
+
+  Future<Map<String, String>> getReportsSysAttachmentData({
+    required int reportId,
+    required int attachmentId,
+  }) async =>
+      throw UnsupportedError('Reports-SYS requires API mode');
+
+  Future<ReportsSysModel> createReportsSys({
+    required int userId,
+    required String reportName,
+    required String reportType,
+    required String summary,
+    String? notes,
+    int? sourceReportId,
+  }) async =>
+      throw UnsupportedError('Reports-SYS requires API mode');
+
+  Future<ReportsSysModel> updateReportsSys({
+    required int reportId,
+    required int userId,
+    required String reportName,
+    required String reportType,
+    required String summary,
+    String? notes,
+    List<Map<String, dynamic>>? attachments,
+  }) async =>
+      throw UnsupportedError('Reports-SYS requires API mode');
+
+  Future<ReportsSysModel> submitReportsSys({
+    required int reportId,
+    required int userId,
+    required int toUserId,
+    String? comment,
+  }) async =>
+      throw UnsupportedError('Reports-SYS requires API mode');
+
+  Future<ReportsSysModel> respondReportsSys({
+    required int reportId,
+    required int userId,
+    required String action,
+    int? toUserId,
+    String? comment,
+  }) async =>
+      throw UnsupportedError('Reports-SYS requires API mode');
+
+  Future<ReportsSysModel> relaunchReportsSys({
+    required int sourceReportId,
+    required int userId,
+    required String reportName,
+  }) async =>
+      throw UnsupportedError('Reports-SYS requires API mode');
 }

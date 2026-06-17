@@ -50,6 +50,9 @@ bool _isHomeIconAvailable({
     case 'activity_logs':
       return user.canViewActivityLogs &&
           IconVisibilityService.isVisible(iconConfig, iconId);
+    case 'reports_sys':
+      return user.canParticipateInReportsSys &&
+          IconVisibilityService.isVisible(iconConfig, iconId);
     default:
       return IconVisibilityService.isVisible(iconConfig, iconId);
   }

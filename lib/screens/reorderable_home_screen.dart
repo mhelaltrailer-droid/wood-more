@@ -8,11 +8,15 @@ import '../widgets/home_icon_builder.dart';
 class ReorderableHomeScreen extends StatefulWidget {
   final UserModel user;
   final Map<String, bool>? iconConfig;
+  final int pendingReportsSysCount;
+  final Future<void> Function()? onReportsSysReturn;
 
   const ReorderableHomeScreen({
     super.key,
     required this.user,
     required this.iconConfig,
+    this.pendingReportsSysCount = 0,
+    this.onReportsSysReturn,
   });
 
   @override
@@ -143,6 +147,8 @@ class _ReorderableHomeScreenState extends State<ReorderableHomeScreen> {
                       context: context,
                       user: widget.user,
                       iconId: iconId,
+                      pendingReportsSysCount: widget.pendingReportsSysCount,
+                      onReportsSysReturn: widget.onReportsSysReturn,
                     ),
                   ),
                 );

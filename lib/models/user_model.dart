@@ -60,6 +60,7 @@ class UserModel {
 
   /// زر الإشعارات في الشاشة الرئيسية (بدون طلبات السحب لـ مشرف عام).
   bool get canUseNotifications =>
+      role == 'site_engineer' ||
       role == 'site_engineer_manager' ||
       role == 'general_supervisor' ||
       role == 'operation_manager' ||
@@ -95,6 +96,27 @@ class UserModel {
   /// حذف مرفقات IR / MIR — مسؤول التطبيق بهذا البريد فقط.
   bool get canDeleteIrMirAttachments =>
       isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+
+  /// أيقونة Reports-SYS في الواجهة الرئيسية — كل المشاركين (ما عدا المحاسب).
+  bool get canAccessReportsSysHomeIcon => canParticipateInReportsSys;
+
+  /// المشاركة في تداول Reports-SYS (استلام وتوجيه عبر الإشعارات).
+  bool get canParticipateInReportsSys => !isAccountant;
+
+  /// عرض النظام كاملاً: أرشيف + كل المرفوضة + تبويب «الكل».
+  bool get canViewReportsSysFullAccess =>
+      role == 'app_admin' ||
+      role == 'operation_manager' ||
+      role == 'site_engineer_manager' ||
+      role == 'general_supervisor' ||
+      role == 'document_controller';
+
+  /// أرشفة تقارير Reports-SYS — نفس أدوار العرض الكامل.
+  bool get canArchiveReportsSys => canViewReportsSysFullAccess;
+
+  bool get canViewReportsSysArchiveTab => canViewReportsSysFullAccess;
+
+  bool get canViewReportsSysAllTab => canViewReportsSysFullAccess;
 
   bool get canUsePrivateAdminManagerChat {
     final e = email.trim().toLowerCase();

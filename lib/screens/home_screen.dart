@@ -28,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen>
   Map<String, bool>? _iconConfig;
   int _unreadNotificationsCount = 0;
   int _pendingWithdrawalRequestsCount = 0;
+  int _pendingReportsSysCount = 0;
   Timer? _notificationsPollTimer;
   late final AnimationController _wrRotateController;
 
@@ -58,6 +59,7 @@ class _HomeScreenState extends State<HomeScreen>
     _loadIconsConfig();
     _loadUnreadNotificationsCount();
     _loadPendingWithdrawalActionsCount();
+    _loadPendingReportsSysCount();
   }
 
   @override
@@ -70,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen>
     _loadIconsConfig();
     _loadUnreadNotificationsCount();
     _loadPendingWithdrawalActionsCount();
+    _loadPendingReportsSysCount();
     _startNotificationsPollingIfManager();
   }
 
@@ -155,6 +158,22 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Future<void> _loadPendingReportsSysCount() async {
+    if (!widget.currentUser.canParticipateInReportsSys) {
+      if (mounted) setState(() => _pendingReportsSysCount = 0);
+      return;
+    }
+    try {
+      final storage = getStorage();
+      final c = await storage.countPendingReportsSys(widget.currentUser.id);
+      if (!mounted) return;
+      setState(() => _pendingReportsSysCount = c);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _pendingReportsSysCount = 0);
+    }
+  }
+
   void _startNotificationsPollingIfManager() {
     if (!_canUseNotifications) return;
     _notificationsPollTimer?.cancel();
@@ -163,6 +182,7 @@ class _HomeScreenState extends State<HomeScreen>
       (_) {
         _loadUnreadNotificationsCount();
         _loadPendingWithdrawalActionsCount();
+        _loadPendingReportsSysCount();
       },
     );
   }
@@ -311,6 +331,8 @@ class _HomeScreenState extends State<HomeScreen>
       body: ReorderableHomeScreen(
         user: currentUser,
         iconConfig: _iconConfig,
+        pendingReportsSysCount: _pendingReportsSysCount,
+        onReportsSysReturn: _loadPendingReportsSysCount,
       ),
     );
   }

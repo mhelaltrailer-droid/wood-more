@@ -24,6 +24,7 @@ import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
 import '../screens/postpone_fines_report_screen.dart';
 import '../screens/reports_screen.dart';
+import '../screens/reports_sys_hub_screen.dart';
 import '../screens/site_engineer_finances_entry_screen.dart';
 import '../screens/today_work_plan_screen.dart';
 import '../screens/tomorrow_work_plan_screen.dart';
@@ -41,6 +42,8 @@ class HomeIconBuilder {
     required BuildContext context,
     required UserModel user,
     required String iconId,
+    int pendingReportsSysCount = 0,
+    Future<void> Function()? onReportsSysReturn,
   }) {
     switch (iconId) {
       case 'attendance':
@@ -438,6 +441,21 @@ class HomeIconBuilder {
           subtitle: mosItpSubtitle,
           onTap: () => pushAndSaveRoute(context, 'mos-itp', mosItpScreen),
         );
+      case 'reports_sys':
+        return _gradientCard(
+          icon: Icons.hub_outlined,
+          title: 'Reports -SYS',
+          subtitle: 'تداول التقارير: معاينة، إثبات حالة، تلفيات',
+          badgeCount: pendingReportsSysCount,
+          onTap: () async {
+            await pushAndSaveRoute(
+              context,
+              'reports-sys',
+              ReportsSysHubScreen(currentUser: user),
+            );
+            await onReportsSysReturn?.call();
+          },
+        );
       default:
         return const SizedBox.shrink();
     }
@@ -522,51 +540,81 @@ class HomeIconBuilder {
     required Future<void> Function() onTap,
     double iconSize = 64,
     double padding = 32,
+    int badgeCount = 0,
   }) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: EdgeInsets.all(padding),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF1B5E20), Color(0xFF0D3B0D)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(padding),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF1B5E20), Color(0xFF0D3B0D)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.15),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Icon(icon, size: iconSize, color: Colors.white.withOpacity(0.95)),
+                const SizedBox(height: 16),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white.withOpacity(0.9),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
           ),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.15),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Icon(icon, size: iconSize, color: Colors.white.withOpacity(0.95)),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+          if (badgeCount > 0)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                constraints: const BoxConstraints(minWidth: 22),
+                child: Text(
+                  badgeCount > 99 ? '99+' : '$badgeCount',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
-              textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.white.withOpacity(0.9),
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }

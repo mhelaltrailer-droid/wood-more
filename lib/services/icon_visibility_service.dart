@@ -21,6 +21,7 @@ class IconVisibilityService {
     HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
     HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
     HomeIconItem(id: 'admin_dashboard', label: 'لوح التحكم'),
+    HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
   ];
 
   static const List<HomeIconItem> _projectManagerHomeIcons = [
@@ -43,6 +44,7 @@ class IconVisibilityService {
     HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
     HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
     HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
+    HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
   ];
 
   static const Map<String, String> roleTitles = {
@@ -71,6 +73,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
       HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
       HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
+      HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
     ],
     roleAccountant: [
       HomeIconItem(id: 'accountant_custody', label: 'العهدة'),
@@ -107,6 +110,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
       HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
       HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
+      HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -139,6 +143,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
       HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
       HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
+      HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
     ],
   };
 

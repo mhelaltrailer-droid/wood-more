@@ -163,6 +163,292 @@ async function ensurePrivateChatMessagesTable() {
   }
 }
 
+const REPORTS_SYS_PRIMARY_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
+const REPORTS_SYS_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const REPORTS_SYS_TYPES = ['تقرير معاينة', 'تقرير إثبات حالة', 'تقرير تلفيات'];
+
+async function ensureReportsSysTables() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reports_sys (
+        id SERIAL PRIMARY KEY,
+        report_name TEXT NOT NULL,
+        report_type TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        notes TEXT,
+        status TEXT NOT NULL DEFAULT 'draft',
+        created_by_user_id INTEGER NOT NULL REFERENCES users(id),
+        created_by_user_name TEXT NOT NULL DEFAULT '',
+        current_assignee_user_id INTEGER REFERENCES users(id),
+        current_assignee_user_name TEXT,
+        source_report_id INTEGER REFERENCES reports_sys(id),
+        rejection_reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        archived_at TEXT,
+        rejected_at TEXT
+      )
+    `);
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_sys_name_lower
+      ON reports_sys (LOWER(TRIM(report_name)))
+    `).catch(() => {});
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reports_sys_attachments (
+        id SERIAL PRIMARY KEY,
+        report_id INTEGER NOT NULL REFERENCES reports_sys(id) ON DELETE CASCADE,
+        file_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        data_base64 TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reports_sys_actions (
+        id SERIAL PRIMARY KEY,
+        report_id INTEGER NOT NULL REFERENCES reports_sys(id) ON DELETE CASCADE,
+        actor_user_id INTEGER NOT NULL REFERENCES users(id),
+        actor_user_name TEXT NOT NULL,
+        action TEXT NOT NULL,
+        comment TEXT,
+        from_user_id INTEGER,
+        to_user_id INTEGER,
+        to_user_name TEXT,
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_reports_sys_assignee_status
+      ON reports_sys (current_assignee_user_id, status)
+    `).catch(() => {});
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_reports_sys_creator
+      ON reports_sys (created_by_user_id, status)
+    `).catch(() => {});
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'reports_sys' AND column_name = 'project_id'
+        ) THEN
+          ALTER TABLE reports_sys ADD COLUMN project_id INTEGER REFERENCES projects(id);
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'reports_sys' AND column_name = 'project_name'
+        ) THEN
+          ALTER TABLE reports_sys ADD COLUMN project_name TEXT NOT NULL DEFAULT '';
+        END IF;
+      END $$
+    `).catch(() => {});
+    console.log('ensureReportsSysTables: ok');
+  } catch (e) {
+    console.warn('ensureReportsSysTables:', e.message);
+  }
+}
+
+async function reportsSysNotifyPrimaryAdmin(pool, fields) {
+  await runNotificationSafely('reportsSysNotifyPrimaryAdmin', async () => {
+    const r = await pool.query(
+      `SELECT id, role FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1`,
+      [REPORTS_SYS_PRIMARY_ADMIN_EMAIL.toLowerCase()],
+    );
+    if (r.rows.length === 0) return;
+    const admin = r.rows[0];
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO notifications (
+        recipient_user_id, recipient_role, title, body, event_type,
+        actor_user_id, actor_user_name, project_name, created_at, is_read
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE)`,
+      [
+        parseInt(admin.id, 10),
+        String(admin.role || 'app_admin'),
+        fields.title,
+        fields.body,
+        fields.eventType ?? fields.event_type ?? 'reports_sys',
+        fields.actorUserId ?? fields.actor_user_id ?? null,
+        fields.actorUserName ?? fields.actor_user_name ?? null,
+        fields.reportName ?? fields.report_name ?? null,
+        now,
+      ],
+    );
+  });
+}
+
+async function reportsSysNotifyUser(pool, userId, fields) {
+  await runNotificationSafely('reportsSysNotifyUser', async () => {
+    const u = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
+    if (u.rows.length === 0) return;
+    const row = u.rows[0];
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO notifications (
+        recipient_user_id, recipient_role, title, body, event_type,
+        actor_user_id, actor_user_name, project_name, created_at, is_read
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE)`,
+      [
+        parseInt(userId, 10),
+        String(row.role || 'site_engineer'),
+        fields.title,
+        fields.body,
+        fields.eventType ?? fields.event_type ?? 'reports_sys',
+        fields.actorUserId ?? fields.actor_user_id ?? null,
+        fields.actorUserName ?? fields.actor_user_name ?? null,
+        fields.reportName ?? fields.report_name ?? null,
+        now,
+      ],
+    );
+  });
+}
+
+function reportsSysMapRow(row, attachments = [], actions = [], reviewers = []) {
+  return {
+    id: parseInt(row.id, 10),
+    report_name: row.report_name,
+    report_type: row.report_type,
+    summary: row.summary || '',
+    notes: row.notes || '',
+    status: row.status,
+    created_by_user_id: parseInt(row.created_by_user_id, 10),
+    created_by_user_name: row.created_by_user_name || '',
+    current_assignee_user_id: row.current_assignee_user_id != null
+      ? parseInt(row.current_assignee_user_id, 10)
+      : null,
+    current_assignee_user_name: row.current_assignee_user_name || null,
+    source_report_id: row.source_report_id != null ? parseInt(row.source_report_id, 10) : null,
+    project_id: row.project_id != null ? parseInt(row.project_id, 10) : null,
+    project_name: row.project_name || '',
+    rejection_reason: row.rejection_reason || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    archived_at: row.archived_at || null,
+    rejected_at: row.rejected_at || null,
+    attachments,
+    actions,
+    reviewers,
+  };
+}
+
+async function reportsSysLoadDetail(pool, reportId) {
+  const r = await pool.query('SELECT * FROM reports_sys WHERE id = $1', [reportId]);
+  if (r.rows.length === 0) return null;
+  const row = r.rows[0];
+  const att = await pool.query(
+    `SELECT id, file_name, mime_type, size_bytes, created_at
+     FROM reports_sys_attachments WHERE report_id = $1 ORDER BY id`,
+    [reportId],
+  );
+  const act = await pool.query(
+    `SELECT * FROM reports_sys_actions WHERE report_id = $1 ORDER BY created_at ASC, id ASC`,
+    [reportId],
+  );
+  const reviewers = act.rows
+    .filter((a) => ['forward', 'archive', 'submit', 'resubmit'].includes(String(a.action)))
+    .map((a) => ({
+      user_id: parseInt(a.actor_user_id, 10),
+      user_name: a.actor_user_name,
+      reviewed_at: a.created_at,
+      action: a.action,
+    }));
+  const attachments = att.rows.map((a) => ({
+    id: parseInt(a.id, 10),
+    file_name: a.file_name,
+    mime_type: a.mime_type,
+    size_bytes: parseInt(a.size_bytes, 10),
+    created_at: a.created_at,
+  }));
+  const actions = act.rows.map((a) => ({
+    id: parseInt(a.id, 10),
+    actor_user_id: parseInt(a.actor_user_id, 10),
+    actor_user_name: a.actor_user_name,
+    action: a.action,
+    comment: a.comment || null,
+    from_user_id: a.from_user_id != null ? parseInt(a.from_user_id, 10) : null,
+    to_user_id: a.to_user_id != null ? parseInt(a.to_user_id, 10) : null,
+    to_user_name: a.to_user_name || null,
+    created_at: a.created_at,
+  }));
+  return reportsSysMapRow(row, attachments, actions, reviewers);
+}
+
+async function reportsSysResolveProject(pool, body, fallbackRow = null) {
+  const rawId = body?.projectId ?? body?.project_id;
+  const rawName = body?.projectName ?? body?.project_name
+    ?? body?.customProjectName ?? body?.custom_project_name;
+  const isOther = rawId == null
+    || String(rawId).trim() === ''
+    || String(rawId).trim() === '-1'
+    || String(rawId).trim().toLowerCase() === 'other';
+  if (isOther) {
+    const name = String(rawName ?? fallbackRow?.project_name ?? '').trim();
+    if (!name) return { error: 'project_name_required' };
+    return { project_id: null, project_name: name };
+  }
+  const projectId = parseInt(String(rawId), 10);
+  if (Number.isNaN(projectId)) return { error: 'invalid_project' };
+  const pr = await pool.query('SELECT id, name FROM projects WHERE id = $1', [projectId]);
+  if (pr.rows.length === 0) return { error: 'project_not_found' };
+  return {
+    project_id: projectId,
+    project_name: String(pr.rows[0].name || '').trim(),
+  };
+}
+
+async function reportsSysInsertAction(pool, fields) {
+  const now = new Date().toISOString();
+  await pool.query(
+    `INSERT INTO reports_sys_actions (
+      report_id, actor_user_id, actor_user_name, action, comment,
+      from_user_id, to_user_id, to_user_name, created_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [
+      fields.reportId,
+      fields.actorUserId,
+      fields.actorUserName,
+      fields.action,
+      fields.comment || null,
+      fields.fromUserId ?? null,
+      fields.toUserId ?? null,
+      fields.toUserName ?? null,
+      now,
+    ],
+  );
+  return now;
+}
+
+function reportsSysHasFullAccess(role) {
+  const r = String(role || '').trim();
+  return r === 'app_admin'
+    || r === 'operation_manager'
+    || r === 'site_engineer_manager'
+    || r === 'general_supervisor'
+    || r === 'document_controller';
+}
+
+async function reportsSysCanArchive(role, email) {
+  return reportsSysHasFullAccess(role);
+}
+
+function reportsSysAppendTextSearch(sql, params, q) {
+  const term = String(q || '').trim().toLowerCase();
+  if (!term) return { sql, params };
+  const like = `%${term}%`;
+  const idx = params.length + 1;
+  return {
+    sql: `${sql} AND (
+      LOWER(report_name) LIKE $${idx}
+      OR LOWER(COALESCE(project_name, '')) LIKE $${idx}
+      OR LOWER(summary) LIKE $${idx}
+    )`,
+    params: [...params, like],
+  };
+}
+
 async function ensureWithdrawalRequestsTable() {
   try {
     await pool.query(`
@@ -3784,6 +4070,704 @@ app.put('/withdrawal-requests/:id/fulfill', async (req, res) => {
   }
 });
 
+// ——— Reports-SYS (circulated reports workflow) ———
+app.get('/reports-sys/check-name', async (req, res) => {
+  try {
+    const name = String(req.query.name || '').trim();
+    const excludeId = parseInt(String(req.query.excludeId || ''), 10);
+    if (!name) return res.json({ available: false, error: 'name_required' });
+    const r = await pool.query(
+      `SELECT id FROM reports_sys WHERE LOWER(TRIM(report_name)) = LOWER(TRIM($1)) LIMIT 1`,
+      [name],
+    );
+    if (r.rows.length === 0) return res.json({ available: true });
+    const existingId = parseInt(r.rows[0].id, 10);
+    if (!Number.isNaN(excludeId) && existingId === excludeId) {
+      return res.json({ available: true });
+    }
+    return res.json({ available: false });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/reports-sys/pending-count', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId || ''), 10);
+    if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
+    const r = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM reports_sys
+       WHERE current_assignee_user_id = $1 AND status = 'pending_review'`,
+      [userId],
+    );
+    res.json({ count: r.rows[0]?.count ?? 0 });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/reports-sys/inbox', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId || ''), 10);
+    const tab = String(req.query.tab || 'pending').trim().toLowerCase();
+    const requesterEmail = String(req.query.requesterEmail || '').trim().toLowerCase();
+    const searchQ = String(req.query.q || req.query.search || '').trim();
+    if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
+
+    let sql;
+    let params;
+    if (tab === 'pending') {
+      sql = `SELECT * FROM reports_sys
+             WHERE current_assignee_user_id = $1 AND status IN ('pending_review', 'returned_for_edit')
+             ORDER BY updated_at DESC`;
+      params = [userId];
+    } else if (tab === 'sent') {
+      sql = `SELECT DISTINCT r.* FROM reports_sys r
+             INNER JOIN reports_sys_actions a ON a.report_id = r.id
+             WHERE a.actor_user_id = $1
+             ORDER BY r.updated_at DESC`;
+      params = [userId];
+    } else if (tab === 'created') {
+      sql = `SELECT * FROM reports_sys WHERE created_by_user_id = $1 ORDER BY updated_at DESC`;
+      params = [userId];
+    } else if (tab === 'archive') {
+      const actor = await pool.query('SELECT role, email FROM users WHERE id = $1', [userId]);
+      if (actor.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+      const canViewArchive = reportsSysHasFullAccess(String(actor.rows[0].role || ''));
+      if (!canViewArchive) return res.status(403).json({ error: 'forbidden' });
+      let archiveSql = `SELECT * FROM reports_sys WHERE status = 'archived'`;
+      let archiveParams = [];
+      ({ sql: archiveSql, params: archiveParams } = reportsSysAppendTextSearch(
+        archiveSql,
+        archiveParams,
+        searchQ,
+      ));
+      sql = `${archiveSql} ORDER BY archived_at DESC NULLS LAST, updated_at DESC`;
+      params = archiveParams;
+    } else if (tab === 'rejected') {
+      const actor = await pool.query('SELECT role, email FROM users WHERE id = $1', [userId]);
+      if (actor.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+      if (!reportsSysHasFullAccess(String(actor.rows[0].role || ''))) {
+        let rejectedSql = `SELECT * FROM reports_sys
+               WHERE status = 'rejected' AND created_by_user_id = $1`;
+        let rejectedParams = [userId];
+        ({ sql: rejectedSql, params: rejectedParams } = reportsSysAppendTextSearch(
+          rejectedSql,
+          rejectedParams,
+          searchQ,
+        ));
+        sql = `${rejectedSql} ORDER BY rejected_at DESC NULLS LAST, updated_at DESC`;
+        params = rejectedParams;
+      } else {
+        let rejectedSql = `SELECT * FROM reports_sys WHERE status = 'rejected'`;
+        let rejectedParams = [];
+        ({ sql: rejectedSql, params: rejectedParams } = reportsSysAppendTextSearch(
+          rejectedSql,
+          rejectedParams,
+          searchQ,
+        ));
+        sql = `${rejectedSql} ORDER BY rejected_at DESC NULLS LAST, updated_at DESC`;
+        params = rejectedParams;
+      }
+    } else if (tab === 'all') {
+      const actor = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
+      if (actor.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+      if (!reportsSysHasFullAccess(String(actor.rows[0].role || ''))) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      sql = `SELECT * FROM reports_sys ORDER BY updated_at DESC`;
+      params = [];
+    } else {
+      return res.status(400).json({ error: 'invalid tab' });
+    }
+
+    const r = params.length
+      ? await pool.query(sql, params)
+      : await pool.query(sql);
+    res.json(r.rows.map((row) => reportsSysMapRow(row)));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/reports-sys/:id', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id || ''), 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+    const detail = await reportsSysLoadDetail(pool, id);
+    if (!detail) return res.status(404).json({ error: 'not found' });
+    res.json(detail);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.delete('/reports-sys/:id', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id || ''), 10);
+    const userId = parseInt(String(req.query.userId || req.body?.userId || ''), 10);
+    if (Number.isNaN(id) || Number.isNaN(userId)) {
+      return res.status(400).json({ error: 'invalid' });
+    }
+
+    const actor = await pool.query('SELECT id, name, email FROM users WHERE id = $1', [userId]);
+    if (actor.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+    const actorEmail = String(actor.rows[0].email || '').trim().toLowerCase();
+    if (actorEmail !== REPORTS_SYS_PRIMARY_ADMIN_EMAIL.toLowerCase()) {
+      return res.status(403).json({ error: 'forbidden_delete' });
+    }
+
+    const existing = await pool.query(
+      'SELECT id, report_name FROM reports_sys WHERE id = $1',
+      [id],
+    );
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'not found' });
+
+    await pool.query('DELETE FROM reports_sys WHERE id = $1', [id]);
+
+    await reportsSysNotifyPrimaryAdmin(pool, {
+      title: 'Reports-SYS — حذف تقرير',
+      body: `${actor.rows[0].name} حذف التقرير «${existing.rows[0].report_name}» نهائياً`,
+      eventType: `reports_sys_${id}`,
+      actorUserId: userId,
+      actorUserName: actor.rows[0].name,
+      reportName: existing.rows[0].report_name,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/reports-sys/:id/attachments/:attachmentId', async (req, res) => {
+  try {
+    const reportId = parseInt(String(req.params.id || ''), 10);
+    const attachmentId = parseInt(String(req.params.attachmentId || ''), 10);
+    if (Number.isNaN(reportId) || Number.isNaN(attachmentId)) {
+      return res.status(400).json({ error: 'invalid' });
+    }
+    const r = await pool.query(
+      `SELECT file_name, mime_type, data_base64 FROM reports_sys_attachments
+       WHERE id = $1 AND report_id = $2`,
+      [attachmentId, reportId],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    res.json({
+      file_name: r.rows[0].file_name,
+      mime_type: r.rows[0].mime_type,
+      data_base64: r.rows[0].data_base64,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/reports-sys', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+    const reportName = String(b.reportName ?? b.report_name ?? '').trim();
+    const reportType = String(b.reportType ?? b.report_type ?? '').trim();
+    const summary = String(b.summary ?? '').trim();
+    const notes = b.notes != null ? String(b.notes).trim() : '';
+    const sourceReportId = b.sourceReportId != null
+      ? parseInt(String(b.sourceReportId), 10)
+      : null;
+    if (Number.isNaN(userId) || !reportName || !reportType || !summary) {
+      return res.status(400).json({ error: 'missing fields' });
+    }
+    if (!REPORTS_SYS_TYPES.includes(reportType)) {
+      return res.status(400).json({ error: 'invalid_report_type' });
+    }
+    const actor = await pool.query('SELECT id, name, email FROM users WHERE id = $1', [userId]);
+    if (actor.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+    const dup = await pool.query(
+      `SELECT id FROM reports_sys WHERE LOWER(TRIM(report_name)) = LOWER(TRIM($1)) LIMIT 1`,
+      [reportName],
+    );
+    if (dup.rows.length > 0) return res.status(409).json({ error: 'name_taken' });
+
+    const project = await reportsSysResolveProject(pool, b);
+    if (project.error) return res.status(400).json({ error: project.error });
+
+    const now = new Date().toISOString();
+    const ins = await pool.query(
+      `INSERT INTO reports_sys (
+        report_name, report_type, summary, notes, status,
+        created_by_user_id, created_by_user_name,
+        current_assignee_user_id, current_assignee_user_name,
+        source_report_id, project_id, project_name,
+        created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,'draft',$5,$6,$5,$6,$7,$8,$9,$10,$10) RETURNING id`,
+      [
+        reportName,
+        reportType,
+        summary,
+        notes || null,
+        userId,
+        actor.rows[0].name,
+        Number.isNaN(sourceReportId) ? null : sourceReportId,
+        project.project_id,
+        project.project_name,
+        now,
+      ],
+    );
+    const reportId = parseInt(ins.rows[0].id, 10);
+    await reportsSysInsertAction(pool, {
+      reportId,
+      actorUserId: userId,
+      actorUserName: actor.rows[0].name,
+      action: 'created',
+      comment: sourceReportId ? `من تقرير سابق #${sourceReportId}` : null,
+    });
+    await reportsSysNotifyPrimaryAdmin(pool, {
+      title: 'Reports-SYS — تقرير جديد',
+      body: `أنشأ ${actor.rows[0].name} مسودة تقرير «${reportName}» (${reportType})`,
+      eventType: `reports_sys_${reportId}`,
+      actorUserId: userId,
+      actorUserName: actor.rows[0].name,
+      reportName,
+    });
+    const detail = await reportsSysLoadDetail(pool, reportId);
+    res.status(201).json(detail);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.put('/reports-sys/:id', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id || ''), 10);
+    const b = req.body || {};
+    const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+    if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
+
+    const rq = await pool.query('SELECT * FROM reports_sys WHERE id = $1', [id]);
+    if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const row = rq.rows[0];
+    const status = String(row.status);
+    const creatorId = parseInt(row.created_by_user_id, 10);
+    const assigneeId = row.current_assignee_user_id != null
+      ? parseInt(row.current_assignee_user_id, 10)
+      : null;
+
+    if (userId !== creatorId) return res.status(403).json({ error: 'forbidden' });
+    if (!(status === 'draft' || status === 'returned_for_edit')) {
+      return res.status(400).json({ error: 'not_editable' });
+    }
+    if (assigneeId !== userId) return res.status(403).json({ error: 'not_current_holder' });
+
+    const reportName = String(b.reportName ?? b.report_name ?? row.report_name).trim();
+    const reportType = String(b.reportType ?? b.report_type ?? row.report_type).trim();
+    const summary = String(b.summary ?? row.summary ?? '').trim();
+    const notes = b.notes != null ? String(b.notes).trim() : (row.notes || '');
+    if (!reportName || !reportType || !summary) {
+      return res.status(400).json({ error: 'missing fields' });
+    }
+    if (!REPORTS_SYS_TYPES.includes(reportType)) {
+      return res.status(400).json({ error: 'invalid_report_type' });
+    }
+    const dup = await pool.query(
+      `SELECT id FROM reports_sys WHERE LOWER(TRIM(report_name)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1`,
+      [reportName, id],
+    );
+    if (dup.rows.length > 0) return res.status(409).json({ error: 'name_taken' });
+
+    const project = await reportsSysResolveProject(pool, b, row);
+    if (project.error) return res.status(400).json({ error: project.error });
+
+    const now = new Date().toISOString();
+    await pool.query(
+      `UPDATE reports_sys SET report_name=$1, report_type=$2, summary=$3, notes=$4,
+       project_id=$5, project_name=$6, updated_at=$7 WHERE id=$8`,
+      [
+        reportName,
+        reportType,
+        summary,
+        notes || null,
+        project.project_id,
+        project.project_name,
+        now,
+        id,
+      ],
+    );
+
+    const actor = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+    const actorName = actor.rows.length ? actor.rows[0].name : '';
+
+    if (Array.isArray(b.attachments)) {
+      await pool.query('DELETE FROM reports_sys_attachments WHERE report_id = $1', [id]);
+      for (const att of b.attachments) {
+        const fileName = String(att.fileName ?? att.file_name ?? 'file').trim();
+        const mimeType = String(att.mimeType ?? att.mime_type ?? 'application/octet-stream');
+        const dataBase64 = String(att.dataBase64 ?? att.data_base64 ?? '');
+        const sizeBytes = parseInt(String(att.sizeBytes ?? att.size_bytes ?? '0'), 10);
+        if (!dataBase64) continue;
+        if (sizeBytes > REPORTS_SYS_MAX_ATTACHMENT_BYTES) {
+          return res.status(400).json({ error: 'attachment_too_large' });
+        }
+        await pool.query(
+          `INSERT INTO reports_sys_attachments (report_id, file_name, mime_type, data_base64, size_bytes, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [id, fileName, mimeType, dataBase64, sizeBytes, now],
+        );
+      }
+    }
+
+    await reportsSysNotifyPrimaryAdmin(pool, {
+      title: 'Reports-SYS — تعديل تقرير',
+      body: `عدّل ${actorName} التقرير «${reportName}»`,
+      eventType: `reports_sys_${id}`,
+      actorUserId: userId,
+      actorUserName: actorName,
+      reportName,
+    });
+
+    const detail = await reportsSysLoadDetail(pool, id);
+    res.json(detail);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/reports-sys/:id/submit', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id || ''), 10);
+    const b = req.body || {};
+    const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+    const toUserId = parseInt(String(b.toUserId ?? b.to_user_id ?? ''), 10);
+    const comment = b.comment != null ? String(b.comment).trim() : '';
+    if (Number.isNaN(id) || Number.isNaN(userId) || Number.isNaN(toUserId)) {
+      return res.status(400).json({ error: 'invalid' });
+    }
+    if (userId === toUserId) return res.status(400).json({ error: 'cannot_send_to_self' });
+
+    const rq = await pool.query('SELECT * FROM reports_sys WHERE id = $1', [id]);
+    if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const row = rq.rows[0];
+    const status = String(row.status);
+    const creatorId = parseInt(row.created_by_user_id, 10);
+    const assigneeId = row.current_assignee_user_id != null
+      ? parseInt(row.current_assignee_user_id, 10)
+      : null;
+
+    if (userId !== creatorId || assigneeId !== userId) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (!(status === 'draft' || status === 'returned_for_edit')) {
+      return res.status(400).json({ error: 'invalid_status' });
+    }
+
+    const toUser = await pool.query('SELECT id, name, role FROM users WHERE id = $1', [toUserId]);
+    if (toUser.rows.length === 0) return res.status(404).json({ error: 'recipient not found' });
+    const actor = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+    const actorName = actor.rows.length ? actor.rows[0].name : '';
+    const now = new Date().toISOString();
+    const actionType = status === 'returned_for_edit' ? 'resubmit' : 'submit';
+
+    await pool.query(
+      `UPDATE reports_sys SET status='pending_review', current_assignee_user_id=$1,
+       current_assignee_user_name=$2, updated_at=$3 WHERE id=$4`,
+      [toUserId, toUser.rows[0].name, now, id],
+    );
+    await reportsSysInsertAction(pool, {
+      reportId: id,
+      actorUserId: userId,
+      actorUserName: actorName,
+      action: actionType,
+      comment: comment || null,
+      fromUserId: userId,
+      toUserId,
+      toUserName: toUser.rows[0].name,
+    });
+
+    const reportName = row.report_name;
+    await reportsSysNotifyUser(pool, toUserId, {
+      title: 'Reports-SYS — تقرير بانتظار مراجعتك',
+      body: `أرسل إليك ${actorName} التقرير «${reportName}» للاطلاع والتوجيه`,
+      eventType: `reports_sys_${id}`,
+      actorUserId: userId,
+      actorUserName: actorName,
+      reportName,
+    });
+    await reportsSysNotifyPrimaryAdmin(pool, {
+      title: 'Reports-SYS — إرسال تقرير',
+      body: `${actorName} أرسل التقرير «${reportName}» إلى ${toUser.rows[0].name}`,
+      eventType: `reports_sys_${id}`,
+      actorUserId: userId,
+      actorUserName: actorName,
+      reportName,
+    });
+
+    res.json(await reportsSysLoadDetail(pool, id));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/reports-sys/:id/respond', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id || ''), 10);
+    const b = req.body || {};
+    const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+    const action = String(b.action || '').trim().toLowerCase();
+    const toUserId = b.toUserId != null ? parseInt(String(b.toUserId ?? b.to_user_id), 10) : null;
+    const comment = b.comment != null ? String(b.comment).trim() : '';
+    if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
+    if (!['forward', 'return', 'reject', 'archive'].includes(action)) {
+      return res.status(400).json({ error: 'invalid_action' });
+    }
+
+    const rq = await pool.query('SELECT * FROM reports_sys WHERE id = $1', [id]);
+    if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const row = rq.rows[0];
+    const status = String(row.status);
+    if (status !== 'pending_review') return res.status(400).json({ error: 'not_pending' });
+    const assigneeId = row.current_assignee_user_id != null
+      ? parseInt(row.current_assignee_user_id, 10)
+      : null;
+    if (assigneeId !== userId) return res.status(403).json({ error: 'not_current_holder' });
+
+    const actor = await pool.query('SELECT id, name, role, email FROM users WHERE id = $1', [userId]);
+    if (actor.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+    const actorName = actor.rows[0].name;
+    const creatorId = parseInt(row.created_by_user_id, 10);
+    const reportName = row.report_name;
+    const now = new Date().toISOString();
+
+    if (action === 'reject') {
+      if (!comment) return res.status(400).json({ error: 'reason_required' });
+      await pool.query(
+        `UPDATE reports_sys SET status='rejected', rejection_reason=$1, rejected_at=$2,
+         current_assignee_user_id=$3, current_assignee_user_name=$4, updated_at=$2 WHERE id=$5`,
+        [comment, now, creatorId, row.created_by_user_name, id],
+      );
+      await reportsSysInsertAction(pool, {
+        reportId: id,
+        actorUserId: userId,
+        actorUserName: actorName,
+        action: 'reject',
+        comment,
+        fromUserId: userId,
+        toUserId: creatorId,
+        toUserName: row.created_by_user_name,
+      });
+      await reportsSysNotifyUser(pool, creatorId, {
+        title: 'Reports-SYS — رُفض التقرير',
+        body: `رُفض التقرير «${reportName}». السبب: ${comment}`,
+        eventType: `reports_sys_${id}`,
+        actorUserId: userId,
+        actorUserName: actorName,
+        reportName,
+      });
+      await reportsSysNotifyPrimaryAdmin(pool, {
+        title: 'Reports-SYS — رفض تقرير',
+        body: `${actorName} رفض التقرير «${reportName}». السبب: ${comment}`,
+        eventType: `reports_sys_${id}`,
+        actorUserId: userId,
+        actorUserName: actorName,
+        reportName,
+      });
+      return res.json(await reportsSysLoadDetail(pool, id));
+    }
+
+    if (action === 'return') {
+      if (!comment) return res.status(400).json({ error: 'comment_required' });
+      await pool.query(
+        `UPDATE reports_sys SET status='returned_for_edit', current_assignee_user_id=$1,
+         current_assignee_user_name=$2, updated_at=$3 WHERE id=$4`,
+        [creatorId, row.created_by_user_name, now, id],
+      );
+      await reportsSysInsertAction(pool, {
+        reportId: id,
+        actorUserId: userId,
+        actorUserName: actorName,
+        action: 'return',
+        comment,
+        fromUserId: userId,
+        toUserId: creatorId,
+        toUserName: row.created_by_user_name,
+      });
+      await reportsSysNotifyUser(pool, creatorId, {
+        title: 'Reports-SYS — أُعيد التقرير للتعديل',
+        body: `أعاد ${actorName} التقرير «${reportName}» للتعديل. الملاحظة: ${comment}`,
+        eventType: `reports_sys_${id}`,
+        actorUserId: userId,
+        actorUserName: actorName,
+        reportName,
+      });
+      await reportsSysNotifyPrimaryAdmin(pool, {
+        title: 'Reports-SYS — إرجاع للتعديل',
+        body: `${actorName} أعاد التقرير «${reportName}» إلى المنشئ للتعديل`,
+        eventType: `reports_sys_${id}`,
+        actorUserId: userId,
+        actorUserName: actorName,
+        reportName,
+      });
+      return res.json(await reportsSysLoadDetail(pool, id));
+    }
+
+    if (action === 'archive') {
+      const canArchive = await reportsSysCanArchive(
+        String(actor.rows[0].role || ''),
+        String(actor.rows[0].email || ''),
+      );
+      if (!canArchive) return res.status(403).json({ error: 'forbidden_archive' });
+      await pool.query(
+        `UPDATE reports_sys SET status='archived', archived_at=$1, current_assignee_user_id=NULL,
+         current_assignee_user_name=NULL, updated_at=$1 WHERE id=$2`,
+        [now, id],
+      );
+      await reportsSysInsertAction(pool, {
+        reportId: id,
+        actorUserId: userId,
+        actorUserName: actorName,
+        action: 'archive',
+        comment: comment || null,
+        fromUserId: userId,
+      });
+      await reportsSysNotifyUser(pool, creatorId, {
+        title: 'Reports-SYS — أُرشف التقرير',
+        body: `تم قبول وأرشفة التقرير «${reportName}» بواسطة ${actorName}`,
+        eventType: `reports_sys_${id}`,
+        actorUserId: userId,
+        actorUserName: actorName,
+        reportName,
+      });
+      await reportsSysNotifyPrimaryAdmin(pool, {
+        title: 'Reports-SYS — أرشفة',
+        body: `${actorName} أرشف التقرير «${reportName}»`,
+        eventType: `reports_sys_${id}`,
+        actorUserId: userId,
+        actorUserName: actorName,
+        reportName,
+      });
+      return res.json(await reportsSysLoadDetail(pool, id));
+    }
+
+    if (action === 'forward') {
+      if (Number.isNaN(toUserId) || toUserId == null) {
+        return res.status(400).json({ error: 'to_user_required' });
+      }
+      if (toUserId === userId) return res.status(400).json({ error: 'cannot_send_to_self' });
+      const toUser = await pool.query('SELECT id, name FROM users WHERE id = $1', [toUserId]);
+      if (toUser.rows.length === 0) return res.status(404).json({ error: 'recipient not found' });
+      await pool.query(
+        `UPDATE reports_sys SET current_assignee_user_id=$1, current_assignee_user_name=$2, updated_at=$3 WHERE id=$4`,
+        [toUserId, toUser.rows[0].name, now, id],
+      );
+      await reportsSysInsertAction(pool, {
+        reportId: id,
+        actorUserId: userId,
+        actorUserName: actorName,
+        action: 'forward',
+        comment: comment || null,
+        fromUserId: userId,
+        toUserId,
+        toUserName: toUser.rows[0].name,
+      });
+      await reportsSysNotifyUser(pool, toUserId, {
+        title: 'Reports-SYS — تقرير موجّه إليك',
+        body: `وجّه ${actorName} إليك التقرير «${reportName}» بعد الاطلاع`,
+        eventType: `reports_sys_${id}`,
+        actorUserId: userId,
+        actorUserName: actorName,
+        reportName,
+      });
+      await reportsSysNotifyPrimaryAdmin(pool, {
+        title: 'Reports-SYS — توجيه تقرير',
+        body: `${actorName} وجّه التقرير «${reportName}» إلى ${toUser.rows[0].name}`,
+        eventType: `reports_sys_${id}`,
+        actorUserId: userId,
+        actorUserName: actorName,
+        reportName,
+      });
+      return res.json(await reportsSysLoadDetail(pool, id));
+    }
+
+    return res.status(400).json({ error: 'invalid_action' });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/reports-sys/:id/relaunch', async (req, res) => {
+  try {
+    const sourceId = parseInt(String(req.params.id || ''), 10);
+    const b = req.body || {};
+    const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+    const reportName = String(b.reportName ?? b.report_name ?? '').trim();
+    if (Number.isNaN(sourceId) || Number.isNaN(userId) || !reportName) {
+      return res.status(400).json({ error: 'invalid' });
+    }
+    const src = await pool.query('SELECT * FROM reports_sys WHERE id = $1', [sourceId]);
+    if (src.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const source = src.rows[0];
+    if (!['rejected', 'archived'].includes(String(source.status))) {
+      return res.status(400).json({ error: 'invalid_source_status' });
+    }
+    const dup = await pool.query(
+      `SELECT id FROM reports_sys WHERE LOWER(TRIM(report_name)) = LOWER(TRIM($1)) LIMIT 1`,
+      [reportName],
+    );
+    if (dup.rows.length > 0) return res.status(409).json({ error: 'name_taken' });
+    const actor = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+    const actorName = actor.rows.length ? actor.rows[0].name : '';
+    const now = new Date().toISOString();
+    const ins = await pool.query(
+      `INSERT INTO reports_sys (
+        report_name, report_type, summary, notes, status,
+        created_by_user_id, created_by_user_name,
+        current_assignee_user_id, current_assignee_user_name,
+        source_report_id, project_id, project_name,
+        created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,'draft',$5,$6,$5,$6,$7,$8,$9,$10,$10) RETURNING id`,
+      [
+        reportName,
+        source.report_type,
+        source.summary,
+        source.notes,
+        userId,
+        actorName,
+        sourceId,
+        source.project_id ?? null,
+        source.project_name || '',
+        now,
+      ],
+    );
+    const newId = parseInt(ins.rows[0].id, 10);
+    const oldAtt = await pool.query(
+      'SELECT file_name, mime_type, data_base64, size_bytes FROM reports_sys_attachments WHERE report_id = $1',
+      [sourceId],
+    );
+    for (const a of oldAtt.rows) {
+      await pool.query(
+        `INSERT INTO reports_sys_attachments (report_id, file_name, mime_type, data_base64, size_bytes, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [newId, a.file_name, a.mime_type, a.data_base64, a.size_bytes, now],
+      );
+    }
+    await reportsSysInsertAction(pool, {
+      reportId: newId,
+      actorUserId: userId,
+      actorUserName: actorName,
+      action: 'created',
+      comment: `إعادة إطلاق من تقرير #${sourceId}`,
+    });
+    await reportsSysNotifyPrimaryAdmin(pool, {
+      title: 'Reports-SYS — إعادة إطلاق تقرير',
+      body: `${actorName} أنشأ تقريراً جديداً «${reportName}» من تقرير سابق #${sourceId}`,
+      eventType: `reports_sys_${newId}`,
+      actorUserId: userId,
+      actorUserName: actorName,
+      reportName,
+    });
+    res.status(201).json(await reportsSysLoadDetail(pool, newId));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 app.get('/units', async (req, res) => {
   try {
     const r = await pool.query('SELECT id, building_id, name, model, image_path FROM units WHERE building_id = $1 ORDER BY name', [req.query.buildingId]);
@@ -4502,9 +5486,20 @@ app.get('/executed-plans/contractor-report', async (req, res) => {
 
     const fromDay = dateFromRaw.slice(0, 10);
     const toDay = dateToRaw.slice(0, 10);
-    const c = await pool.query('SELECT id FROM contractors WHERE name = $1 LIMIT 1', [contractorName]);
-    if (c.rows.length === 0) return res.json([]);
-    const contractorId = parseInt(c.rows[0].id, 10);
+    const isAll = contractorName === 'الجميع';
+
+    let contractorId = null;
+    const contractorsMap = new Map();
+    if (isAll) {
+      const allC = await pool.query('SELECT id, name FROM contractors');
+      for (const row of allC.rows) {
+        contractorsMap.set(parseInt(row.id, 10), String(row.name || '').trim());
+      }
+    } else {
+      const c = await pool.query('SELECT id FROM contractors WHERE name = $1 LIMIT 1', [contractorName]);
+      if (c.rows.length === 0) return res.json([]);
+      contractorId = parseInt(c.rows[0].id, 10);
+    }
 
     const rows = await pool.query(
       `SELECT id, user_id, user_name, project_id, project_name, plan_date, status, plan_json
@@ -4558,9 +5553,15 @@ app.get('/executed-plans/contractor-report', async (req, res) => {
       const byLocation = new Map();
       for (const line of lines) {
         const cid = line?.contractorId != null ? parseInt(line.contractorId, 10) : null;
-        if (cid == null || Number.isNaN(cid) || cid !== contractorId) continue;
+        if (cid == null || Number.isNaN(cid)) continue;
+        if (isAll) {
+          if (!contractorsMap.has(cid)) continue;
+        } else if (cid !== contractorId) {
+          continue;
+        }
         const locationId = line?.locationId != null ? parseInt(line.locationId, 10) : null;
-        const key = Number.isNaN(locationId) || locationId == null ? 'none' : String(locationId);
+        const locKey = Number.isNaN(locationId) || locationId == null ? 'none' : String(locationId);
+        const key = isAll ? `${cid}:${locKey}` : locKey;
         const craftsman = parseInt(String(line.contractorWorkersCount ?? 0), 10);
         const assistant = parseInt(String(line.selfWorkersCount ?? 0), 10);
         let workers = parseInt(String(line.workersCount ?? 0), 10);
@@ -4570,7 +5571,8 @@ app.get('/executed-plans/contractor-report', async (req, res) => {
           workers = craftsmanSafe + assistantSafe;
         }
         const prev = byLocation.get(key) || {
-          locationId: key === 'none' ? null : parseInt(key, 10),
+          contractorId: cid,
+          locationId: locKey === 'none' ? null : parseInt(locKey, 10),
           craftsmanCount: 0,
           assistantCount: 0,
           workersCount: 0,
@@ -4593,7 +5595,7 @@ app.get('/executed-plans/contractor-report', async (req, res) => {
           project_name: row.project_name ?? (plan?.projectName ?? null),
           user_id: parseInt(row.user_id, 10),
           user_name: row.user_name,
-          contractor_name: contractorName,
+          contractor_name: isAll ? (contractorsMap.get(g.contractorId) || '—') : contractorName,
           plan_date: row.plan_date,
           status: row.status,
           work_place: formatLocation(projectLocations, g.locationId),
@@ -4659,6 +5661,7 @@ ensurePasswordColumn()
   .then(() => ensureMsSdTables())
   .then(() => ensureMosItpTables())
   .then(() => ensureWithdrawalRequestsTable())
+  .then(() => ensureReportsSysTables())
   .then(() => ensureZ1EmaarFProjectLocationsSeeded())
   .then(() => {
     app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));

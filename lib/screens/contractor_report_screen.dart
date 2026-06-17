@@ -20,9 +20,11 @@ class ContractorReportScreen extends StatefulWidget {
 }
 
 class _ContractorReportScreenState extends State<ContractorReportScreen> {
+  static const _allContractors = 'الجميع';
+
   final _db = getStorage();
-  List<String> _contractorNames = ['لايوجد مقاول'];
-  String? _selectedContractor;
+  List<String> _contractorNames = [];
+  String _selectedContractor = _allContractors;
   DateTime _dateFrom = DateTime.now();
   DateTime _dateTo = DateTime.now();
   List<_ContractorReportRow> _rows = [];
@@ -39,23 +41,19 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
       final list = await _db.getContractors();
       if (mounted) {
         setState(() {
-          _contractorNames = ['لايوجد مقاول', ...list.map((c) => c.name)];
+          _contractorNames = list.map((c) => c.name).where((n) => n != 'لايوجد مقاول').toList();
         });
       }
     } catch (_) {
       if (mounted) {
         setState(() {
-          _contractorNames = ['لايوجد مقاول', 'حسام حسن', 'ابراهيم النجار', 'ابراهيم حسن'];
+          _contractorNames = ['حسام حسن', 'ابراهيم النجار', 'ابراهيم حسن'];
         });
       }
     }
   }
 
   Future<void> _run() async {
-    if (_selectedContractor == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اختر المقاول')));
-      return;
-    }
     if (_db is! ApiStorageService) {
       if (!mounted) return;
       setState(() => _rows = []);
@@ -69,7 +67,7 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
     }
     setState(() => _loading = true);
     final list = await (_db as ApiStorageService).getContractorReportFromExecutedPlans(
-      contractorName: _selectedContractor!,
+      contractorName: _selectedContractor,
       dateFrom: _dateFrom,
       dateTo: _dateTo,
     );
@@ -116,18 +114,20 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
               pw.Table(
                 border: pw.TableBorder.all(width: 0.5),
                 columnWidths: {
-                  0: const pw.FlexColumnWidth(1.4),
+                  0: const pw.FlexColumnWidth(1),
                   1: const pw.FlexColumnWidth(1.2),
-                  2: const pw.FlexColumnWidth(1.2),
-                  3: const pw.FlexColumnWidth(1.6),
-                  4: const pw.FlexColumnWidth(1),
-                  5: const pw.FlexColumnWidth(1),
-                  6: const pw.FlexColumnWidth(1),
+                  2: const pw.FlexColumnWidth(1.1),
+                  3: const pw.FlexColumnWidth(1.2),
+                  4: const pw.FlexColumnWidth(1.4),
+                  5: const pw.FlexColumnWidth(0.8),
+                  6: const pw.FlexColumnWidth(0.8),
+                  7: const pw.FlexColumnWidth(0.8),
                 },
                 children: [
                   pw.TableRow(
                     decoration: const pw.BoxDecoration(color: PdfColors.grey300),
                     children: [
+                      _cell('التاريخ', true),
                       _cell('المقاول', true),
                       _cell('المهندس', true),
                       _cell('المشروع', true),
@@ -139,6 +139,7 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
                   ),
                   ..._rows.map((r) => pw.TableRow(
                         children: [
+                          _cell(r.planDate != null ? dateFormat.format(r.planDate!) : '—', false),
                           _cell(r.contractorName, false),
                           _cell(r.engineerName, false),
                           _cell(r.projectName, false),
@@ -177,10 +178,10 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
             isExpanded: true,
             decoration: const InputDecoration(labelText: 'المقاول', border: OutlineInputBorder()),
             items: [
-              const DropdownMenuItem<String>(value: null, child: Text('— اختر المقاول —')),
+              const DropdownMenuItem<String>(value: _allContractors, child: Text('الجميع')),
               ..._contractorNames.map((c) => DropdownMenuItem(value: c, child: Text(c))),
             ],
-            onChanged: (v) => setState(() => _selectedContractor = v),
+            onChanged: (v) => setState(() => _selectedContractor = v ?? _allContractors),
           ),
           const SizedBox(height: 12),
           ListTile(title: const Text('من تاريخ'), subtitle: Text(dateFormat.format(_dateFrom)), trailing: const Icon(Icons.calendar_today), onTap: () async {
@@ -202,6 +203,7 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
                   child: ListTile(
                     title: Text('${r.contractorName} • ${r.engineerName}'),
                     subtitle: Text(
+                      '${r.planDate != null ? dateFormat.format(r.planDate!) : '—'}\n'
                       '${r.projectName} • ${r.workPlace}\n'
                       'صنايعي: ${r.craftsmanCount} • مساعد: ${r.assistantCount} • عمال: ${r.workersCount}',
                     ),
@@ -222,6 +224,7 @@ class _ContractorReportRow {
   final String engineerName;
   final String projectName;
   final String workPlace;
+  final DateTime? planDate;
   final int craftsmanCount;
   final int assistantCount;
   final int workersCount;
@@ -231,6 +234,7 @@ class _ContractorReportRow {
     required this.engineerName,
     required this.projectName,
     required this.workPlace,
+    this.planDate,
     required this.craftsmanCount,
     required this.assistantCount,
     required this.workersCount,
@@ -238,11 +242,17 @@ class _ContractorReportRow {
 
   factory _ContractorReportRow.fromMap(Map<String, dynamic> m) {
     int parse(dynamic v) => int.tryParse('${v ?? 0}') ?? 0;
+    DateTime? parseDate(dynamic v) {
+      if (v == null) return null;
+      if (v is DateTime) return v;
+      return DateTime.tryParse(v.toString());
+    }
     return _ContractorReportRow(
       contractorName: (m['contractor_name'] ?? '—').toString(),
       engineerName: (m['user_name'] ?? '—').toString(),
       projectName: (m['project_name'] ?? '—').toString(),
       workPlace: (m['work_place'] ?? '—').toString(),
+      planDate: parseDate(m['plan_date']),
       craftsmanCount: parse(m['craftsman_count']),
       assistantCount: parse(m['assistant_count']),
       workersCount: parse(m['workers_count']),

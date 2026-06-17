@@ -5,6 +5,8 @@ import '../models/user_model.dart';
 import '../models/notification_item_model.dart';
 import '../services/storage_service.dart';
 import '../services/api_storage_service.dart';
+import 'reports_sys_detail_screen.dart';
+import 'reports_sys_hub_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -113,6 +115,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     } catch (_) {}
   }
 
+  Future<void> _onNotificationTap(NotificationItemModel item) async {
+    await _markAsRead(item);
+    final reportId = parseReportsSysIdFromEventType(item.eventType);
+    if (reportId == null || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReportsSysDetailScreen(
+          currentUser: widget.currentUser,
+          reportId: reportId,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -166,7 +182,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       itemBuilder: (context, index) {
         final item = _items[index];
         return InkWell(
-          onTap: () => _markAsRead(item),
+          onTap: () {
+            if (item.eventType.startsWith('reports_sys_')) {
+              _onNotificationTap(item);
+            } else {
+              _markAsRead(item);
+            }
+          },
           borderRadius: BorderRadius.circular(12),
           child: Container(
             padding: const EdgeInsets.all(14),

@@ -28,6 +28,7 @@ import '../models/mos_itp_record_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../models/pending_postpone_fine_action_model.dart';
 import '../models/postpone_fine_report_row_model.dart';
+import '../models/reports_sys_model.dart';
 import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
@@ -1940,6 +1941,242 @@ class ApiStorageService {
       body: jsonEncode({'userId': engineerUserId}),
       headers: {'Content-Type': 'application/json'},
     );
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  // ——— Reports-SYS ———
+  Future<bool> checkReportsSysNameAvailable({
+    required String name,
+    int? excludeId,
+  }) async {
+    final qp = <String, String>{'name': name};
+    if (excludeId != null) qp['excludeId'] = excludeId.toString();
+    final uri = Uri.parse(_path('reports-sys/check-name')).replace(
+      queryParameters: qp,
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final data = jsonDecode(r.body) as Map<String, dynamic>;
+    return data['available'] == true;
+  }
+
+  Future<int> countPendingReportsSys(int userId) async {
+    final uri = Uri.parse(_path('reports-sys/pending-count')).replace(
+      queryParameters: {'userId': userId.toString()},
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final data = jsonDecode(r.body) as Map<String, dynamic>;
+    return int.tryParse(data['count']?.toString() ?? '0') ?? 0;
+  }
+
+  Future<List<ReportsSysModel>> listReportsSysInbox({
+    required int userId,
+    required String tab,
+    String? requesterEmail,
+    String? searchQuery,
+  }) async {
+    final qp = <String, String>{
+      'userId': userId.toString(),
+      'tab': tab,
+    };
+    if (requesterEmail != null && requesterEmail.trim().isNotEmpty) {
+      qp['requesterEmail'] = requesterEmail.trim();
+    }
+    final q = searchQuery?.trim();
+    if (q != null && q.isNotEmpty) {
+      qp['q'] = q;
+    }
+    final uri = Uri.parse(_path('reports-sys/inbox')).replace(
+      queryParameters: qp,
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) => ReportsSysModel.fromMap(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+  }
+
+  Future<ReportsSysModel> getReportsSysDetail(int reportId) async {
+    final uri = Uri.parse(_path('reports-sys/$reportId'));
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ReportsSysModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<Map<String, String>> getReportsSysAttachmentData({
+    required int reportId,
+    required int attachmentId,
+  }) async {
+    final uri = Uri.parse(
+      _path('reports-sys/$reportId/attachments/$attachmentId'),
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final data = Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+    return {
+      'file_name': (data['file_name'] ?? '').toString(),
+      'mime_type': (data['mime_type'] ?? '').toString(),
+      'data_base64': (data['data_base64'] ?? '').toString(),
+    };
+  }
+
+  Future<ReportsSysModel> createReportsSys({
+    required int userId,
+    required String reportName,
+    required String reportType,
+    required String summary,
+    String? notes,
+    int? sourceReportId,
+    int? projectId,
+    String? projectName,
+  }) async {
+    final uri = Uri.parse(_path('reports-sys'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'reportName': reportName,
+        'reportType': reportType,
+        'summary': summary,
+        if (notes != null && notes.isNotEmpty) 'notes': notes,
+        if (sourceReportId != null) 'sourceReportId': sourceReportId,
+        if (projectId == ReportsSysModel.otherProjectId) ...{
+          'projectId': ReportsSysModel.otherProjectId,
+          if (projectName != null && projectName.isNotEmpty)
+            'projectName': projectName,
+        } else if (projectId != null) ...{
+          'projectId': projectId,
+        },
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ReportsSysModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ReportsSysModel> updateReportsSys({
+    required int reportId,
+    required int userId,
+    required String reportName,
+    required String reportType,
+    required String summary,
+    String? notes,
+    int? projectId,
+    String? projectName,
+    List<Map<String, dynamic>>? attachments,
+  }) async {
+    final uri = Uri.parse(_path('reports-sys/$reportId'));
+    final r = await http.put(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'reportName': reportName,
+        'reportType': reportType,
+        'summary': summary,
+        if (notes != null) 'notes': notes,
+        if (projectId == ReportsSysModel.otherProjectId) ...{
+          'projectId': ReportsSysModel.otherProjectId,
+          if (projectName != null && projectName.isNotEmpty)
+            'projectName': projectName,
+        } else if (projectId != null) ...{
+          'projectId': projectId,
+        },
+        if (attachments != null) 'attachments': attachments,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ReportsSysModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ReportsSysModel> submitReportsSys({
+    required int reportId,
+    required int userId,
+    required int toUserId,
+    String? comment,
+  }) async {
+    final uri = Uri.parse(_path('reports-sys/$reportId/submit'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'toUserId': toUserId,
+        if (comment != null && comment.isNotEmpty) 'comment': comment,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ReportsSysModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ReportsSysModel> respondReportsSys({
+    required int reportId,
+    required int userId,
+    required String action,
+    int? toUserId,
+    String? comment,
+  }) async {
+    final uri = Uri.parse(_path('reports-sys/$reportId/respond'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'action': action,
+        if (toUserId != null) 'toUserId': toUserId,
+        if (comment != null && comment.isNotEmpty) 'comment': comment,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ReportsSysModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ReportsSysModel> relaunchReportsSys({
+    required int sourceReportId,
+    required int userId,
+    required String reportName,
+  }) async {
+    final uri = Uri.parse(_path('reports-sys/$sourceReportId/relaunch'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'reportName': reportName,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ReportsSysModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<void> deleteReportsSys({
+    required int reportId,
+    required int userId,
+    required String requesterEmail,
+  }) async {
+    final uri = Uri.parse(_path('reports-sys/$reportId')).replace(
+      queryParameters: {
+        'userId': userId.toString(),
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
+      },
+    );
+    final r = await http.delete(uri);
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 }
