@@ -31,6 +31,7 @@ void main() async {
   }
 
   await LocalCacheService.init();
+  await initAuthPersistence();
   await initStorage();
 
   runApp(const WoodAndMoreApp());
