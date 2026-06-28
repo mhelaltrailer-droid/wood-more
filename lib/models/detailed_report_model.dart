@@ -188,6 +188,8 @@ List<DetailedReportAttachment> parseDetailedReportAttachments(Map<String, dynami
 class DetailedReportLineModel {
   final int? id;
   final int? contractorId;
+  /// اسم المقاول من الخادم (JOIN) أو من لقطة الخطة — يُستخدم عند العرض إن وُجد.
+  final String? contractorName;
   final int contractorWorkersCount;
   final int selfWorkersCount;
   final int? zoneId;
@@ -201,6 +203,7 @@ class DetailedReportLineModel {
   const DetailedReportLineModel({
     this.id,
     this.contractorId,
+    this.contractorName,
     this.contractorWorkersCount = 0,
     this.selfWorkersCount = 0,
     this.zoneId,
@@ -229,9 +232,15 @@ class DetailedReportLineModel {
   factory DetailedReportLineModel.fromMap(Map<String, dynamic> m) {
     int parse(dynamic v) => v is int ? v : int.parse(v.toString());
     final contractorIdRaw = m['contractor_id'] ?? m['contractorId'];
+    final contractorNameRaw = m['contractor_name'] ?? m['contractorName'];
+    final contractorName = contractorNameRaw?.toString().trim();
     return DetailedReportLineModel(
       id: m['id'] != null ? parse(m['id']) : null,
       contractorId: contractorIdRaw != null ? parse(contractorIdRaw) : null,
+      contractorName:
+          contractorName != null && contractorName.isNotEmpty
+              ? contractorName
+              : null,
       contractorWorkersCount: parse(m['contractor_workers_count'] ?? m['contractorWorkersCount'] ?? 0),
       selfWorkersCount: parse(m['self_workers_count'] ?? m['selfWorkersCount'] ?? 0),
       zoneId: m['zone_id'] != null || m['zoneId'] != null ? parse(m['zone_id'] ?? m['zoneId']) : null,

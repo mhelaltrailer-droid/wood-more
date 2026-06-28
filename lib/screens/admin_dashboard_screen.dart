@@ -15,6 +15,7 @@ import 'admin_warehouse_withdraw_screen.dart';
 import 'admin_units_screen.dart';
 import 'admin_building_materials_screen.dart';
 import 'admin_cutlists_screen.dart';
+import 'worker_hours_report_screen.dart';
 import 'home_screen.dart';
 
 /// لوح التحكم - يظهر لمسؤول التطبيق فقط
@@ -89,6 +90,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       _Item('إدارة القطعيات', 'صور القطعيات لكل مبنى (للمهندس)', Icons.photo_library, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminCutlistsScreen(admin: widget.currentUser)))),
       _Item('إدارة المشرفين', 'أسماء المشرفين', Icons.badge, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminSupervisorsScreen(admin: widget.currentUser)))),
       _Item('إدارة المقاولين', 'أسماء المقاولين', Icons.engineering, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminContractorsScreen(admin: widget.currentUser)))),
+      _Item('ساعات العمال', 'تقرير ساعات العمل من الحضور والانصراف (مهندس موقع / مشرف عام)', Icons.access_time, () => Navigator.push(context, MaterialPageRoute(builder: (_) => WorkerHoursReportScreen(admin: widget.currentUser)))),
       _Item('الخامات', 'إضافة وتعديل وحذف أسماء الخامات على مستوى التطبيق', Icons.inventory_2, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminMaterialsScreen(admin: widget.currentUser)))),
       _Item('ارصدة مخازن المشاريع', 'إضافة وتعديل وعرض أرصدة الخامات لكل مشروع (اسم المخزن = اسم المشروع)', Icons.warehouse, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminProjectStoresScreen(admin: widget.currentUser)))),
       _Item('هيكلة المخازن', 'أماكن فرعية داخل كل مشروع مع خامات وكمياتها للسحب من قبل مهندس الموقع', Icons.account_tree, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminWarehouseStructureScreen(admin: widget.currentUser)))),

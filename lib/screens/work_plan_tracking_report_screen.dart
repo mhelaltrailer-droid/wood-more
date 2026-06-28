@@ -234,25 +234,6 @@ DateTime _trackingTomorrowOnly() =>
 bool _isFuturePlanDate(DateTime reportDatetime) =>
     _planDateOnly(reportDatetime).isAfter(_trackingTodayOnly());
 
-/// خطة الغد: عرض المؤجلة وبانتظار الإجراء فقط (استبعاد المؤكدة).
-bool _includeInTomorrowPlanReport(String? status) {
-  final s = status?.trim();
-  if (s == 'confirmed' || s == 'confirmed_edited') return false;
-  return true;
-}
-
-String _formatTomorrowPlanStatusColumn(Map<String, String?>? d) {
-  final status = d?['status']?.trim();
-  if (status == 'postponed') {
-    final reason = d?['postponedReasonText']?.trim();
-    if (reason != null && reason.isNotEmpty) {
-      return 'مؤجلة — $reason';
-    }
-    return 'مؤجلة';
-  }
-  return 'انتظار إجراء';
-}
-
 class _PlanTrackingRow {
   final int reportId;
   final String engineerName;
@@ -262,13 +243,12 @@ class _PlanTrackingRow {
   final String workplaceLevel1;
   final String phasesText;
   final String planDetails;
-  /// خطة الغد فقط: «ملخص ما تم تنفيذه اليوم» من رأس التقرير
-  final String executedTodaySummary;
+  /// تاريخ حفظ الخطة + ملخص ما تم تنفيذه اليوم
+  final String executedTodayDateLabel;
+  final String executedTodayBody;
   final String materialsWithdrawn;
-  /// خطة اليوم فقط؛ عند خطة الغد يُترك «—»
+  /// خطة اليوم فقط
   final String executionStatus;
-  /// خطة الغد فقط: انتظار إجراء أو مؤجلة (مع السبب)
-  final String tomorrowPlanStatus;
   final String contractorName;
 
   _PlanTrackingRow({
@@ -279,12 +259,14 @@ class _PlanTrackingRow {
     required this.workplaceLevel1,
     required this.phasesText,
     required this.planDetails,
-    this.executedTodaySummary = '',
+    this.executedTodayDateLabel = '—',
+    this.executedTodayBody = kExecutedTodayTrackingEmptyLabel,
     required this.materialsWithdrawn,
     required this.executionStatus,
-    this.tomorrowPlanStatus = '',
     required this.contractorName,
   });
+
+  String get executedTodayPdfText => '$executedTodayDateLabel\n$executedTodayBody';
 }
 
 /// تقارير متابعة خطط اليوم/الغد — شكل مبدئي مطابق للنموذج (جدول + فلاتر).
@@ -350,13 +332,42 @@ class _WorkPlanTrackingReportScreenState
       setState(() {
         _projects = projects;
         _engineers = engineers;
-        _contractorById = {for (final c in contractors) c.id: c};
+        _contractorById = <int, ContractorModel>{
+          for (final c in contractors) c.id: c,
+        };
         _contractors = contractors.where((c) {
           final n = c.name.trim().toLowerCase();
           return n != 'لايوجد مقاول' && n != 'ذاتي';
         }).toList();
       });
-    } catch (_) {}
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تعذر تحميل الفلاتر: $e'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
+  }
+
+  Future<Map<int, ContractorModel>> _loadContractorById() async {
+    try {
+      final contractors = await _db.getContractors();
+      final map = <int, ContractorModel>{for (final c in contractors) c.id: c};
+      if (mounted) {
+        setState(() {
+          _contractorById = map;
+          _contractors = contractors.where((c) {
+            final n = c.name.trim().toLowerCase();
+            return n != 'لايوجد مقاول' && n != 'ذاتي';
+          }).toList();
+        });
+      }
+      return map;
+    } catch (_) {
+      return _contractorById;
+    }
   }
 
   Future<void> _pickDateFrom() async {
@@ -421,7 +432,7 @@ class _WorkPlanTrackingReportScreenState
         userId: _selectedEngineer?.id,
         projectId: _selectedProject?.id,
       );
-      final contractorById = _contractorById;
+      final contractorById = await _loadContractorById();
       final projectById = {for (final p in _projects) p.id: p};
       final phases = await _db.getWorkPhases();
       final phaseById = <int, WorkPhaseModel>{
@@ -437,7 +448,7 @@ class _WorkPlanTrackingReportScreenState
       final db = _db;
       final apiMode = db is ApiStorageService;
       Map<int, Map<String, String?>> planStatuses = {};
-      if (apiMode) {
+      if (apiMode && !_tomorrowPlan) {
         planStatuses = await _loadPlanExecutionStatusesApi(
           reports,
           db,
@@ -496,10 +507,10 @@ class _WorkPlanTrackingReportScreenState
         );
       }
 
-      String tomorrowStatusForReport(DetailedReportModel report) {
-        if (!_tomorrowPlan) return '';
-        return _formatTomorrowPlanStatusColumn(
-          report.id != null ? planStatuses[report.id!] : null,
+      ExecutedTodayCellContent executedTodayForReport(DetailedReportModel report) {
+        return executedTodayCellContent(
+          planSavedAt: report.createdAt,
+          executedTodaySummary: report.executedTodaySummary,
         );
       }
 
@@ -507,11 +518,7 @@ class _WorkPlanTrackingReportScreenState
       final out = <_PlanTrackingRow>[];
       for (final report in reports) {
         if (report.id == null) continue;
-        if (_tomorrowPlan) {
-          if (!_isFuturePlanDate(report.reportDatetime)) continue;
-          final rawStatus = planStatuses[report.id!]?['status']?.toString();
-          if (!_includeInTomorrowPlanReport(rawStatus)) continue;
-        } else if (_isFuturePlanDate(report.reportDatetime)) {
+        if (!_tomorrowPlan && _isFuturePlanDate(report.reportDatetime)) {
           continue;
         }
         if (!_tomorrowPlan && _executionStatusFilter != _execFilterAll) {
@@ -528,8 +535,7 @@ class _WorkPlanTrackingReportScreenState
         final summaryText = (report.summary ?? '').trim().isEmpty
             ? '—'
             : report.summary!.trim();
-        final executedTodayText =
-            formatExecutedTodaySummaryForReport(report.executedTodaySummary);
+        final executedToday = executedTodayForReport(report);
         final planDateLabel =
             planDateFmt.format(report.reportDatetime.toLocal());
 
@@ -544,10 +550,10 @@ class _WorkPlanTrackingReportScreenState
               workplaceLevel1: '—',
               phasesText: '—',
               planDetails: summaryText,
-              executedTodaySummary: executedTodayText,
+              executedTodayDateLabel: executedToday.dateLabel,
+              executedTodayBody: executedToday.body,
               materialsWithdrawn: materialsForReport(report),
               executionStatus: executionForReport(report),
-              tomorrowPlanStatus: tomorrowStatusForReport(report),
               contractorName: '—',
             ),
           );
@@ -577,9 +583,7 @@ class _WorkPlanTrackingReportScreenState
               (first.manualWorkLocation?.trim().isEmpty ?? true)) {
             continue;
           }
-          final cnameRaw = first.contractorId == null
-              ? '—'
-              : (contractorById[first.contractorId!]?.name ?? '—');
+          final cnameRaw = contractorDisplayNameForLine(first, contractorById);
           if (_selectedContractor != null &&
               first.contractorId != _selectedContractor!.id) {
             continue;
@@ -597,10 +601,10 @@ class _WorkPlanTrackingReportScreenState
               workplaceLevel1: locDisplay,
               phasesText: phasesText,
               planDetails: summaryText,
-              executedTodaySummary: executedTodayText,
+              executedTodayDateLabel: executedToday.dateLabel,
+              executedTodayBody: executedToday.body,
               materialsWithdrawn: materialsForReport(report),
               executionStatus: executionForReport(report),
-              tomorrowPlanStatus: tomorrowStatusForReport(report),
               contractorName: cname,
             ),
           );
@@ -761,9 +765,9 @@ class _WorkPlanTrackingReportScreenState
             border: pw.TableBorder.all(width: 0.45, color: PdfColors.grey600),
             columnWidths: _pdfColumnWidths(
               showMaterials: _showMaterialsColumn,
-              showExecutedTodaySummary: _tomorrowPlan,
+              showExecutedTodaySummary: true,
+              executedTodayAfterPlanDetails: _tomorrowPlan,
               showExecution: !_tomorrowPlan,
-              showTomorrowStatus: _tomorrowPlan,
             ),
             children: [
               pw.TableRow(
@@ -771,9 +775,12 @@ class _WorkPlanTrackingReportScreenState
                 decoration: const pw.BoxDecoration(color: PdfColors.grey300),
                 children: _pdfHeaderCells(
                   showMaterials: _showMaterialsColumn,
-                  showExecutedTodaySummary: _tomorrowPlan,
+                  showExecutedTodaySummary: true,
+                  executedTodayAfterPlanDetails: _tomorrowPlan,
+                  executedTodayHeader: _tomorrowPlan
+                      ? 'ملخص ما تم تنفيذه اليوم'
+                      : 'ما تم تنفيذه اليوم',
                   showExecution: !_tomorrowPlan,
-                  showTomorrowStatus: _tomorrowPlan,
                 ),
               ),
               ..._rows.map(
@@ -782,9 +789,9 @@ class _WorkPlanTrackingReportScreenState
                   children: _pdfDataCells(
                     r,
                     showMaterials: _showMaterialsColumn,
-                    showExecutedTodaySummary: _tomorrowPlan,
+                    showExecutedTodaySummary: true,
+                    executedTodayAfterPlanDetails: _tomorrowPlan,
                     showExecution: !_tomorrowPlan,
-                    showTomorrowStatus: _tomorrowPlan,
                   ),
                 ),
               ),
@@ -802,7 +809,10 @@ class _WorkPlanTrackingReportScreenState
   }
 
   pw.Widget _pdfCellHdr(String t) => pw.Padding(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        padding: const pw.EdgeInsets.symmetric(
+          horizontal: kWorkPlanPdfCellHdrHorizontal,
+          vertical: kWorkPlanPdfCellHdrVertical,
+        ),
         child: pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Text(
@@ -819,7 +829,10 @@ class _WorkPlanTrackingReportScreenState
       );
 
   pw.Widget _pdfCellBody(String t) => pw.Padding(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 8),
+        padding: const pw.EdgeInsets.symmetric(
+          horizontal: kWorkPlanPdfCellBodyHorizontal,
+          vertical: kWorkPlanPdfCellBodyVertical,
+        ),
         child: pw.Align(
           alignment: pw.Alignment.topRight,
           child: pw.Text(
@@ -836,7 +849,10 @@ class _WorkPlanTrackingReportScreenState
   Widget _tableCell(String text, {required double width}) {
     final display = text.trim().isEmpty ? '—' : text;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+      padding: const EdgeInsets.symmetric(
+        vertical: kWorkPlanTableCellVerticalPadding,
+        horizontal: kWorkPlanTableCellHorizontalPadding,
+      ),
       child: SizedBox(
         width: width,
         child: Text(
@@ -848,11 +864,43 @@ class _WorkPlanTrackingReportScreenState
     );
   }
 
+  pw.Widget _pdfCellExecutedToday(_PlanTrackingRow r) => pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(
+          horizontal: kWorkPlanPdfCellBodyHorizontal,
+          vertical: kWorkPlanPdfCellBodyVertical,
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            pw.Text(
+              r.executedTodayDateLabel,
+              textAlign: pw.TextAlign.center,
+              textDirection: pw.TextDirection.rtl,
+              style: pw.TextStyle(
+                fontSize: 7.5,
+                fontWeight: pw.FontWeight.bold,
+                lineSpacing: kWorkPlanPdfLineSpacing,
+              ),
+            ),
+            pw.SizedBox(height: kWorkPlanPdfExecutedTodayInnerGap),
+            pw.Text(
+              r.executedTodayBody,
+              textAlign: pw.TextAlign.center,
+              textDirection: pw.TextDirection.rtl,
+              style: const pw.TextStyle(
+                fontSize: 7.5,
+                lineSpacing: kWorkPlanPdfLineSpacing,
+              ),
+            ),
+          ],
+        ),
+      );
+
   Map<int, pw.TableColumnWidth> _pdfColumnWidths({
     required bool showMaterials,
     required bool showExecutedTodaySummary,
+    required bool executedTodayAfterPlanDetails,
     required bool showExecution,
-    required bool showTomorrowStatus,
   }) {
     final m = <int, pw.TableColumnWidth>{};
     var i = 0;
@@ -862,11 +910,11 @@ class _WorkPlanTrackingReportScreenState
     add(0.75);
     add(1.15);
     add(1.35);
+    if (showExecutedTodaySummary && !executedTodayAfterPlanDetails) add(1.75);
     add(1.6);
-    if (showExecutedTodaySummary) add(1.75);
+    if (showExecutedTodaySummary && executedTodayAfterPlanDetails) add(1.75);
     if (showMaterials) add(2.0);
     if (showExecution) add(1.55);
-    if (showTomorrowStatus) add(1.7);
     add(2.4);
     return m;
   }
@@ -874,8 +922,9 @@ class _WorkPlanTrackingReportScreenState
   List<pw.Widget> _pdfHeaderCells({
     required bool showMaterials,
     required bool showExecutedTodaySummary,
+    required bool executedTodayAfterPlanDetails,
+    required String executedTodayHeader,
     required bool showExecution,
-    required bool showTomorrowStatus,
   }) {
     return [
       _pdfCellHdr('اسم المهندس'),
@@ -883,12 +932,13 @@ class _WorkPlanTrackingReportScreenState
       _pdfCellHdr('تاريخ الخطة'),
       _pdfCellHdr('مكان العمل — المستوى الأول'),
       _pdfCellHdr('المرحلة'),
+      if (showExecutedTodaySummary && !executedTodayAfterPlanDetails)
+        _pdfCellHdr(executedTodayHeader),
       _pdfCellHdr('تفاصيل خطة العمل'),
-      if (showExecutedTodaySummary)
-        _pdfCellHdr('ملخص ما تم تنفيذه اليوم'),
+      if (showExecutedTodaySummary && executedTodayAfterPlanDetails)
+        _pdfCellHdr(executedTodayHeader),
       if (showMaterials) _pdfCellHdr('الخامات المسحوبة — إن وجدت'),
       if (showExecution) _pdfCellHdr('حالة التنفيذ'),
-      if (showTomorrowStatus) _pdfCellHdr('وضع الخطة'),
       _pdfCellHdr('المقاول'),
     ];
   }
@@ -897,8 +947,8 @@ class _WorkPlanTrackingReportScreenState
     _PlanTrackingRow r, {
     required bool showMaterials,
     required bool showExecutedTodaySummary,
+    required bool executedTodayAfterPlanDetails,
     required bool showExecution,
-    required bool showTomorrowStatus,
   }) {
     return [
       _pdfCellBody(r.engineerName),
@@ -906,11 +956,13 @@ class _WorkPlanTrackingReportScreenState
       _pdfCellBody(r.planDateLabel),
       _pdfCellBody(r.workplaceLevel1),
       _pdfCellBody(r.phasesText),
+      if (showExecutedTodaySummary && !executedTodayAfterPlanDetails)
+        _pdfCellExecutedToday(r),
       _pdfCellBody(r.planDetails),
-      if (showExecutedTodaySummary) _pdfCellBody(r.executedTodaySummary),
+      if (showExecutedTodaySummary && executedTodayAfterPlanDetails)
+        _pdfCellExecutedToday(r),
       if (showMaterials) _pdfCellBody(r.materialsWithdrawn),
       if (showExecution) _pdfCellBody(r.executionStatus),
-      if (showTomorrowStatus) _pdfCellBody(r.tomorrowPlanStatus),
       _pdfCellBody(r.contractorName),
     ];
   }
@@ -1187,9 +1239,22 @@ class _WorkPlanTrackingReportScreenState
       );
     }
     final showExecCol = !_tomorrowPlan;
-    final showTomorrowStatusCol = _tomorrowPlan;
-    final showExecutedTodayCol = _tomorrowPlan;
+    final showExecutedTodayCol = true;
+    final executedTodayAfterPlanDetails = _tomorrowPlan;
+    final executedTodayHeader = _tomorrowPlan
+        ? 'ملخص ما تم تنفيذه اليوم'
+        : 'ما تم تنفيذه اليوم';
     final showMatCol = _showMaterialsColumn;
+
+    DataCell executedTodayCell(_PlanTrackingRow r) => DataCell(
+          buildExecutedTodayTrackingTableCell(
+            ExecutedTodayCellContent(
+              dateLabel: r.executedTodayDateLabel,
+              body: r.executedTodayBody,
+            ),
+            width: 220,
+          ),
+        );
 
     return Scrollbar(
       thumbVisibility: true,
@@ -1199,87 +1264,123 @@ class _WorkPlanTrackingReportScreenState
           child: DataTable(
             headingRowColor: WidgetStateProperty.all(const Color(0xFFE8F5E9)),
             border: TableBorder.all(color: Colors.grey.shade400, width: 0.8),
-            columnSpacing: 14,
-            horizontalMargin: 12,
-            headingRowHeight: 56,
-            dataRowMinHeight: 52,
+            columnSpacing: kWorkPlanDataTableColumnSpacing,
+            horizontalMargin: kWorkPlanDataTableHorizontalMargin,
+            headingRowHeight: kWorkPlanDataTableHeadingRowHeight,
+            dataRowMinHeight: kWorkPlanDataTableDataRowMinHeight,
             dataRowMaxHeight: double.infinity,
             columns: [
               DataColumn(
                 label: Text(
                   'اسم المهندس',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    height: kWorkPlanTableTextLineHeight,
+                  ),
                 ),
               ),
               DataColumn(
                 label: Text(
                   'اسم المشروع',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    height: kWorkPlanTableTextLineHeight,
+                  ),
                 ),
               ),
               DataColumn(
                 label: Text(
                   'تاريخ الخطة',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    height: kWorkPlanTableTextLineHeight,
+                  ),
                 ),
               ),
               DataColumn(
                 label: Text(
                   'مكان العمل — المستوى الأول',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    height: kWorkPlanTableTextLineHeight,
+                  ),
                 ),
               ),
               DataColumn(
                 label: Text(
                   'المرحلة',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    height: kWorkPlanTableTextLineHeight,
+                  ),
                 ),
               ),
+              if (showExecutedTodayCol && !executedTodayAfterPlanDetails)
+                DataColumn(
+                  label: Text(
+                    executedTodayHeader,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      height: kWorkPlanTableTextLineHeight,
+                    ),
+                  ),
+                ),
               DataColumn(
                 label: Text(
                   'تفاصيل خطة العمل',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    height: kWorkPlanTableTextLineHeight,
+                  ),
                 ),
               ),
-              if (showExecutedTodayCol)
+              if (showExecutedTodayCol && executedTodayAfterPlanDetails)
                 DataColumn(
                   label: Text(
-                    'ملخص ما تم تنفيذه اليوم',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    executedTodayHeader,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      height: kWorkPlanTableTextLineHeight,
+                    ),
                   ),
                 ),
               if (showMatCol)
                 DataColumn(
                   label: Text(
                     'الخامات المسحوبة — إن وجدت',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      height: kWorkPlanTableTextLineHeight,
+                    ),
                   ),
                 ),
               if (showExecCol)
                 DataColumn(
                   label: Text(
                     'حالة التنفيذ',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              if (showTomorrowStatusCol)
-                DataColumn(
-                  label: Text(
-                    'وضع الخطة',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      height: kWorkPlanTableTextLineHeight,
+                    ),
                   ),
                 ),
               DataColumn(
                 label: Text(
                   'المقاول',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    height: kWorkPlanTableTextLineHeight,
+                  ),
                 ),
               ),
               if (widget.currentUser.canManageAnySiteWorkPlan)
-                const DataColumn(
+                DataColumn(
                   label: Text(
                     'إجراء',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      height: kWorkPlanTableTextLineHeight,
+                    ),
                   ),
                 ),
             ],
@@ -1292,11 +1393,11 @@ class _WorkPlanTrackingReportScreenState
                       DataCell(_tableCell(r.planDateLabel, width: 96)),
                       DataCell(_tableCell(r.workplaceLevel1, width: 160)),
                       DataCell(_tableCell(r.phasesText, width: 180)),
+                      if (showExecutedTodayCol && !executedTodayAfterPlanDetails)
+                        executedTodayCell(r),
                       DataCell(_tableCell(r.planDetails, width: 220)),
-                      if (showExecutedTodayCol)
-                        DataCell(
-                          _tableCell(r.executedTodaySummary, width: 220),
-                        ),
+                      if (showExecutedTodayCol && executedTodayAfterPlanDetails)
+                        executedTodayCell(r),
                       if (showMatCol)
                         DataCell(
                           _tableCell(
@@ -1308,20 +1409,13 @@ class _WorkPlanTrackingReportScreenState
                         ),
                       if (showExecCol)
                         DataCell(_tableCell(r.executionStatus, width: 200)),
-                      if (showTomorrowStatusCol)
-                        DataCell(
-                          _tableCell(
-                            r.tomorrowPlanStatus.isEmpty
-                                ? 'انتظار إجراء'
-                                : r.tomorrowPlanStatus,
-                            width: 220,
-                          ),
-                        ),
                       DataCell(_tableCell(r.contractorName, width: 300)),
                       if (widget.currentUser.canManageAnySiteWorkPlan)
                         DataCell(
                           Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: kWorkPlanTableCellVerticalPadding,
+                            ),
                             child: IconButton(
                               tooltip: 'حذف الخطة',
                               icon: const Icon(

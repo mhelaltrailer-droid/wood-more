@@ -2688,17 +2688,25 @@ class DatabaseService {
     final list = <DetailedReportModel>[];
     for (final row in maps) {
       final reportId = row['id'] as int;
-      final lineMaps = await db.query(
-        'detailed_report_lines',
-        where: 'detailed_report_id = ?',
-        whereArgs: [reportId],
-        orderBy: 'id',
+      final lineMaps = await db.rawQuery(
+        '''
+        SELECT l.id, l.contractor_id, c.name AS contractor_name,
+               l.contractor_workers_count, l.self_workers_count, l.zone_id,
+               l.building_id, l.location_id, l.manual_work_location, l.phase_id,
+               l.workers_count
+        FROM detailed_report_lines l
+        LEFT JOIN contractors c ON c.id = l.contractor_id
+        WHERE l.detailed_report_id = ?
+        ORDER BY l.id
+        ''',
+        [reportId],
       );
       final lines = lineMaps
           .map(
             (l) => DetailedReportLineModel.fromMap({
               'id': l['id'],
               'contractor_id': l['contractor_id'],
+              'contractor_name': l['contractor_name'],
               'contractor_workers_count': l['contractor_workers_count'],
               'self_workers_count': l['self_workers_count'],
               'zone_id': l['zone_id'],

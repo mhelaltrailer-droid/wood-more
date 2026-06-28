@@ -133,11 +133,12 @@ class UserModel {
   }
 
   factory UserModel.fromMap(Map<String, dynamic> map) {
+    int parseId(dynamic v) => v is int ? v : int.parse(v.toString());
     return UserModel(
-      id: map['id'] as int,
-      name: map['name'] as String,
-      email: map['email'] as String,
-      role: map['role'] as String,
+      id: parseId(map['id']),
+      name: (map['name'] ?? '').toString(),
+      email: (map['email'] ?? '').toString(),
+      role: (map['role'] ?? 'site_engineer').toString(),
     );
   }
 }

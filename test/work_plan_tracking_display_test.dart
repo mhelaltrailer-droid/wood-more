@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wood_and_more_app/models/contractor_model.dart';
 import 'package:wood_and_more_app/models/detailed_report_model.dart';
 import 'package:wood_and_more_app/models/project_location_model.dart';
 import 'package:wood_and_more_app/utils/work_plan_tracking_display.dart';
@@ -107,28 +108,56 @@ void main() {
     });
   });
 
+  group('executedTodayCellContent', () {
+    test('uses save date and summary body', () {
+      final cell = executedTodayCellContent(
+        planSavedAt: DateTime(2026, 6, 23, 14, 30),
+        executedTodaySummary: ' أنجزنا الدهان ',
+      );
+      expect(cell.dateLabel, '23/06/2026');
+      expect(cell.body, 'أنجزنا الدهان');
+      expect(cell.pdfText, '23/06/2026\nأنجزنا الدهان');
+    });
+
+    test('shows لايوجد when summary missing', () {
+      final cell = executedTodayCellContent(
+        planSavedAt: DateTime(2026, 6, 23),
+        executedTodaySummary: null,
+      );
+      expect(cell.dateLabel, '23/06/2026');
+      expect(cell.body, kExecutedTodayTrackingEmptyLabel);
+    });
+
+    test('date dash when createdAt missing', () {
+      final cell = executedTodayCellContent(
+        planSavedAt: null,
+        executedTodaySummary: 'نص',
+      );
+      expect(cell.dateLabel, '—');
+      expect(cell.body, 'نص');
+    });
+  });
+
   group('workPlanTrackingPdfColumnCount', () {
-    test('tomorrow plan: base + executed today + tomorrow status', () {
+    test('tomorrow plan: base + executed today', () {
       expect(
         workPlanTrackingPdfColumnCount(
           showMaterials: false,
           showExecutedTodaySummary: true,
           showExecution: false,
-          showTomorrowStatus: true,
         ),
-        9,
+        8,
       );
     });
 
-    test('today plan: base + execution, no executed today column', () {
+    test('today plan: base + executed today + execution', () {
       expect(
         workPlanTrackingPdfColumnCount(
           showMaterials: false,
-          showExecutedTodaySummary: false,
+          showExecutedTodaySummary: true,
           showExecution: true,
-          showTomorrowStatus: false,
         ),
-        8,
+        9,
       );
     });
 
@@ -138,9 +167,8 @@ void main() {
           showMaterials: true,
           showExecutedTodaySummary: true,
           showExecution: true,
-          showTomorrowStatus: true,
         ),
-        11,
+        10,
       );
     });
   });
@@ -218,6 +246,35 @@ void main() {
         formatExecutedTodaySummaryForReport(report.executedTodaySummary),
         'ملخص تجربة',
       );
+    });
+  });
+
+  group('contractorDisplayNameForLine', () {
+    test('uses embedded contractor_name from API', () {
+      final line = DetailedReportLineModel(
+        contractorId: 14,
+        contractorName: 'حسام حسن',
+        phaseId: 1,
+        workersCount: 2,
+      );
+      expect(contractorDisplayNameForLine(line, {}), 'حسام حسن');
+    });
+
+    test('falls back to contractorById map', () {
+      final line = DetailedReportLineModel(
+        contractorId: 3,
+        phaseId: 1,
+        workersCount: 1,
+      );
+      final byId = {
+        3: const ContractorModel(id: 3, name: 'مقاول تجريبي'),
+      };
+      expect(contractorDisplayNameForLine(line, byId), 'مقاول تجريبي');
+    });
+
+    test('returns dash when no contractor', () {
+      final line = DetailedReportLineModel(phaseId: 1, workersCount: 1);
+      expect(contractorDisplayNameForLine(line, {}), '—');
     });
   });
 

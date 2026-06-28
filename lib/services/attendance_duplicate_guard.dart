@@ -37,6 +37,49 @@ bool attendanceSameProject(
   return (r.projectName ?? '').trim() == wantName;
 }
 
+const _kDuplicateCheckInMessage =
+    'تم تسجيل الحضور مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.';
+
+const _kDuplicateCheckOutMessage =
+    'تم تسجيل الانصراف مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.';
+
+/// حضور مكرر لنفس المشروع يُسمح فقط إذا سجّل المستخدم حضوراً في مشروع آخر بعد آخر حضور في هذا المشروع.
+String? _duplicateCheckInMessageIfAny({
+  required Iterable<AttendanceRecordModel> userRecords,
+  required int userId,
+  required int? projectId,
+  required String? projectName,
+  required DateTime onDate,
+}) {
+  final dayCheckIns = userRecords
+      .where(
+        (r) =>
+            r.userId == userId &&
+            r.type == 'check_in' &&
+            _sameCalendarDay(r.dateTime, onDate),
+      )
+      .toList()
+    ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+
+  AttendanceRecordModel? lastSameProject;
+  for (final r in dayCheckIns) {
+    if (attendanceSameProject(r, projectId, projectName)) {
+      lastSameProject = r;
+    }
+  }
+  if (lastSameProject == null) return null;
+
+  final lastTime = lastSameProject.dateTime;
+  final visitedOtherProjectAfter = dayCheckIns.any(
+    (r) =>
+        r.dateTime.isAfter(lastTime) &&
+        !attendanceSameProject(r, projectId, projectName),
+  );
+  if (visitedOtherProjectAfter) return null;
+
+  return _kDuplicateCheckInMessage;
+}
+
 /// رسالة إن وُجد تسجيل سابق من نفس النوع لنفس المستخدم والمشروع في نفس اليوم؛ وإلا null.
 String? duplicateAttendanceMessageIfAny({
   required Iterable<AttendanceRecordModel> userRecords,
@@ -46,16 +89,23 @@ String? duplicateAttendanceMessageIfAny({
   required String type,
   required DateTime onDate,
 }) {
+  if (type == 'check_in') {
+    return _duplicateCheckInMessageIfAny(
+      userRecords: userRecords,
+      userId: userId,
+      projectId: projectId,
+      projectName: projectName,
+      onDate: onDate,
+    );
+  }
+
   for (final r in userRecords) {
     if (r.userId != userId) continue;
     if (r.type != type) continue;
     if (!_sameCalendarDay(r.dateTime, onDate)) continue;
     if (!attendanceSameProject(r, projectId, projectName)) continue;
-    if (type == 'check_in') {
-      return 'تم تسجيل الحضور مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.';
-    }
     if (type == 'check_out') {
-      return 'تم تسجيل الانصراف مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.';
+      return _kDuplicateCheckOutMessage;
     }
   }
   return null;

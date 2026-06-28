@@ -1669,6 +1669,75 @@ app.delete('/buildings/:id', async (req, res) => {
 });
 
 // ——— Attendance ———
+
+function attendanceSameProjectRecord(rec, projectId, projectName) {
+  const wantName = String(projectName || '').trim();
+  if (projectId != null && !Number.isNaN(projectId)) {
+    const rid = rec.project_id != null ? parseInt(String(rec.project_id), 10) : null;
+    if (rid === projectId) return true;
+    if (rid == null && String(rec.project_name || '').trim() === wantName) return true;
+    return false;
+  }
+  return String(rec.project_name || '').trim() === wantName;
+}
+
+async function duplicateCheckInMessageIfAny(pool, userId, calendarDate, projectId, projectName) {
+  const r = await pool.query(
+    `SELECT project_id, project_name, date_time FROM attendance_records
+     WHERE user_id = $1 AND type = 'check_in'
+     AND (
+       calendar_date = $2
+       OR (calendar_date IS NULL AND SUBSTRING(date_time, 1, 10) = $2)
+     )
+     ORDER BY date_time ASC`,
+    [userId, calendarDate]
+  );
+  const records = r.rows;
+  let lastSame = null;
+  for (const rec of records) {
+    if (attendanceSameProjectRecord(rec, projectId, projectName)) lastSame = rec;
+  }
+  if (!lastSame) return null;
+
+  const lastTime = new Date(lastSame.date_time).getTime();
+  const visitedOther = records.some((rec) => {
+    if (attendanceSameProjectRecord(rec, projectId, projectName)) return false;
+    return new Date(rec.date_time).getTime() > lastTime;
+  });
+  if (visitedOther) return null;
+  return 'تم تسجيل الحضور مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.';
+}
+
+async function duplicateCheckOutExists(pool, userId, calendarDate, projectId, projectName) {
+  let dup;
+  if (projectId != null && !Number.isNaN(projectId)) {
+    dup = await pool.query(
+      `SELECT id FROM attendance_records
+       WHERE user_id = $1 AND type = 'check_out'
+       AND (
+         calendar_date = $2
+         OR (calendar_date IS NULL AND SUBSTRING(date_time, 1, 10) = $2)
+       )
+       AND project_id = $3
+       LIMIT 1`,
+      [userId, calendarDate, projectId]
+    );
+  } else {
+    dup = await pool.query(
+      `SELECT id FROM attendance_records
+       WHERE user_id = $1 AND type = 'check_out'
+       AND (
+         calendar_date = $2
+         OR (calendar_date IS NULL AND SUBSTRING(date_time, 1, 10) = $2)
+       )
+       AND project_id IS NULL AND TRIM(COALESCE(project_name, '')) = TRIM($3::text)
+       LIMIT 1`,
+      [userId, calendarDate, projectName]
+    );
+  }
+  return dup.rows.length > 0;
+}
+
 app.post('/attendance', async (req, res) => {
   try {
     const b = req.body;
@@ -1690,38 +1759,31 @@ app.post('/attendance', async (req, res) => {
         : parseInt(String(rawPid), 10);
     const projectName = b.projectName != null ? String(b.projectName) : '';
 
-    let dup;
-    if (projectId != null && !Number.isNaN(projectId)) {
-      dup = await pool.query(
-        `SELECT id FROM attendance_records
-         WHERE user_id = $1 AND type = $2
-         AND (
-           calendar_date = $3
-           OR (calendar_date IS NULL AND SUBSTRING(date_time, 1, 10) = $3)
-         )
-         AND project_id = $4
-         LIMIT 1`,
-        [userId, type, calendarDate, projectId]
+    if (type === 'check_in') {
+      const checkInMsg = await duplicateCheckInMessageIfAny(
+        pool,
+        userId,
+        calendarDate,
+        Number.isNaN(projectId) ? null : projectId,
+        projectName
       );
+      if (checkInMsg) {
+        return res.status(409).json({ error: checkInMsg });
+      }
     } else {
-      dup = await pool.query(
-        `SELECT id FROM attendance_records
-         WHERE user_id = $1 AND type = $2
-         AND (
-           calendar_date = $3
-           OR (calendar_date IS NULL AND SUBSTRING(date_time, 1, 10) = $3)
-         )
-         AND project_id IS NULL AND TRIM(COALESCE(project_name, '')) = TRIM($4::text)
-         LIMIT 1`,
-        [userId, type, calendarDate, projectName]
+      const checkOutDup = await duplicateCheckOutExists(
+        pool,
+        userId,
+        calendarDate,
+        Number.isNaN(projectId) ? null : projectId,
+        projectName
       );
-    }
-    if (dup.rows.length > 0) {
-      const msg =
-        type === 'check_in'
-          ? 'تم تسجيل الحضور مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.'
-          : 'تم تسجيل الانصراف مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.';
-      return res.status(409).json({ error: msg });
+      if (checkOutDup) {
+        return res.status(409).json({
+          error:
+            'تم تسجيل الانصراف مسبقاً لهذا المشروع اليوم. لا داعي لإعادة التسجيل مرة أخرى.',
+        });
+      }
     }
 
     const r = await pool.query(
@@ -2982,7 +3044,8 @@ app.post('/detailed-reports', async (req, res) => {
       const locationId = line.locationId != null ? parseInt(line.locationId) : null;
       const zoneId = line.zoneId != null ? parseInt(line.zoneId) : null;
       const buildingId = line.buildingId != null ? parseInt(line.buildingId) : null;
-      const contractorId = line.contractorId != null ? parseInt(line.contractorId) : null;
+      const contractorIdRaw = line.contractorId ?? line.contractor_id;
+      const contractorId = contractorIdRaw != null ? parseInt(contractorIdRaw, 10) : null;
       await pool.query(
         'INSERT INTO detailed_report_lines (detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, manual_work_location, phase_id, workers_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
         [reportId, contractorId, line.contractorWorkersCount ?? 0, line.selfWorkersCount ?? 0, zoneId, buildingId, locationId, (line.manualWorkLocation != null && String(line.manualWorkLocation).trim() !== '') ? String(line.manualWorkLocation).trim() : null, line.phaseId, line.workersCount]
@@ -3085,13 +3148,20 @@ app.get('/detailed-reports', async (req, res) => {
     // Load lines for each report
     for (const report of reports) {
       const linesRes = await pool.query(
-        'SELECT id, detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, manual_work_location, phase_id, workers_count FROM detailed_report_lines WHERE detailed_report_id = $1 ORDER BY id',
+        `SELECT l.id, l.detailed_report_id, l.contractor_id, c.name AS contractor_name,
+                l.contractor_workers_count, l.self_workers_count, l.zone_id, l.building_id,
+                l.location_id, l.manual_work_location, l.phase_id, l.workers_count
+         FROM detailed_report_lines l
+         LEFT JOIN contractors c ON c.id = l.contractor_id
+         WHERE l.detailed_report_id = $1
+         ORDER BY l.id`,
         [report.id]
       );
       report.lines = linesRes.rows.map(l => ({
         id: parseInt(l.id),
         detailed_report_id: parseInt(l.detailed_report_id),
         contractor_id: l.contractor_id != null ? parseInt(l.contractor_id) : null,
+        contractor_name: l.contractor_name != null ? String(l.contractor_name).trim() : null,
         contractor_workers_count: parseInt(l.contractor_workers_count),
         self_workers_count: parseInt(l.self_workers_count),
         zone_id: l.zone_id != null ? parseInt(l.zone_id) : null,
@@ -3222,7 +3292,8 @@ app.put('/detailed-reports/:id', async (req, res) => {
         const locationId = line.locationId != null ? parseInt(line.locationId, 10) : null;
         const zoneId = line.zoneId != null ? parseInt(line.zoneId, 10) : null;
         const buildingId = line.buildingId != null ? parseInt(line.buildingId, 10) : null;
-        const contractorId = line.contractorId != null ? parseInt(line.contractorId, 10) : null;
+        const contractorIdRaw = line.contractorId ?? line.contractor_id;
+        const contractorId = contractorIdRaw != null ? parseInt(contractorIdRaw, 10) : null;
         await pool.query(
           'INSERT INTO detailed_report_lines (detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, manual_work_location, phase_id, workers_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
           [id, contractorId, line.contractorWorkersCount ?? 0, line.selfWorkersCount ?? 0, zoneId, buildingId, locationId, (line.manualWorkLocation != null && String(line.manualWorkLocation).trim() !== '') ? String(line.manualWorkLocation).trim() : null, line.phaseId, line.workersCount]
@@ -5552,7 +5623,8 @@ app.get('/executed-plans/contractor-report', async (req, res) => {
       const lines = Array.isArray(plan?.lines) ? plan.lines : [];
       const byLocation = new Map();
       for (const line of lines) {
-        const cid = line?.contractorId != null ? parseInt(line.contractorId, 10) : null;
+        const cidRaw = line?.contractorId ?? line?.contractor_id;
+        const cid = cidRaw != null ? parseInt(cidRaw, 10) : null;
         if (cid == null || Number.isNaN(cid)) continue;
         if (isAll) {
           if (!contractorsMap.has(cid)) continue;

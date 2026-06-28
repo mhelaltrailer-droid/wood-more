@@ -4,6 +4,31 @@ This guide explains how [Render](https://render.com) fits **this** project (Flut
 
 ---
 
+## Production (current)
+
+| Role | Public URL | Build |
+|------|------------|--------|
+| **Flutter web** | [https://wood-more-dtnp.onrender.com/](https://wood-more-dtnp.onrender.com/) | Root `Dockerfile` (Flutter + nginx) |
+| **Node API** | [https://wood-more-1qtv.onrender.com/](https://wood-more-1qtv.onrender.com/) | `backend/Dockerfile` |
+
+- **Git repo:** `https://github.com/mhelaltrailer-droid/wood-more` — branch **`main`**
+- **API URL in the app:** `web/config.json` and `assets/config.json` must use `"apiBaseUrl": "https://wood-more-1qtv.onrender.com/"` (no trailing slash is also fine; paths are joined in code).
+- **Database:** Neon Postgres via **`DATABASE_URL`** on the API service only (set in Render dashboard, never committed).
+
+### Deploy updates (local → production)
+
+When the local app is ahead of production:
+
+1. **Commit and push** all changes to **`main`** on GitHub.
+2. Render **auto-deploys** both web and API if **Auto-Deploy** is enabled on each service (default).
+3. Wait for builds to finish (web Docker build often **15–30 min**; API **~5–10 min**). Watch **Logs** in the Render dashboard.
+4. **Verify:** open [wood-more-dtnp.onrender.com](https://wood-more-dtnp.onrender.com/) — hard-refresh (`Ctrl+Shift+R`) — and test login / admin features against the live API.
+5. If auto-deploy is off: **Manual Deploy** → **Deploy latest commit** on **both** services.
+
+Both services must redeploy after a push that touches **`backend/`** (API) and/or **`lib/`**, **`web/`**, **`pubspec.yaml`**, root **`Dockerfile`** (web).
+
+---
+
 ## Troubleshooting: `bash: flutter: command not found`
 
 Render **Static Site** build images are a small **Ubuntu + Node** (or similar) stack. They do **not** include the **Flutter SDK**, so any build command that runs `flutter` will fail—this is expected, not a misconfiguration on your side.
@@ -73,7 +98,7 @@ Common causes for the **Flutter + nginx** Docker service were: (1) Render inject
    - `DATABASE_URL` — your Neon (or Render Postgres) connection string.
    - Do **not** commit secrets; paste only in the dashboard or use **Secret Files** if you prefer.
 6. Click **Create Web Service**. Wait for the first build and deploy.
-7. Note the service URL, e.g. `https://wood-more-api.onrender.com`.
+7. Note the service URL, e.g. `https://wood-more-1qtv.onrender.com` (production API).
 
 **Health checks:** Optional—add a path your API exposes (e.g. `GET /`) so Render can verify the service is up.
 
@@ -120,7 +145,7 @@ A **Static Site** has **no** server-side runtime: it cannot read `DATABASE_URL` 
 Locally, `config.api.json` may use a relative path such as `/api` when nginx proxies to the API. On Render, the static site and API usually have **different hostnames**, so the Flutter build must use the **full public API URL**, for example:
 
 ```json
-{"apiBaseUrl": "https://wood-more-api.onrender.com"}
+{"apiBaseUrl": "https://wood-more-1qtv.onrender.com/"}
 ```
 
 Rebuild the web app after changing this, then redeploy the static site (or Docker image). Adjust if your client code expects a trailing path or `/api` prefix—match what `server.js` actually exposes.
@@ -165,7 +190,7 @@ Under the service **Settings** → **Build** (or equivalent), **Branch** control
 
 ### Custom domains and Render URL
 
-**Custom Domains** adds your own hostname; the **Render subdomain** (e.g. `https://wood-more-static.onrender.com`) stays available unless you turn it off. For production, prefer a **Docker Web Service** hostname for the app and a separate one for the API.
+**Custom Domains** adds your own hostname; the **Render subdomain** (e.g. `https://wood-more-dtnp.onrender.com`) stays available unless you turn it off. For production, the web app and API use separate `*.onrender.com` hostnames.
 
 ### PR previews
 
@@ -175,9 +200,11 @@ Under the service **Settings** → **Build** (or equivalent), **Branch** control
 
 ## 10. Summary
 
-- **Sign up** at Render and connect Git.
+- **Production web:** [https://wood-more-dtnp.onrender.com/](https://wood-more-dtnp.onrender.com/) — **Production API:** [https://wood-more-1qtv.onrender.com/](https://wood-more-1qtv.onrender.com/)
+- **Sign up** at Render and connect Git (`mhelaltrailer-droid/wood-more`, branch **`main`**).
 - Use a **Web Service** for **`backend/`** with `DATABASE_URL` pointing at Neon or Render Postgres.
-- Use a **Docker Web Service** (or Blueprint **`render.yaml`**) for the Flutter web build; use a **Static Site** only with **pre-built** `build/web`. Set **`apiBaseUrl`** in **`web/config.json`** to your live API URL.
+- Use a **Docker Web Service** (or Blueprint **`render.yaml`**) for the Flutter web build; use a **Static Site** only with **pre-built** `build/web`. Set **`apiBaseUrl`** in **`web/config.json`** to the live API URL above.
+- **Push to `main`** to deploy both services when auto-deploy is on.
 - Manage secrets only in the dashboard or your CI secrets—never commit production `DATABASE_URL` to the repo.
 
 For official, up-to-date UI steps, refer to [Render Documentation](https://render.com/docs).

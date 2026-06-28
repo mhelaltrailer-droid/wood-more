@@ -53,7 +53,8 @@ class _AdminLocationMaterialsScreenState extends State<AdminLocationMaterialsScr
   Future<void> _showForm([LocationMaterialModel? item]) async {
     String? selectedMaterial = item != null && _materials.contains(item.materialName) ? item.materialName : null;
     final qtyC = TextEditingController(text: item?.quantity ?? '');
-    String unit = item?.unit ?? (materialUnits.isNotEmpty ? materialUnits.first : '');
+    final savedUnit = item?.unit.trim() ?? '';
+    String unit = savedUnit.isNotEmpty ? savedUnit : kDefaultMaterialUnit;
 
     final result = await showDialog<Map<String, String>>(
       context: context,
@@ -79,7 +80,7 @@ class _AdminLocationMaterialsScreenState extends State<AdminLocationMaterialsScr
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: materialUnits.contains(unit) ? unit : (materialUnits.isNotEmpty ? materialUnits.first : null),
+                  value: materialUnits.contains(unit) ? unit : kDefaultMaterialUnit,
                   decoration: const InputDecoration(labelText: 'الوحدة'),
                   items: materialUnits.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
                   onChanged: (v) => setDialog(() => unit = v ?? unit),
@@ -105,7 +106,7 @@ class _AdminLocationMaterialsScreenState extends State<AdminLocationMaterialsScr
     if (result == null || !mounted) return;
     final name = result['name']!;
     final qty = result['quantity'] ?? '';
-    final unitVal = result['unit'] ?? (materialUnits.isNotEmpty ? materialUnits.first : '');
+    final unitVal = result['unit'] ?? kDefaultMaterialUnit;
     try {
       if (item == null) {
         await _db.addLocationMaterial(LocationMaterialModel(

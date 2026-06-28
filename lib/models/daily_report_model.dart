@@ -205,6 +205,9 @@ class ExpenseItem {
       );
 }
 
+/// الوحدة الافتراضية عند إضافة/تعديل خامات المخازن
+const String kDefaultMaterialUnit = 'قطعة';
+
 /// وحدات القياس للخامات
 const List<String> materialUnits = [
   'متر',

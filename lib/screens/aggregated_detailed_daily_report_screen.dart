@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import '../models/contractor_model.dart';
 import '../models/detailed_report_model.dart';
 import '../models/project_location_model.dart';
 import '../models/project_model.dart';
@@ -12,6 +13,7 @@ import '../models/user_model.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import '../utils/pdf_share.dart';
+import '../utils/work_plan_tracking_display.dart';
 import 'home_screen.dart';
 import 'reports_screen.dart' show canEditDeleteDailyReport;
 
@@ -183,7 +185,9 @@ class _AggregatedDetailedDailyReportScreenState extends State<AggregatedDetailed
         projectId: _selectedProject?.id,
       );
       final contractors = await _db.getContractors();
-      final contractorById = {for (final c in contractors) c.id: c};
+      final contractorById = <int, ContractorModel>{
+        for (final c in contractors) c.id: c,
+      };
       final phases = await _db.getWorkPhases();
       final phaseById = {for (final p in phases) p.id: p};
 
@@ -287,9 +291,7 @@ class _AggregatedDetailedDailyReportScreenState extends State<AggregatedDetailed
         }
         for (final g in grouped.values) {
           final first = g.first;
-          final cname = first.contractorId == null
-              ? '—'
-              : (contractorById[first.contractorId!]?.name ?? '—');
+          final cname = contractorDisplayNameForLine(first, contractorById);
           String locName = '—';
           if (first.locationId != null) {
             final loc = locationById[first.locationId!];

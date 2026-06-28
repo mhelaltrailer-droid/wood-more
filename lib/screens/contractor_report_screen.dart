@@ -4,12 +4,13 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import '../models/contractor_model.dart';
 import '../models/user_model.dart';
 import '../services/storage_service.dart';
 import '../services/api_storage_service.dart';
 
 /// تقرير المقاول: اسم المقاول + مدة → المشاريع وعدد العمال في كل تقرير
-/// قائمة المقاولين من التخزين (نفس مصدر التقرير اليومي والتقرير المفصل)
+/// قائمة المقاولين من التخزين (نفس مصدر خطة عمل الغد / التقرير المفصل)
 class ContractorReportScreen extends StatefulWidget {
   final UserModel admin;
 
@@ -37,20 +38,31 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
   }
 
   Future<void> _loadContractors() async {
+    List<ContractorModel> contractors = [];
     try {
-      final list = await _db.getContractors();
-      if (mounted) {
-        setState(() {
-          _contractorNames = list.map((c) => c.name).where((n) => n != 'لايوجد مقاول').toList();
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _contractorNames = ['حسام حسن', 'ابراهيم النجار', 'ابراهيم حسن'];
-        });
-      }
+      contractors = await _db.getContractors();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _contractorNames = []);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تعذر تحميل المقاولين: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
     }
+    if (!mounted) return;
+    setState(() {
+      _contractorNames = contractors
+          .where((c) {
+            final n = c.name.trim().toLowerCase();
+            return n != 'لايوجد مقاول' && n != 'ذاتي';
+          })
+          .map((c) => c.name.trim())
+          .where((n) => n.isNotEmpty)
+          .toList();
+    });
   }
 
   Future<void> _run() async {

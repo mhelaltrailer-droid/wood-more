@@ -62,7 +62,8 @@ class _AdminProjectStoresScreenState extends State<AdminProjectStoresScreen> {
         ? item.materialName
         : null;
     final qtyC = TextEditingController(text: item?.quantity ?? '');
-    String unit = item?.unit ?? (materialUnits.isNotEmpty ? materialUnits.first : '');
+    final savedUnit = item?.unit.trim() ?? '';
+    String unit = savedUnit.isNotEmpty ? savedUnit : kDefaultMaterialUnit;
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -82,7 +83,7 @@ class _AdminProjectStoresScreenState extends State<AdminProjectStoresScreen> {
                 TextField(controller: qtyC, decoration: const InputDecoration(labelText: 'الكمية'), keyboardType: TextInputType.number),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: materialUnits.contains(unit) ? unit : (materialUnits.isNotEmpty ? materialUnits.first : null),
+                  value: materialUnits.contains(unit) ? unit : kDefaultMaterialUnit,
                   decoration: const InputDecoration(labelText: 'الوحدة'),
                   items: materialUnits.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
                   onChanged: (v) => setDialog(() => unit = v ?? unit),
