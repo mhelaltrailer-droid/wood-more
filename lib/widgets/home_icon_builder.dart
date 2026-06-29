@@ -2,16 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../models/user_model.dart';
 import '../screens/accountant_custody_screen.dart';
+import '../screens/site_engineer_expenses_report_screen.dart';
 import '../screens/accountant_finance_screen.dart';
 import '../screens/activity_logs_screen.dart';
 import '../screens/admin_dashboard_screen.dart';
 import '../screens/admin_project_structure_screen.dart';
-import '../screens/aggregated_detailed_daily_report_screen.dart';
 import '../screens/attendance_reports_screen.dart';
 import '../screens/attendance_screen.dart';
 import '../screens/contractor_report_screen.dart';
-import '../screens/daily_movement_screen.dart';
-import '../screens/dashboard_screen.dart';
 import '../screens/detailed_report_screen.dart';
 import '../screens/engineer_projects_screen.dart';
 import '../screens/engineer_withdraw_materials_screen.dart';
@@ -25,7 +23,7 @@ import '../screens/operation_reports_screen.dart';
 import '../screens/postpone_fines_report_screen.dart';
 import '../screens/reports_screen.dart';
 import '../screens/reports_sys_hub_screen.dart';
-import '../screens/site_engineer_finances_entry_screen.dart';
+import '../screens/detailed_report_finances_screen.dart';
 import '../screens/today_work_plan_screen.dart';
 import '../screens/tomorrow_work_plan_screen.dart';
 import '../screens/warehouses_view_screen.dart';
@@ -33,7 +31,6 @@ import '../screens/work_plan_tracking_report_screen.dart';
 import '../services/home_icon_order_service.dart';
 import '../services/route_restore.dart';
 import '../services/storage_service.dart';
-import 'animated_operation_tracking_card.dart';
 
 class HomeIconBuilder {
   const HomeIconBuilder._();
@@ -107,15 +104,12 @@ class HomeIconBuilder {
         return _lightCard(
           icon: Icons.payments_outlined,
           iconSize: 56,
-          title: 'الماليات',
-          subtitle:
-              'مرتبطة بخطة عمل اليوم: اختيار التاريخ → عرض الخطة (قراءة فقط) → بنود الصرف وخصم الرصيد',
+          title: 'العهدة/المصروفات',
           padding: 28,
-          onTap: () => _openAfterAttendanceCheck(
-            context: context,
-            user: user,
-            routeName: 'engineer-finances',
-            screen: SiteEngineerFinancesEntryScreen(user: user),
+          onTap: () => pushAndSaveRoute(
+            context,
+            'engineer-finances',
+            DetailedReportFinancesScreen.directEntry(user: user),
           ),
         );
       case 'operation_reports':
@@ -168,17 +162,32 @@ class HomeIconBuilder {
         return _lightCard(
           icon: Icons.handshake,
           title: 'العهدة',
-          subtitle: 'تقرير العهدة حسب المستخدم والمدة وتصدير PDF',
+          subtitle: 'بنود صرف العهدة/المصروفات حسب المستخدم والمدة وتصدير PDF',
           onTap: () => pushAndSaveRoute(
             context,
             'accountant-custody',
             AccountantCustodyScreen(currentUser: user),
           ),
         );
+      case 'site_engineer_expenses_report':
+        return _lightCard(
+          icon: Icons.receipt_long_outlined,
+          title: 'بنود الصرف',
+          subtitle: 'عرض وحذف بنود صرف مهندسي المواقع حسب المستخدم والمدة',
+          onTap: () => pushAndSaveRoute(
+            context,
+            'site-engineer-expenses-report',
+            SiteEngineerExpensesReportScreen(
+              currentUser: user,
+              canDeleteExpenses: true,
+              appBarTitle: 'بنود الصرف',
+            ),
+          ),
+        );
       case 'accountant_finance':
         return _lightCard(
           icon: Icons.account_balance_wallet,
-          title: 'الماليات',
+          title: 'الأرصدة / المصروفات',
           subtitle: 'أرصدة المستخدمين، إضافة/سحب رصيد، وإنشاء تقرير',
           onTap: () => pushAndSaveRoute(
             context,
@@ -238,8 +247,6 @@ class HomeIconBuilder {
             NewIconScreen(currentUser: user),
           ),
         );
-      case 'operation_reports_tracking':
-        return AnimatedOperationTrackingCard(user: user);
       case homeIconIdIconsControl:
         return _lightCard(
           icon: Icons.toggle_on,
@@ -251,17 +258,6 @@ class HomeIconBuilder {
             IconsControlScreen(currentUser: user),
           ),
         );
-      case 'daily_movement':
-        return _lightCard(
-          icon: Icons.insights,
-          title: 'الحركة اليومية',
-          subtitle: 'ملخص يومي لتنفيذ/تعديل/تأجيل الخطط',
-          onTap: () => pushAndSaveRoute(
-            context,
-            'daily-movement',
-            DailyMovementScreen(currentUser: user),
-          ),
-        );
       case 'reports':
         return _lightCard(
           icon: Icons.summarize,
@@ -271,18 +267,6 @@ class HomeIconBuilder {
             context,
             'reports',
             ReportsScreen(currentUser: user),
-          ),
-        );
-      case 'aggregated_detailed_daily':
-        return _lightCard(
-          icon: Icons.table_rows,
-          title: 'التقرير اليومي المجمع',
-          subtitle:
-              'من التقارير المفصّلة: مشروع، مهندس، مقاول، عمال، موقع، سحب خامات بنفس اليوم',
-          onTap: () => pushAndSaveRoute(
-            context,
-            'aggregated-detailed-daily',
-            AggregatedDetailedDailyReportScreen(currentUser: user),
           ),
         );
       case 'contractor_report':
@@ -362,18 +346,6 @@ class HomeIconBuilder {
             context,
             'activity-logs',
             ActivityLogsScreen(currentUser: user),
-          ),
-        );
-      case 'dashboard':
-        return _gradientCard(
-          icon: Icons.dashboard,
-          title: 'Management Dashboard',
-          subtitle:
-              'Fast daily visibility: progress, issues, and missing reports.',
-          onTap: () => pushAndSaveRoute(
-            context,
-            'dashboard',
-            const DashboardScreen(),
           ),
         );
       case 'ms_sd':
@@ -483,7 +455,7 @@ class HomeIconBuilder {
   static Widget _lightCard({
     required IconData icon,
     required String title,
-    required String subtitle,
+    String? subtitle,
     required Future<void> Function() onTap,
     double iconSize = 64,
     double padding = 32,
@@ -518,15 +490,17 @@ class HomeIconBuilder {
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              style: TextStyle(
-                fontSize: 14,
-                color: const Color(0xFF1B5E20).withOpacity(0.9),
+            if (subtitle != null && subtitle.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: const Color(0xFF1B5E20).withOpacity(0.9),
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
-            ),
+            ],
           ],
         ),
       ),

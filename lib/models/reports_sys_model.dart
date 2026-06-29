@@ -136,6 +136,8 @@ class ReportsSysModel {
     'تقرير معاينة',
     'تقرير إثبات حالة',
     'تقرير تلفيات',
+    'تقرير عطلة',
+    'استلام /معاينة خامات',
   ];
 
   static const int otherProjectId = -1;

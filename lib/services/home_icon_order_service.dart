@@ -2,16 +2,26 @@ import 'icon_visibility_service.dart';
 import '../models/user_model.dart';
 
 const String homeIconIdIconsControl = 'icons_control';
+const String homeIconIdSiteEngineerExpensesReport = 'site_engineer_expenses_report';
 
 List<String> defaultHomeIconOrderForUser(UserModel user) {
   final roleItems = IconVisibilityService.roleIcons[user.role] ?? const [];
   final out = roleItems.map((item) => item.id).toList();
   if (user.canManageIconsControl && !out.contains(homeIconIdIconsControl)) {
-    final trackingIndex = out.indexOf('operation_reports_tracking');
-    if (trackingIndex >= 0) {
-      out.insert(trackingIndex + 1, homeIconIdIconsControl);
+    final anchorIndex = out.indexOf('new_icon');
+    if (anchorIndex >= 0) {
+      out.insert(anchorIndex + 1, homeIconIdIconsControl);
     } else {
       out.add(homeIconIdIconsControl);
+    }
+  }
+  if (user.canManageSiteEngineerExpensesReport &&
+      !out.contains(homeIconIdSiteEngineerExpensesReport)) {
+    final anchorIndex = out.indexOf('reports');
+    if (anchorIndex >= 0) {
+      out.insert(anchorIndex + 1, homeIconIdSiteEngineerExpensesReport);
+    } else {
+      out.add(homeIconIdSiteEngineerExpensesReport);
     }
   }
   return out;
@@ -43,10 +53,11 @@ bool _isHomeIconAvailable({
   switch (iconId) {
     case homeIconIdIconsControl:
       return user.canManageIconsControl;
+    case homeIconIdSiteEngineerExpensesReport:
+      return user.canManageSiteEngineerExpensesReport;
     case 'postpone_fines_reports':
       return user.canAccessPostponeFinesReports &&
           IconVisibilityService.isVisible(iconConfig, iconId);
-    case 'daily_movement':
     case 'activity_logs':
       return user.canViewActivityLogs &&
           IconVisibilityService.isVisible(iconConfig, iconId);

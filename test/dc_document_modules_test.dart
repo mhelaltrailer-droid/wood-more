@@ -131,6 +131,21 @@ void main() {
       expect(ids, isNot(contains('ms_sd')));
       expect(ids, isNot(contains('mos_itp')));
     });
+
+    test('مدير المشروعات: الأرصدة / المصروفات في آخر القائمة', () {
+      final ids = IconVisibilityService.roleIcons['site_engineer_manager']!
+          .map((e) => e.id)
+          .toList();
+      expect(ids, contains('accountant_finance'));
+      expect(ids.last, 'accountant_finance');
+    });
+
+    test('المشرف العام بلا الأرصدة / المصروفات', () {
+      final ids = IconVisibilityService.roleIcons['general_supervisor']!
+          .map((e) => e.id)
+          .toList();
+      expect(ids, isNot(contains('accountant_finance')));
+    });
   });
 
   group('نماذج البيانات', () {

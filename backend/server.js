@@ -165,7 +165,7 @@ async function ensurePrivateChatMessagesTable() {
 
 const REPORTS_SYS_PRIMARY_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 const REPORTS_SYS_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
-const REPORTS_SYS_TYPES = ['تقرير معاينة', 'تقرير إثبات حالة', 'تقرير تلفيات'];
+const REPORTS_SYS_TYPES = ['تقرير معاينة', 'تقرير إثبات حالة', 'تقرير تلفيات', 'تقرير عطلة', 'استلام /معاينة خامات'];
 
 async function ensureReportsSysTables() {
   try {
@@ -785,20 +785,133 @@ function _extractUserContext(req) {
   const query = req.query || {};
   const userIdRaw = body.userId ?? body.user_id ?? query.userId ?? query.user_id;
   const userName = body.userName ?? body.user_name ?? query.userName ?? query.user_name ?? null;
-  const userEmail = body.userEmail ?? body.user_email ?? query.userEmail ?? query.user_email ?? body.email ?? query.email ?? null;
+  let userEmail =
+    body.userEmail ??
+    body.user_email ??
+    query.userEmail ??
+    query.user_email ??
+    body.email ??
+    query.email ??
+    query.requesterEmail ??
+    null;
   const userId = userIdRaw != null && String(userIdRaw).trim() !== '' ? parseInt(userIdRaw, 10) : null;
+  if (!userEmail && req.path === '/auth/login' && body.email) {
+    userEmail = body.email;
+  }
   return {
     userId: Number.isNaN(userId) ? null : userId,
-    userName: userName != null ? String(userName) : null,
+    userName: userName != null ? String(userName).trim() : null,
     userEmail: userEmail != null ? String(userEmail).trim().toLowerCase() : null,
+  };
+}
+
+function _planKindFromReportDatetime(raw) {
+  if (!raw) return { kind: 'today', label: 'خطة عمل اليوم' };
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return { kind: 'today', label: 'خطة عمل اليوم' };
+  const plan = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (plan.getTime() === tomorrow.getTime()) {
+    return { kind: 'tomorrow', label: 'خطة عمل الغد' };
+  }
+  if (plan.getTime() > tomorrow.getTime()) {
+    return { kind: 'future', label: 'خطة عمل لاحقة' };
+  }
+  return { kind: 'today', label: 'خطة عمل اليوم' };
+}
+
+function _planSaveAction(body) {
+  const { kind } = _planKindFromReportDatetime(body?.reportDatetime ?? body?.planDate);
+  if (kind === 'tomorrow') {
+    return { type: 'plan_save_tomorrow', label: 'تسجيل خطة عمل الغد' };
+  }
+  if (kind === 'future') {
+    return { type: 'plan_save_future', label: 'تسجيل خطة عمل لاحقة' };
+  }
+  return { type: 'plan_save_today', label: 'حفظ خطة عمل اليوم' };
+}
+
+function _planUpdateAction(body) {
+  const { kind } = _planKindFromReportDatetime(body?.reportDatetime ?? body?.planDate);
+  if (kind === 'tomorrow') {
+    return { type: 'plan_update_tomorrow', label: 'تعديل خطة عمل الغد' };
+  }
+  if (kind === 'future') {
+    return { type: 'plan_update_future', label: 'تعديل خطة عمل لاحقة' };
+  }
+  return { type: 'plan_update_today', label: 'تعديل خطة عمل اليوم' };
+}
+
+async function _resolveActivityUserContext(req) {
+  const ctx = _extractUserContext(req);
+  let userId = ctx.userId;
+  let userName = ctx.userName;
+  let userEmail = ctx.userEmail;
+
+  async function applyRow(row) {
+    if (!row) return;
+    userId = userId ?? parseInt(row.id, 10);
+    if (!userName) userName = String(row.name || '').trim() || null;
+    if (!userEmail) userEmail = String(row.email || '').trim().toLowerCase() || null;
+  }
+
+  if (userId != null && (!userName || !userEmail)) {
+    const r = await pool.query('SELECT id, name, email FROM users WHERE id = $1 LIMIT 1', [userId]);
+    await applyRow(r.rows[0]);
+  }
+  if ((!userName || !userId) && userEmail) {
+    const r = await pool.query(
+      'SELECT id, name, email FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1',
+      [userEmail]
+    );
+    await applyRow(r.rows[0]);
+  }
+
+  return {
+    userId: userId != null && !Number.isNaN(userId) ? userId : null,
+    userName: userName || null,
+    userEmail: userEmail || null,
+  };
+}
+
+async function _enrichActivityLogRow(row) {
+  let userName = row.user_name != null ? String(row.user_name).trim() : '';
+  let userEmail = row.user_email != null ? String(row.user_email).trim().toLowerCase() : '';
+  const userId = row.user_id != null ? parseInt(row.user_id, 10) : null;
+
+  async function applyUser(u) {
+    if (!u) return;
+    if (!userName) userName = String(u.name || '').trim();
+    if (!userEmail) userEmail = String(u.email || '').trim().toLowerCase();
+  }
+
+  if (userId != null && (!userName || !userEmail)) {
+    const r = await pool.query('SELECT name, email FROM users WHERE id = $1 LIMIT 1', [userId]);
+    await applyUser(r.rows[0]);
+  }
+  if (!userName && userEmail) {
+    const r = await pool.query(
+      'SELECT name, email FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1',
+      [userEmail]
+    );
+    await applyUser(r.rows[0]);
+  }
+
+  return {
+    ...row,
+    user_name: userName || null,
+    user_email: userEmail || null,
   };
 }
 
 async function _insertActivityLog({ req, statusCode, details }) {
   try {
     if (req.path === '/activity-logs') return;
-    const ctx = _extractUserContext(req);
-    const action = _resolveActivityAction(req.method, req.path);
+    const ctx = await _resolveActivityUserContext(req);
+    const action = _resolveActivityAction(req.method, req.path, req.body || {});
     await pool.query(
       `INSERT INTO activity_logs (created_at, action_type, action_label, endpoint, method, user_id, user_name, user_email, status_code, details)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
@@ -818,18 +931,31 @@ async function _insertActivityLog({ req, statusCode, details }) {
   } catch (_) {}
 }
 
-function _resolveActivityAction(method, path) {
+function _resolveActivityAction(method, path, body) {
   const m = String(method || '').toUpperCase();
   const p = String(path || '');
+  const b = body || {};
   if (m === 'POST' && p === '/auth/login') return { type: 'login', label: 'تسجيل دخول' };
-  if (p.startsWith('/attendance') && m === 'POST') return { type: 'attendance_record', label: 'تسجيل حضور/انصراف' };
+  if (p.startsWith('/attendance') && m === 'POST') {
+    const t = String(b.type || '');
+    if (t === 'check_in') return { type: 'attendance_check_in', label: 'تسجيل حضور' };
+    if (t === 'check_out') return { type: 'attendance_check_out', label: 'تسجيل انصراف' };
+    return { type: 'attendance_record', label: 'تسجيل حضور/انصراف' };
+  }
+  if (p.startsWith('/executed-plans') && m === 'POST') {
+    const status = String(b.status || '');
+    if (status === 'confirmed') return { type: 'plan_execute', label: 'تنفيذ خطة عمل' };
+    if (status === 'confirmed_edited') return { type: 'plan_execute_edited', label: 'تعديل وتنفيذ خطة عمل' };
+    if (status === 'postponed') return { type: 'plan_postpone', label: 'تأجيل خطة عمل' };
+    return { type: 'plan_execute', label: 'تنفيذ خطة عمل' };
+  }
   if (p.startsWith('/daily-reports') && m === 'GET') return { type: 'daily_report_view', label: 'عرض تقرير يومي' };
   if (p.startsWith('/daily-reports') && m === 'POST') return { type: 'daily_report_create', label: 'إنشاء تقرير يومي' };
   if (p.startsWith('/daily-reports') && m === 'PUT') return { type: 'daily_report_update', label: 'تعديل تقرير يومي' };
   if (p.startsWith('/daily-reports') && m === 'DELETE') return { type: 'daily_report_delete', label: 'حذف تقرير يومي' };
   if (p.startsWith('/detailed-reports') && m === 'GET') return { type: 'detailed_report_view', label: 'عرض تقرير مفصل' };
-  if (p.startsWith('/detailed-reports') && m === 'POST') return { type: 'detailed_report_create', label: 'إنشاء تقرير مفصل' };
-  if (p.startsWith('/detailed-reports') && m === 'PUT') return { type: 'detailed_report_update', label: 'تعديل تقرير مفصل' };
+  if (p.startsWith('/detailed-reports') && m === 'POST') return _planSaveAction(b);
+  if (p.startsWith('/detailed-reports') && m === 'PUT') return _planUpdateAction(b);
   if (p.startsWith('/detailed-reports') && m === 'DELETE') return { type: 'detailed_report_delete', label: 'حذف تقرير مفصل' };
   if (p.startsWith('/users') && m === 'POST') return { type: 'user_create', label: 'إنشاء مستخدم' };
   if (p.startsWith('/users') && m === 'PUT') return { type: 'user_update', label: 'تعديل مستخدم' };
@@ -973,21 +1099,19 @@ async function ensureHomeIconsVisibilitySetting() {
         attendance_reports: true,
         work_plan_tracking_report: true,
         new_icon: true,
-        operation_reports_tracking: true,
-        aggregated_detailed_daily: true,
         contractor_report: true,
         ir_mir: true,
         warehouses_view: true,
         ms_sd: true,
         mos_itp: true,
+        accountant_finance: true,
       },
       general_supervisor: {
         attendance: true,
+        engineer_finances: true,
         attendance_reports: true,
         work_plan_tracking_report: true,
         new_icon: true,
-        operation_reports_tracking: true,
-        aggregated_detailed_daily: true,
         contractor_report: true,
         ir_mir: true,
         warehouses_view: true,
@@ -999,8 +1123,6 @@ async function ensureHomeIconsVisibilitySetting() {
         work_plan_tracking_report: true,
         postpone_fines_reports: true,
         new_icon: true,
-        operation_reports_tracking: true,
-        aggregated_detailed_daily: true,
         contractor_report: true,
         ir_mir: true,
         warehouses_view: true,
@@ -1013,15 +1135,11 @@ async function ensureHomeIconsVisibilitySetting() {
         work_plan_tracking_report: true,
         postpone_fines_reports: true,
         new_icon: true,
-        operation_reports_tracking: true,
-        daily_movement: true,
         reports: true,
-        aggregated_detailed_daily: true,
         contractor_report: true,
         admin_project_structure: true,
         admin_dashboard: true,
         activity_logs: true,
-        dashboard: true,
         ir_mir: true,
         warehouses_view: true,
         ms_sd: true,
@@ -4975,8 +5093,12 @@ app.get('/activity-logs', async (req, res) => {
     }
     sql += ' ORDER BY created_at DESC, id DESC LIMIT 5000';
     const r = await pool.query(sql, params);
+    const enriched = [];
+    for (const row of r.rows) {
+      enriched.push(await _enrichActivityLogRow(row));
+    }
     res.json(
-      r.rows.map((row) => ({
+      enriched.map((row) => ({
         id: parseInt(row.id),
         created_at: row.created_at,
         action_type: row.action_type,

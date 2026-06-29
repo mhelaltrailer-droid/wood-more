@@ -68,6 +68,10 @@ class UserModel {
   bool get isAdmin => role == 'app_admin';
   bool get isAccountant => role == 'accountant';
 
+  /// إدارة أرصدة المستخدمين (إضافة/سحب) — المحاسب ومدير المشروعات.
+  bool get canManageUserBalances =>
+      isAccountant || role == 'site_engineer_manager';
+
   /// موافقة / رفض طلبات سحب الخامات (مدير المشروعات أو مدير العمليات).
   bool get canActOnWithdrawalRequests =>
       role == 'site_engineer_manager' || role == 'operation_manager';
@@ -96,6 +100,10 @@ class UserModel {
   /// حذف مرفقات IR / MIR — مسؤول التطبيق بهذا البريد فقط.
   bool get canDeleteIrMirAttachments =>
       isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+
+  /// تقرير بنود صرف العهدة/المصروفات + حذف البنود — مسؤول التطبيق بهذا البريد فقط.
+  bool get canManageSiteEngineerExpensesReport =>
+      isAdmin && email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
 
   /// أيقونة Reports-SYS في الواجهة الرئيسية — كل المشاركين (ما عدا المحاسب).
   bool get canAccessReportsSysHomeIcon => canParticipateInReportsSys;

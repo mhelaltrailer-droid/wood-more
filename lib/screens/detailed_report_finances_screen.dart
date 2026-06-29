@@ -4,18 +4,40 @@ import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../models/detailed_report_model.dart';
 import '../models/daily_report_model.dart';
+import '../models/project_model.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
 const int _kMaxExpenseItems = 4;
 
-/// التقرير المفصل - الماليات: بنود صرف تُضاف تباعاً (حتى 4) وخصم الرصيد كما سابقاً.
+/// العهدة والمصروفات لمهندس الموقع: بنود صرف تُضاف تباعاً (حتى 4) وخصم الرصيد.
 class DetailedReportFinancesScreen extends StatefulWidget {
   final UserModel user;
   final DetailedReportModel report;
+  final bool showProjectSelector;
 
-  const DetailedReportFinancesScreen({super.key, required this.user, required this.report});
+  const DetailedReportFinancesScreen({
+    super.key,
+    required this.user,
+    required this.report,
+    this.showProjectSelector = false,
+  });
+
+  /// فتح مباشر من أيقونة «العهدة/المصروفات» بدون خطة عمل.
+  factory DetailedReportFinancesScreen.directEntry({required UserModel user}) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    return DetailedReportFinancesScreen(
+      user: user,
+      showProjectSelector: true,
+      report: DetailedReportModel(
+        userId: user.id,
+        userName: user.name,
+        reportDatetime: today,
+      ),
+    );
+  }
 
   @override
   State<DetailedReportFinancesScreen> createState() => _DetailedReportFinancesScreenState();
@@ -24,7 +46,12 @@ class DetailedReportFinancesScreen extends StatefulWidget {
 class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScreen> {
   final _db = getStorage();
   bool _saving = false;
+  bool _loadingProjects = true;
+  bool _loadingBalance = true;
   late List<ExpenseItem> _expenses;
+  List<ProjectModel> _projects = [];
+  ProjectModel? _selectedProject;
+  double _balance = 0;
 
   static bool _expenseHasContent(ExpenseItem e) {
     final a = double.tryParse(e.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
@@ -42,6 +69,47 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
           .map((e) => ExpenseItem(description: e.description, amount: e.amount, imagePath: e.imagePath))
           .toList();
     }
+    _loadBalance();
+    if (widget.showProjectSelector) {
+      _loadProjects();
+    }
+  }
+
+  Future<void> _loadBalance() async {
+    try {
+      final balance = await _db.getEngineerBalance(widget.user.id);
+      if (!mounted) return;
+      setState(() {
+        _balance = balance;
+        _loadingBalance = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingBalance = false);
+    }
+  }
+
+  Future<void> _loadProjects() async {
+    try {
+      final projects = await _db.getProjects();
+      ProjectModel? selected;
+      final reportProjectId = widget.report.projectId;
+      if (reportProjectId != null) {
+        for (final p in projects) {
+          if (p.id == reportProjectId) {
+            selected = p;
+            break;
+          }
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _projects = projects;
+        _selectedProject = selected;
+        _loadingProjects = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingProjects = false);
+    }
   }
 
   List<ExpenseItem> _collectForSave() {
@@ -49,6 +117,12 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
   }
 
   Future<void> _save() async {
+    if (widget.showProjectSelector && _selectedProject == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('اختر المشروع'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
     final toSave = _collectForSave();
     if (toSave.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -62,6 +136,8 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
     setState(() => _saving = true);
     try {
       final existingId = widget.report.id;
+      final projectId = widget.showProjectSelector ? _selectedProject!.id : widget.report.projectId;
+      final projectName = widget.showProjectSelector ? _selectedProject!.name : widget.report.projectName;
       if (existingId != null) {
         await _db.patchDetailedReportExpenses(
           reportId: existingId,
@@ -73,8 +149,8 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
           userId: widget.report.userId,
           userName: widget.report.userName,
           reportDatetime: widget.report.reportDatetime,
-          projectId: widget.report.projectId,
-          projectName: widget.report.projectName,
+          projectId: projectId,
+          projectName: projectName,
           supervisorId: widget.report.supervisorId,
           createdAt: widget.report.createdAt,
           summary: widget.report.summary,
@@ -86,8 +162,8 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(existingId != null ? 'تم حفظ التقرير المالي بنجاح' : 'تم حفظ التقرير المفصل بنجاح'),
+        const SnackBar(
+          content: Text('تم الحفظ'),
           backgroundColor: Colors.green,
         ),
       );
@@ -121,13 +197,44 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('التقرير المفصل - الماليات'),
+        title: const Text('العهدة و المصروفات'),
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          if (widget.showProjectSelector)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _loadingBalance
+                  ? const Text('جاري تحميل الرصيد...')
+                  : Text(
+                      '${widget.user.name} (رصيدك الحالي : ${_balance.toStringAsFixed(2)})',
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                    ),
+            ),
+          if (widget.showProjectSelector) const SizedBox(height: 16),
+          if (widget.showProjectSelector) ...[
+            if (_loadingProjects)
+              const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator()))
+            else if (_projects.isEmpty)
+              const Text('لا توجد مشاريع متاحة', style: TextStyle(color: Colors.red))
+            else
+              DropdownButtonFormField<ProjectModel>(
+                value: _selectedProject,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'اسم المشروع *',
+                  border: OutlineInputBorder(),
+                ),
+                items: _projects
+                    .map((p) => DropdownMenuItem(value: p, child: Text(p.name)))
+                    .toList(),
+                onChanged: (v) => setState(() => _selectedProject = v),
+              ),
+            const SizedBox(height: 16),
+          ],
           const Text(
             'أدخل بند الصرف ثم أضف المزيد عند الحاجة (حتى $_kMaxExpenseItems بنود). بيان المبلغ وإرفاق صورة اختياري لكل بند.',
             style: TextStyle(fontWeight: FontWeight.bold),
@@ -159,7 +266,7 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
             ),
             child: _saving
                 ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Text('حفظ التقرير المالي'),
+                : const Text('تأكيد/حفظ'),
           ),
         ],
       ),

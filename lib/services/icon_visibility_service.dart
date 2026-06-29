@@ -24,6 +24,11 @@ class IconVisibilityService {
     HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
   ];
 
+  static const HomeIconItem balancesExpensesIcon = HomeIconItem(
+    id: 'accountant_finance',
+    label: 'الأرصدة / المصروفات',
+  );
+
   static const List<HomeIconItem> _projectManagerHomeIcons = [
     HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
     HomeIconItem(
@@ -31,14 +36,6 @@ class IconVisibilityService {
       label: 'تقارير متابعة خطط اليوم/الغد',
     ),
     HomeIconItem(id: 'new_icon', label: 'New icon'),
-    HomeIconItem(
-      id: 'operation_reports_tracking',
-      label: 'متابعة تقارير التشغيل',
-    ),
-    HomeIconItem(
-      id: 'aggregated_detailed_daily',
-      label: 'التقرير اليومي المجمع',
-    ),
     HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
     HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
     HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
@@ -66,7 +63,7 @@ class IconVisibilityService {
         id: 'engineer_withdraw_materials',
         label: 'المخزن (سحب الخامات)',
       ),
-      HomeIconItem(id: 'engineer_finances', label: 'الماليات'),
+      HomeIconItem(id: 'engineer_finances', label: 'العهدة/المصروفات'),
       HomeIconItem(id: 'operation_reports', label: 'تقارير التشغيل'),
       HomeIconItem(id: 'detailed_report', label: 'التقرير اليومي'),
       HomeIconItem(id: 'engineer_projects', label: 'المشروعات'),
@@ -77,12 +74,16 @@ class IconVisibilityService {
     ],
     roleAccountant: [
       HomeIconItem(id: 'accountant_custody', label: 'العهدة'),
-      HomeIconItem(id: 'accountant_finance', label: 'الماليات'),
+      balancesExpensesIcon,
     ],
     roleDocumentController: _documentControllerHomeIcons,
-    roleSiteEngineerManager: _projectManagerHomeIcons,
+    roleSiteEngineerManager: [
+      ..._projectManagerHomeIcons,
+      balancesExpensesIcon,
+    ],
     roleGeneralSupervisor: [
       HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),
+      HomeIconItem(id: 'engineer_finances', label: 'العهدة/المصروفات'),
       ..._projectManagerHomeIcons,
     ],
     roleOperationManager: [
@@ -96,14 +97,6 @@ class IconVisibilityService {
         label: 'تقارير التأجيل/الغرامات',
       ),
       HomeIconItem(id: 'new_icon', label: 'New icon'),
-      HomeIconItem(
-        id: 'operation_reports_tracking',
-        label: 'متابعة تقارير التشغيل',
-      ),
-      HomeIconItem(
-        id: 'aggregated_detailed_daily',
-        label: 'التقرير اليومي المجمع',
-      ),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
       HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
       HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
@@ -123,23 +116,13 @@ class IconVisibilityService {
         label: 'تقارير التأجيل/الغرامات',
       ),
       HomeIconItem(id: 'new_icon', label: 'New icon'),
-      HomeIconItem(
-        id: 'operation_reports_tracking',
-        label: 'متابعة تقارير التشغيل',
-      ),
-      HomeIconItem(id: 'daily_movement', label: 'الحركة اليومية'),
       HomeIconItem(id: 'reports', label: 'التقارير'),
-      HomeIconItem(
-        id: 'aggregated_detailed_daily',
-        label: 'التقرير اليومي المجمع',
-      ),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
       HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
       HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
       HomeIconItem(id: 'admin_project_structure', label: 'هيكلة المشروعات'),
       HomeIconItem(id: 'admin_dashboard', label: 'لوح التحكم'),
       HomeIconItem(id: 'activity_logs', label: 'سجل الحركة'),
-      HomeIconItem(id: 'dashboard', label: 'Management Dashboard'),
       HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
       HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
       HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),

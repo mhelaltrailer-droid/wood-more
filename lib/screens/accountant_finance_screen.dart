@@ -10,7 +10,7 @@ import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
-/// واجهة الماليات للمحاسب: الاطلاع على أرصدة المستخدمين، إضافة/سحب رصيد، وإنشاء تقرير بكل الحركات
+/// واجهة الأرصدة / المصروفات: الاطلاع على أرصدة المستخدمين، إضافة/سحب رصيد، وإنشاء تقرير بكل الحركات
 class AccountantFinanceScreen extends StatefulWidget {
   final UserModel currentUser;
 
@@ -64,13 +64,16 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
     }
   }
 
-  /// إضافة رصيد لمستخدم. إذا كان المستخدم هو المحاسب نفسه: زيادة رصيده فقط (إضافة ذاتية). وإلا: خصم من رصيد المحاسب وإضافة للمستخدم.
+  /// إضافة رصيد لمستخدم. المحاسب فقط يمكنه إضافة رصيد ذاتي. وإلا: خصم من رصيد المنفّذ وإضافة للمستخدم.
   Future<void> _addBalance(UserModel user) async {
+    final isSelf = user.id == widget.currentUser.id;
+    if (isSelf && !widget.currentUser.isAccountant) return;
+
     final amountC = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(user.id == widget.currentUser.id ? 'إضافة رصيد ذاتي (للمحاسب)' : 'إضافة رصيد - ${user.name}'),
+        title: Text(isSelf ? 'إضافة رصيد ذاتي (للمحاسب)' : 'إضافة رصيد - ${user.name}'),
         content: TextField(
           controller: amountC,
           decoration: const InputDecoration(labelText: 'المبلغ'),
@@ -93,25 +96,24 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       return;
     }
     try {
-      final isSelf = user.id == widget.currentUser.id;
       if (isSelf) {
-        // إضافة رصيد ذاتي: زيادة رصيد المحاسب فقط (بدون خصم من أي أحد)
+        // إضافة رصيد ذاتي للمحاسب فقط (بدون خصم من أي أحد)
         final current = await _db.getEngineerBalance(user.id);
         await _db.setEngineerBalance(user.id, current + amount);
         await _db.addBalanceMovement(user.id, amount, 'إضافة رصيد ذاتي', 'add_balance');
       } else {
-        final accountantBalance = await _db.getEngineerBalance(widget.currentUser.id);
-        if (accountantBalance < amount) {
+        final actorBalance = await _db.getEngineerBalance(widget.currentUser.id);
+        if (actorBalance < amount) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('رصيدك الحالي ${accountantBalance.toStringAsFixed(2)} أقل من المبلغ المطلوب'), backgroundColor: Colors.orange),
+              SnackBar(content: Text('رصيدك الحالي ${actorBalance.toStringAsFixed(2)} أقل من المبلغ المطلوب'), backgroundColor: Colors.orange),
             );
           }
           return;
         }
         final currentUser = await _db.getEngineerBalance(user.id);
         await _db.setEngineerBalance(user.id, currentUser + amount);
-        await _db.setEngineerBalance(widget.currentUser.id, accountantBalance - amount);
+        await _db.setEngineerBalance(widget.currentUser.id, actorBalance - amount);
         await _db.addBalanceMovement(user.id, amount, 'إضافة رصيد', 'add_balance');
       }
       _load();
@@ -121,7 +123,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
     }
   }
 
-  /// سحب رصيد من مستخدم: يُضاف المبلغ إلى رصيد المحاسب ويُخصم من رصيد المستخدم.
+  /// سحب رصيد من مستخدم: يُضاف المبلغ إلى رصيد المنفّذ ويُخصم من رصيد المستخدم.
   Future<void> _withdrawBalance(UserModel user) async {
     final amountC = TextEditingController();
     final ok = await showDialog<bool>(
@@ -159,9 +161,9 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
         }
         return;
       }
-      final accountantBalance = await _db.getEngineerBalance(widget.currentUser.id);
+      final actorBalance = await _db.getEngineerBalance(widget.currentUser.id);
       await _db.setEngineerBalance(user.id, currentUser - amount);
-      await _db.setEngineerBalance(widget.currentUser.id, accountantBalance + amount);
+      await _db.setEngineerBalance(widget.currentUser.id, actorBalance + amount);
       await _db.addBalanceMovement(user.id, amount, 'سحب رصيد', 'withdraw_balance');
       _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم سحب الرصيد'), backgroundColor: Colors.green));
@@ -276,11 +278,27 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
     );
   }
 
+  String get _helpText {
+    if (widget.currentUser.isAccountant) {
+      return 'المحاسب يمكنه إضافة رصيد لنفسه، أو إضافة/سحب رصيد من باقي المستخدمين (الإضافة تخصم من رصيده، والسحب يضاف لرصيده). لا يسمح له بسحب رصيد من نفسه.';
+    }
+    return 'يمكنك إضافة/سحب رصيد للمستخدمين (الإضافة تخصم من رصيدك، والسحب يضاف لرصيدك). لا يمكن تعديل رصيدك من هنا.';
+  }
+
+  String? _selfBadgeLabel(UserModel user) {
+    if (user.id != widget.currentUser.id) return null;
+    if (widget.currentUser.isAccountant) return 'المحاسب';
+    if (widget.currentUser.role == 'site_engineer_manager') {
+      return UserModel.siteEngineerManagerRoleLabel;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('الماليات'),
+        title: const Text('الأرصدة / المصروفات'),
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
         leading: IconButton(
@@ -300,13 +318,16 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                 const Text('أرصدة المستخدمين', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Text(
-                  'المحاسب يمكنه إضافة رصيد لنفسه، أو إضافة/سحب رصيد من باقي المستخدمين (الإضافة تخصم من رصيده، والسحب يضاف لرصيده). لا يسمح له بسحب رصيد من نفسه.',
+                  _helpText,
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 ),
                 const SizedBox(height: 12),
                 ..._users.map((u) {
                   final balance = _balances[u.id] ?? 0;
-                  final isAccountant = u.id == widget.currentUser.id;
+                  final isSelf = u.id == widget.currentUser.id;
+                  final selfBadge = _selfBadgeLabel(u);
+                  final showAdd = !isSelf || widget.currentUser.isAccountant;
+                  final showWithdraw = !isSelf;
                   return Card(
                     margin: const EdgeInsets.only(bottom: 12),
                     child: Padding(
@@ -323,7 +344,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                                     Row(
                                       children: [
                                         Text(u.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                        if (isAccountant) ...[
+                                        if (selfBadge != null) ...[
                                           const SizedBox(width: 8),
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -331,7 +352,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                                               color: const Color(0xFF1B5E20).withOpacity(0.15),
                                               borderRadius: BorderRadius.circular(8),
                                             ),
-                                            child: const Text('المحاسب', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                                            child: Text(selfBadge, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
                                           ),
                                         ],
                                       ],
@@ -343,13 +364,14 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  TextButton.icon(
-                                    icon: const Icon(Icons.add, size: 20),
-                                    label: const Text('إضافة رصيد'),
-                                    onPressed: () => _addBalance(u),
-                                  ),
-                                  if (!isAccountant) ...[
-                                    const SizedBox(width: 8),
+                                  if (showAdd)
+                                    TextButton.icon(
+                                      icon: const Icon(Icons.add, size: 20),
+                                      label: const Text('إضافة رصيد'),
+                                      onPressed: () => _addBalance(u),
+                                    ),
+                                  if (showWithdraw) ...[
+                                    if (showAdd) const SizedBox(width: 8),
                                     TextButton.icon(
                                       icon: const Icon(Icons.remove, size: 20),
                                       label: const Text('سحب رصيد'),

@@ -65,11 +65,11 @@ void main() {
     final resolved = resolveHomeIconOrder(
       user: _user('app_admin'),
       iconConfig: iconConfig,
-      savedOrder: const ['warehouses_view', 'dashboard', 'reports'],
+      savedOrder: const ['warehouses_view', 'reports', 'attendance_reports'],
     );
 
     expect(resolved, isNot(contains('warehouses_view')));
-    expect(resolved.first, 'dashboard');
+    expect(resolved.first, 'reports');
     expect(resolved, contains('reports'));
   });
 }
