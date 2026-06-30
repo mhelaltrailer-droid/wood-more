@@ -82,17 +82,60 @@ CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_unread
   ON notifications(recipient_user_id, is_read);
 
-CREATE TABLE IF NOT EXISTS private_chat_messages (
+CREATE TABLE IF NOT EXISTS shop_darwing_notifications (
   id SERIAL PRIMARY KEY,
-  sender_email TEXT NOT NULL,
-  sender_name TEXT NOT NULL,
-  receiver_email TEXT NOT NULL,
+  recipient_user_id INTEGER NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
   body TEXT NOT NULL,
+  shop_drawing_id INTEGER,
+  created_at TEXT NOT NULL,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  read_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_shop_darwing_notifications_recipient_created
+  ON shop_darwing_notifications(recipient_user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_shop_darwing_notifications_recipient_unread
+  ON shop_darwing_notifications(recipient_user_id, is_read);
+
+CREATE TABLE IF NOT EXISTS shop_drawings (
+  id SERIAL PRIMARY KEY,
+  project_id INTEGER REFERENCES projects(id),
+  project_name TEXT NOT NULL DEFAULT '',
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'pending_pm',
+  created_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  created_by_user_name TEXT NOT NULL DEFAULT '',
+  current_assignee_user_id INTEGER REFERENCES users(id),
+  current_assignee_user_name TEXT,
+  return_reason TEXT,
+  document_type TEXT NOT NULL DEFAULT 'shop_drawing',
+  external_url TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  approved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS shop_drawing_attachments (
+  id SERIAL PRIMARY KEY,
+  drawing_id INTEGER NOT NULL REFERENCES shop_drawings(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  data_base64 TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
   created_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_private_chat_created
-  ON private_chat_messages(created_at);
+CREATE TABLE IF NOT EXISTS shop_drawing_actions (
+  id SERIAL PRIMARY KEY,
+  drawing_id INTEGER NOT NULL REFERENCES shop_drawings(id) ON DELETE CASCADE,
+  actor_user_id INTEGER NOT NULL REFERENCES users(id),
+  actor_user_name TEXT NOT NULL,
+  action TEXT NOT NULL,
+  comment TEXT,
+  created_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS materials (
   id SERIAL PRIMARY KEY,

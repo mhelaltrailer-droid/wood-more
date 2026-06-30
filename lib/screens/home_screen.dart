@@ -8,9 +8,10 @@ import '../services/icon_visibility_service.dart';
 import '../core/route_observer.dart';
 import 'login_screen.dart';
 import 'notifications_screen.dart';
-import 'private_chat_screen.dart';
+import 'shop_darwing_notifications_screen.dart';
 import 'manager_withdrawal_requests_screen.dart';
 import 'reorderable_home_screen.dart';
+import '../widgets/shop_darwing_notification_app_bar_icon.dart';
 
 /// الصفحة الرئيسية - تختلف حسب دور المستخدم
 class HomeScreen extends StatefulWidget {
@@ -27,12 +28,17 @@ class _HomeScreenState extends State<HomeScreen>
   bool _subscribed = false;
   Map<String, bool>? _iconConfig;
   int _unreadNotificationsCount = 0;
+  int _unreadShopDarwingNotificationsCount = 0;
   int _pendingWithdrawalRequestsCount = 0;
   int _pendingReportsSysCount = 0;
+  int _pendingShopDrawingCount = 0;
   Timer? _notificationsPollTimer;
   late final AnimationController _wrRotateController;
 
   bool get _canUseNotifications => widget.currentUser.canUseNotifications;
+
+  bool get _canUseShopDarwingNotification =>
+      widget.currentUser.canUseShopDarwingNotification;
 
   @override
   void didChangeDependencies() {
@@ -58,8 +64,10 @@ class _HomeScreenState extends State<HomeScreen>
     saveLastRoute('home');
     _loadIconsConfig();
     _loadUnreadNotificationsCount();
+    _loadUnreadShopDarwingNotificationsCount();
     _loadPendingWithdrawalActionsCount();
     _loadPendingReportsSysCount();
+    _loadPendingShopDrawingCount();
   }
 
   @override
@@ -71,8 +79,10 @@ class _HomeScreenState extends State<HomeScreen>
     );
     _loadIconsConfig();
     _loadUnreadNotificationsCount();
+    _loadUnreadShopDarwingNotificationsCount();
     _loadPendingWithdrawalActionsCount();
     _loadPendingReportsSysCount();
+    _loadPendingShopDrawingCount();
     _startNotificationsPollingIfManager();
   }
 
@@ -125,6 +135,29 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Future<void> _loadUnreadShopDarwingNotificationsCount() async {
+    if (!_canUseShopDarwingNotification) {
+      if (!mounted) return;
+      setState(() => _unreadShopDarwingNotificationsCount = 0);
+      return;
+    }
+    try {
+      final storage = getStorage();
+      final count = storage is ApiStorageService
+          ? await storage.getUnreadShopDarwingNotificationsCount(
+              widget.currentUser.id,
+            )
+          : await storage.getUnreadShopDarwingNotificationsCount(
+              widget.currentUser.id,
+            );
+      if (!mounted) return;
+      setState(() => _unreadShopDarwingNotificationsCount = count);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _unreadShopDarwingNotificationsCount = 0);
+    }
+  }
+
   Future<void> _loadPendingWithdrawalActionsCount() async {
     if (!widget.currentUser.canActOnWithdrawalRequests) {
       if (mounted) {
@@ -174,15 +207,43 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Future<void> _loadPendingShopDrawingCount() async {
+    if (!widget.currentUser.canAccessShopDrawingHomeIcon) {
+      if (mounted) setState(() => _pendingShopDrawingCount = 0);
+      return;
+    }
+    try {
+      final storage = getStorage();
+      if (storage is! ApiStorageService) {
+        if (mounted) setState(() => _pendingShopDrawingCount = 0);
+        return;
+      }
+      final c = await storage.getShopDrawingPendingCount(widget.currentUser.id);
+      if (!mounted) return;
+      setState(() => _pendingShopDrawingCount = c);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _pendingShopDrawingCount = 0);
+    }
+  }
+
   void _startNotificationsPollingIfManager() {
-    if (!_canUseNotifications) return;
+    if (!_canUseNotifications &&
+        !_canUseShopDarwingNotification &&
+        !widget.currentUser.canAccessShopDrawingHomeIcon) {
+      return;
+    }
     _notificationsPollTimer?.cancel();
     _notificationsPollTimer = Timer.periodic(
       const Duration(seconds: 8),
       (_) {
-        _loadUnreadNotificationsCount();
+        if (_canUseNotifications) _loadUnreadNotificationsCount();
+        if (_canUseShopDarwingNotification) {
+          _loadUnreadShopDarwingNotificationsCount();
+        }
         _loadPendingWithdrawalActionsCount();
         _loadPendingReportsSysCount();
+        _loadPendingShopDrawingCount();
       },
     );
   }
@@ -206,27 +267,6 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               const SizedBox(width: 12),
               const Text('Wood & More'),
-              if (currentUser.canUsePrivateAdminManagerChat) ...[
-                const SizedBox(width: 8),
-                InkWell(
-                  borderRadius: BorderRadius.circular(14),
-                  onTap: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => PrivateChatScreen(currentUser: currentUser),
-                      ),
-                    );
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Icon(Icons.chat_bubble_outline, size: 16),
-                  ),
-                ),
-              ],
             ],
           ),
         ),
@@ -270,6 +310,53 @@ class _HomeScreenState extends State<HomeScreen>
                     },
                     icon: const Icon(Icons.inventory_2_outlined),
                   ),
+          if (currentUser.canUseShopDarwingNotification)
+            IconButton(
+              tooltip: 'إشعارات',
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ShopDarwingNotificationsScreen(
+                      currentUser: currentUser,
+                    ),
+                  ),
+                );
+                await _loadUnreadShopDarwingNotificationsCount();
+              },
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const ShopDarwingNotificationAppBarIcon(),
+                  if (_unreadShopDarwingNotificationsCount > 0)
+                    Positioned(
+                      right: -6,
+                      top: -6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(minWidth: 18),
+                        child: Text(
+                          _unreadShopDarwingNotificationsCount > 99
+                              ? '99+'
+                              : '$_unreadShopDarwingNotificationsCount',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           if (_canUseNotifications)
             IconButton(
               tooltip: 'الإشعارات',
@@ -332,7 +419,9 @@ class _HomeScreenState extends State<HomeScreen>
         user: currentUser,
         iconConfig: _iconConfig,
         pendingReportsSysCount: _pendingReportsSysCount,
+        pendingShopDrawingCount: _pendingShopDrawingCount,
         onReportsSysReturn: _loadPendingReportsSysCount,
+        onShopDrawingReturn: _loadPendingShopDrawingCount,
       ),
     );
   }

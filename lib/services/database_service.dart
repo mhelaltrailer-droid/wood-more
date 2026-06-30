@@ -21,7 +21,7 @@ import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../models/notification_item_model.dart';
-import '../models/private_chat_message_model.dart';
+import '../models/shop_darwing_notification_model.dart';
 import '../models/ir_mir_upload_model.dart';
 import '../models/ms_sd_record_model.dart';
 import '../models/mos_itp_record_model.dart';
@@ -54,7 +54,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 35,
+      version: 36,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -98,7 +98,7 @@ class DatabaseService {
     ''');
 
     await _createNotificationsTable(db);
-    await _createPrivateChatMessagesTable(db);
+    await _createShopDarwingNotificationsTable(db);
 
     // إدخال بيانات تجريبية
     await _seedData(db);
@@ -412,6 +412,9 @@ class DatabaseService {
     if (oldVersion < 35) {
       await _createMosItpTables(db);
     }
+    if (oldVersion < 36) {
+      await _createShopDarwingNotificationsTable(db);
+    }
   }
 
   Future<void> _trimMaterialsCatalog(Database db) async {
@@ -492,6 +495,20 @@ class DatabaseService {
         actor_user_id INTEGER,
         actor_user_name TEXT,
         project_name TEXT,
+        created_at TEXT NOT NULL,
+        is_read INTEGER NOT NULL DEFAULT 0,
+        read_at TEXT
+      )
+    ''');
+  }
+
+  Future<void> _createShopDarwingNotificationsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS shop_darwing_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recipient_user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
         created_at TEXT NOT NULL,
         is_read INTEGER NOT NULL DEFAULT 0,
         read_at TEXT
@@ -1223,49 +1240,41 @@ class DatabaseService {
     );
   }
 
-  bool _isAllowedPrivatePair(String a, String b) {
-    final x = a.trim().toLowerCase();
-    final y = b.trim().toLowerCase();
-    const m = 'islam.shams2050@gmail.com';
-    const a1 = 'mouhammedhelal@gmail.com';
-    return (x == m && y == a1) || (x == a1 && y == m);
-  }
-
-  Future<List<PrivateChatMessageModel>> getPrivateChatMessages({
-    required String requesterEmail,
-  }) async {
-    final me = requesterEmail.trim().toLowerCase();
-    const m = 'islam.shams2050@gmail.com';
-    const a1 = 'mouhammedhelal@gmail.com';
-    if (me != m && me != a1) return [];
+  Future<List<ShopDarwingNotificationModel>> getShopDarwingNotifications(
+    int userId,
+  ) async {
     final db = await database;
     final maps = await db.query(
-      'private_chat_messages',
-      where:
-          '(sender_email = ? AND receiver_email = ?) OR (sender_email = ? AND receiver_email = ?)',
-      whereArgs: [m, a1, a1, m],
-      orderBy: 'created_at ASC',
+      'shop_darwing_notifications',
+      where: 'recipient_user_id = ?',
+      whereArgs: [userId],
+      orderBy: 'created_at DESC',
     );
-    return maps.map((m) => PrivateChatMessageModel.fromMap(m)).toList();
+    return maps.map((m) => ShopDarwingNotificationModel.fromMap(m)).toList();
   }
 
-  Future<int> sendPrivateChatMessage({
-    required String senderEmail,
-    required String senderName,
-    required String receiverEmail,
-    required String body,
-  }) async {
-    if (!_isAllowedPrivatePair(senderEmail, receiverEmail)) {
-      throw Exception('forbidden');
-    }
+  Future<int> getUnreadShopDarwingNotificationsCount(int userId) async {
     final db = await database;
-    return db.insert('private_chat_messages', {
-      'sender_email': senderEmail.trim().toLowerCase(),
-      'sender_name': senderName,
-      'receiver_email': receiverEmail.trim().toLowerCase(),
-      'body': body.trim(),
-      'created_at': DateTime.now().toIso8601String(),
-    });
+    final v = Sqflite.firstIntValue(
+      await db.rawQuery(
+        'SELECT COUNT(*) FROM shop_darwing_notifications WHERE recipient_user_id = ? AND is_read = 0',
+        [userId],
+      ),
+    );
+    return v ?? 0;
+  }
+
+  Future<void> markShopDarwingNotificationRead({
+    required int notificationId,
+    required int userId,
+  }) async {
+    final db = await database;
+    await db.update(
+      'shop_darwing_notifications',
+      {'is_read': 1, 'read_at': DateTime.now().toIso8601String()},
+      where: 'id = ? AND recipient_user_id = ?',
+      whereArgs: [notificationId, userId],
+    );
   }
 
   /// الحصول على جميع سجلات الحضور (للمدير)
@@ -3432,6 +3441,20 @@ class DatabaseService {
   WithdrawalRequestModel _wrFromRow(Map<String, dynamic> m) =>
       WithdrawalRequestModel.fromMap(Map<String, dynamic>.from(m));
 
+  String _formatWithdrawalSubmittedAt(String iso) {
+    final d = DateTime.tryParse(iso);
+    if (d == null) return iso;
+    final local = d.toLocal();
+    final hour = local.hour;
+    final h12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    final amPm = hour >= 12 ? 'م' : 'ص';
+    return '${local.year.toString().padLeft(4, '0')}/'
+        '${local.month.toString().padLeft(2, '0')}/'
+        '${local.day.toString().padLeft(2, '0')} '
+        '${h12.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')} $amPm';
+  }
+
   Future<List<WithdrawalRequestModel>> getWithdrawalRequestsForEngineerProject({
     required int projectId,
     required int engineerUserId,
@@ -3516,7 +3539,8 @@ class DatabaseService {
     final projectName = p.isNotEmpty ? (p.first['name'] as String? ?? '') : '';
     final bodyN =
         'طلب من "$engineerUserName" — مشروع "$projectName" — موقع: ${locationPathLabel.isEmpty ? '—' : locationPathLabel}\n'
-        'رقم الطلب: $id';
+        'رقم الطلب: $id\n'
+        'تاريخ ووقت الإرسال: ${_formatWithdrawalSubmittedAt(now)}';
     await _wrNotifyRoles(
       db,
       ['site_engineer_manager', 'operation_manager', 'app_admin'],

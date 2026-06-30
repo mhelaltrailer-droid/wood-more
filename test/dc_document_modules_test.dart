@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wood_and_more_app/models/mos_itp_record_model.dart';
 import 'package:wood_and_more_app/models/ms_sd_record_model.dart';
+import 'package:wood_and_more_app/models/shop_drawing_model.dart';
 import 'package:wood_and_more_app/models/user_model.dart';
 import 'package:wood_and_more_app/services/icon_visibility_service.dart';
 import 'package:wood_and_more_app/services/web_storage_service.dart';
 import 'package:wood_and_more_app/utils/ms_sd_file_limits.dart';
+import 'package:wood_and_more_app/utils/shop_drawing_status_timeline.dart';
 import 'package:wood_and_more_app/widgets/home_icon_builder.dart';
 
 UserModel _user({
@@ -145,6 +148,124 @@ void main() {
           .map((e) => e.id)
           .toList();
       expect(ids, isNot(contains('accountant_finance')));
+    });
+
+    test('Top Managment: Shop-Drawing & PO فقط', () {
+      final ids = IconVisibilityService.roleIcons['top_management']!
+          .map((e) => e.id)
+          .toList();
+      expect(ids, ['shop_drawing']);
+      final user = _user(role: 'top_management');
+      expect(user.canAccessShopDrawingHomeIcon, isTrue);
+      expect(user.isTopManagement, isTrue);
+      expect(user.canViewShopDrawingReadOnly, isTrue);
+    });
+  });
+
+  group('Shop-Drawing — مسار Top Management', () {
+    final fmt = DateFormat('dd/MM/yyyy HH:mm');
+
+    test('بانتظار مدير المشروعات', () {
+      final d = ShopDrawingModel(
+        id: 1,
+        projectName: 'P1',
+        status: ShopDrawingModel.statusPendingPm,
+        createdByUserId: 2,
+        createdByUserName: 'المكتب الفني',
+        createdAt: DateTime(2026, 6, 30, 10, 0),
+        updatedAt: DateTime(2026, 6, 30, 10, 0),
+        actions: [
+          ShopDrawingActionModel(
+            id: 1,
+            actorUserId: 2,
+            actorUserName: 'المكتب الفني',
+            action: 'created',
+            createdAt: DateTime(2026, 6, 30, 10, 0),
+          ),
+        ],
+      );
+      final lines = buildShopDrawingStatusTimeline(d, formatter: fmt);
+      expect(lines.first.text, contains('تم الإنشاء'));
+      expect(lines.last.text, contains('مدير المشروعات'));
+      expect(lines.last.isPending, isTrue);
+    });
+
+    test('معاد للمكتب الفني', () {
+      final d = ShopDrawingModel(
+        id: 2,
+        projectName: 'P2',
+        status: ShopDrawingModel.statusReturnedToTo,
+        createdByUserId: 2,
+        createdByUserName: 'المكتب الفني',
+        createdAt: DateTime(2026, 6, 30, 9, 0),
+        updatedAt: DateTime(2026, 6, 30, 11, 0),
+        actions: [
+          ShopDrawingActionModel(
+            id: 1,
+            actorUserId: 2,
+            actorUserName: 'المكتب الفني',
+            action: 'created',
+            createdAt: DateTime(2026, 6, 30, 9, 0),
+          ),
+          ShopDrawingActionModel(
+            id: 2,
+            actorUserId: 3,
+            actorUserName: 'مدير PM',
+            action: 'pm_return',
+            comment: 'تعديل',
+            createdAt: DateTime(2026, 6, 30, 11, 0),
+          ),
+        ],
+      );
+      final lines = buildShopDrawingStatusTimeline(d, formatter: fmt);
+      expect(
+        lines.any((l) => l.text.contains('أُعيد للمكتب الفني')),
+        isTrue,
+      );
+      expect(
+        lines.last.text,
+        'في انتظار تعديل وإعادة إرسال من المكتب الفني',
+      );
+    });
+
+    test('معتمد نهائياً', () {
+      final d = ShopDrawingModel(
+        id: 3,
+        projectName: 'P3',
+        status: ShopDrawingModel.statusApproved,
+        createdByUserId: 2,
+        createdByUserName: 'المكتب الفني',
+        createdAt: DateTime(2026, 6, 29, 8, 0),
+        updatedAt: DateTime(2026, 6, 30, 14, 0),
+        approvedAt: DateTime(2026, 6, 30, 14, 0),
+        actions: [
+          ShopDrawingActionModel(
+            id: 1,
+            actorUserId: 2,
+            actorUserName: 'المكتب الفني',
+            action: 'created',
+            createdAt: DateTime(2026, 6, 29, 8, 0),
+          ),
+          ShopDrawingActionModel(
+            id: 2,
+            actorUserId: 3,
+            actorUserName: 'مدير PM',
+            action: 'pm_approve',
+            createdAt: DateTime(2026, 6, 30, 10, 0),
+          ),
+          ShopDrawingActionModel(
+            id: 3,
+            actorUserId: 4,
+            actorUserName: 'مدير OM',
+            action: 'om_approve',
+            createdAt: DateTime(2026, 6, 30, 14, 0),
+          ),
+        ],
+      );
+      final lines = buildShopDrawingStatusTimeline(d, formatter: fmt);
+      expect(lines.length, 3);
+      expect(lines.any((l) => l.isPending), isFalse);
+      expect(lines.last.text, contains('مدير العمليات'));
     });
   });
 

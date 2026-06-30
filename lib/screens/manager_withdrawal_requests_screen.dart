@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../models/location_material_model.dart';
 import '../models/pending_postpone_fine_action_model.dart';
@@ -169,6 +170,9 @@ class _ManagerWithdrawalRequestsScreenState
     if (d == null) return raw;
     return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
+
+  String _formatSubmittedAt(DateTime dt) =>
+      DateFormat('yyyy/MM/dd hh:mm a', 'ar').format(dt.toLocal());
 
   Future<void> _resolvePostponeFine(PendingPostponeFineActionModel p) async {
     final db = _db;
@@ -485,6 +489,10 @@ class _ManagerWithdrawalRequestsScreenState
             Text('المرحلة: ${_phaseAr(r.phase)}'),
             Text('المهندس: ${r.engineerUserName}'),
             Text('رقم الطلب: ${r.id}'),
+            Text(
+              'تاريخ ووقت الإرسال: ${_formatSubmittedAt(r.createdAt)}',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            ),
             if (waitingOther) ...[
               const SizedBox(height: 8),
               Text(

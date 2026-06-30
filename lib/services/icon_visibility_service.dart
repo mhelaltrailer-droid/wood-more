@@ -1,3 +1,5 @@
+import '../core/shop_drawing_constants.dart';
+
 class HomeIconItem {
   final String id;
   final String label;
@@ -13,6 +15,12 @@ class IconVisibilityService {
   static const String roleOperationManager = 'operation_manager';
   static const String roleAccountant = 'accountant';
   static const String roleDocumentController = 'document_controller';
+  static const String roleTechnicalOffice = 'technical_office';
+  static const String roleTopManagement = 'top_management';
+
+  static const List<HomeIconItem> _shopDrawingOnlyHomeIcons = [
+    HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
+  ];
 
   static const List<HomeIconItem> _documentControllerHomeIcons = [
     HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
@@ -52,9 +60,13 @@ class IconVisibilityService {
     roleOperationManager: 'Operation manager',
     roleAccountant: 'Accountant',
     roleDocumentController: 'Document Controller',
+    roleTechnicalOffice: 'المكتب الفني',
+    roleTopManagement: 'Top Managment',
   };
 
   static const Map<String, List<HomeIconItem>> roleIcons = {
+    roleTechnicalOffice: _shopDrawingOnlyHomeIcons,
+    roleTopManagement: _shopDrawingOnlyHomeIcons,
     roleSiteEngineer: [
       HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),
       HomeIconItem(id: 'today_work_plan', label: 'خطة عمل اليوم'),
@@ -104,6 +116,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
       HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
+      HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),

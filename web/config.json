@@ -1,1 +1,3 @@
-{"apiBaseUrl": "https://wood-more-1qtv.onrender.com/"}
+{
+  "apiBaseUrl": "http://localhost:3000"
+}

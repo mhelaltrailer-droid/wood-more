@@ -23,6 +23,8 @@ import '../screens/operation_reports_screen.dart';
 import '../screens/postpone_fines_report_screen.dart';
 import '../screens/reports_screen.dart';
 import '../screens/reports_sys_hub_screen.dart';
+import '../core/shop_drawing_constants.dart';
+import '../screens/shop_drawing_type_gate_screen.dart';
 import '../screens/detailed_report_finances_screen.dart';
 import '../screens/today_work_plan_screen.dart';
 import '../screens/tomorrow_work_plan_screen.dart';
@@ -40,7 +42,9 @@ class HomeIconBuilder {
     required UserModel user,
     required String iconId,
     int pendingReportsSysCount = 0,
+    int pendingShopDrawingCount = 0,
     Future<void> Function()? onReportsSysReturn,
+    Future<void> Function()? onShopDrawingReturn,
   }) {
     switch (iconId) {
       case 'attendance':
@@ -412,6 +416,21 @@ class HomeIconBuilder {
           title: 'MoS-ITP',
           subtitle: mosItpSubtitle,
           onTap: () => pushAndSaveRoute(context, 'mos-itp', mosItpScreen),
+        );
+      case 'shop_drawing':
+        return _gradientCard(
+          icon: Icons.architecture_outlined,
+          title: shopDrawingHomeIconLabel,
+          subtitle: 'رفع واعتماد Shop-Drawing و PO',
+          badgeCount: pendingShopDrawingCount,
+          onTap: () async {
+            await pushAndSaveRoute(
+              context,
+              'shop-drawing',
+              ShopDrawingTypeGateScreen(currentUser: user),
+            );
+            await onShopDrawingReturn?.call();
+          },
         );
       case 'reports_sys':
         return _gradientCard(

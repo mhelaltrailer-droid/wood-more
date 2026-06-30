@@ -78,6 +78,14 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                       value: 'document_controller',
                       child: Text(UserModel.documentControllerRoleLabel),
                     ),
+                    DropdownMenuItem(
+                      value: 'technical_office',
+                      child: Text(UserModel.technicalOfficeRoleLabel),
+                    ),
+                    DropdownMenuItem(
+                      value: 'top_management',
+                      child: Text(UserModel.topManagementRoleLabel),
+                    ),
                     DropdownMenuItem(value: 'app_admin', child: Text('مسؤول التطبيق')),
                   ],
                   onChanged: (v) => setDialog(() => role = v ?? role),
@@ -156,6 +164,8 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     if (r == 'operation_manager') return 'مدير العمليات';
     if (r == 'accountant') return 'محاسب';
     if (r == 'document_controller') return UserModel.documentControllerRoleLabel;
+    if (r == 'technical_office') return UserModel.technicalOfficeRoleLabel;
+    if (r == 'top_management') return UserModel.topManagementRoleLabel;
     if (r == 'app_admin') return 'مسؤول التطبيق';
     return r;
   }

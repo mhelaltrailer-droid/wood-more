@@ -1,14 +1,17 @@
+import '../core/shop_drawing_constants.dart';
+
 /// نموذج المستخدم - مهندس موقع أو مدير المشروعات
-class UserModel {
-  static const String siteEngineerManagerRoleLabel = 'مدير المشروعات';
+class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير المشروعات';
   static const String generalSupervisorRoleLabel = 'مشرف عام';
   static const String documentControllerRoleLabel = 'Document Controller';
+  static const String technicalOfficeRoleLabel = 'المكتب الفني';
+  static const String topManagementRoleLabel = 'Top Managment';
   static const String primaryAppAdminEmail = 'mouhammedhelal@gmail.com';
 
   final int id;
   final String name;
   final String email;
-  final String role; // 'site_engineer' | 'site_engineer_manager' | 'general_supervisor' | 'operation_manager' | 'app_admin' | 'accountant' | 'document_controller'
+  final String role; // 'site_engineer' | 'site_engineer_manager' | 'general_supervisor' | 'operation_manager' | 'app_admin' | 'accountant' | 'document_controller' | 'technical_office' | 'top_management'
 
   const UserModel({
     required this.id,
@@ -20,6 +23,11 @@ class UserModel {
   bool get isSiteEngineer => role == 'site_engineer';
   bool get isDocumentController => role == 'document_controller';
   bool get isGeneralSupervisor => role == 'general_supervisor';
+  bool get isTechnicalOffice => role == shopDrawingRoleTechnicalOffice;
+  bool get isTopManagement => role == shopDrawingRoleTopManagement;
+  bool get isOperationManager => role == 'operation_manager';
+  bool get isShopDrawingProjectManager =>
+      role == 'site_engineer_manager' && isShopDrawingPmEmail(email);
 
   /// رفع سجلات MS-SD (Document Controller فقط).
   bool get canUploadMsSd => isDocumentController;
@@ -126,10 +134,34 @@ class UserModel {
 
   bool get canViewReportsSysAllTab => canViewReportsSysFullAccess;
 
-  bool get canUsePrivateAdminManagerChat {
-    final e = email.trim().toLowerCase();
-    return e == 'islam.shams2050@gmail.com' || e == 'mouhammedhelal@gmail.com';
-  }
+  /// أيقونة Shop-drawing في الشاشة الرئيسية.
+  bool get canAccessShopDrawingHomeIcon =>
+      isTechnicalOffice ||
+      isTopManagement ||
+      isShopDrawingProjectManager ||
+      isOperationManager ||
+      canManageShopDrawingApproved;
+
+  /// إجراءات مدير المشروعات في Shop-drawing.
+  bool get canActAsShopDrawingProjectManager => isShopDrawingProjectManager;
+
+  /// اعتماد نهائي من مدير العمليات.
+  bool get canApproveShopDrawingAsOm => isOperationManager;
+
+  /// عرض Shop-Drawing & PO للقراءة فقط (Top Management).
+  bool get canViewShopDrawingReadOnly => isTopManagement;
+
+  /// إدارة Shop-Drawing & PO (حذف بأي مرحلة، عرض كامل…) — مسؤول التطبيق المحدد فقط.
+  bool get canManageShopDrawingApproved =>
+      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+
+  /// جرس shop-darwing-notification في الشاشة الرئيسية (مدير العمليات + المسؤول).
+  bool get canUseShopDarwingNotification =>
+      isOperationManager || canManageShopDrawingApproved;
+
+  /// إشعارات داخل أيقونة Shop-drawing (مكتب فني + مدير المشروعات المحدد).
+  bool get canSeeShopDrawingModuleNotifications =>
+      isTechnicalOffice || isShopDrawingProjectManager;
 
   Map<String, dynamic> toMap() {
     return {

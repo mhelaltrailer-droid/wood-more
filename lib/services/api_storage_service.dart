@@ -21,7 +21,7 @@ import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../models/activity_log_model.dart';
 import '../models/notification_item_model.dart';
-import '../models/private_chat_message_model.dart';
+import '../models/shop_darwing_notification_model.dart';
 import '../models/ir_mir_upload_model.dart';
 import '../models/ms_sd_record_model.dart';
 import '../models/mos_itp_record_model.dart';
@@ -29,6 +29,7 @@ import '../models/withdrawal_request_model.dart';
 import '../models/pending_postpone_fine_action_model.dart';
 import '../models/postpone_fine_report_row_model.dart';
 import '../models/reports_sys_model.dart';
+import '../models/shop_drawing_model.dart';
 import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
@@ -61,6 +62,13 @@ class ApiStorageService {
           'يجب نشر آخر نسخة من backend/server.js على خدمة wood-more-api ثم إعادة المحاولة.',
         );
       }
+      if (p.contains('shop-drawing')) {
+        return Exception(
+          'الخادم لا يتضمن مسارات Shop-Drawing & PO بعد (404).\n'
+          'للتجربة محلياً: شغّل backend (node server.js) واضبط web/config.json على http://localhost:3000\n'
+          'أو انشر آخر نسخة من backend على Render.',
+        );
+      }
       return Exception(
         'المسار غير موجود على الخادم (404)${p.isNotEmpty ? ': $p' : ''}',
       );
@@ -88,14 +96,14 @@ class ApiStorageService {
   Future<Map<String, dynamic>> _get(String path) async {
     final uri = Uri.parse(_path(path));
     final r = await _httpGet(uri);
-    if (r.statusCode >= 400) throw Exception(r.body);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
     return r.body.isEmpty ? {} : jsonDecode(r.body) as Map<String, dynamic>;
   }
 
   Future<List<dynamic>> _getList(String path) async {
     final uri = Uri.parse(_path(path));
     final r = await _httpGet(uri);
-    if (r.statusCode >= 400) throw Exception(r.body);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
     final decoded = jsonDecode(r.body);
     if (decoded == null) return [];
     return decoded is List ? decoded as List<dynamic> : [];
@@ -581,38 +589,32 @@ class ApiStorageService {
     await _put('notifications/$notificationId/read', {'userId': userId});
   }
 
-  Future<List<PrivateChatMessageModel>> getPrivateChatMessages({
-    required String requesterEmail,
-  }) async {
-    final uri = Uri.parse(_path('private-chat/messages')).replace(
-      queryParameters: {
-        'requesterEmail': requesterEmail.trim().toLowerCase(),
-      },
-    );
-    final r = await http.get(uri);
-    if (r.statusCode >= 400) throw Exception(r.body);
-    final decoded = jsonDecode(r.body);
-    if (decoded == null || decoded is! List) return [];
-    return decoded
+  Future<List<ShopDarwingNotificationModel>> getShopDarwingNotifications(
+    int userId,
+  ) async {
+    final list = await _getList('shop-darwing-notification?userId=$userId');
+    return list
         .map(
-          (e) => PrivateChatMessageModel.fromMap(
+          (e) => ShopDarwingNotificationModel.fromMap(
             Map<String, dynamic>.from(e as Map),
           ),
         )
         .toList();
   }
 
-  Future<int> sendPrivateChatMessage({
-    required String senderEmail,
-    required String senderName,
-    required String receiverEmail,
-    required String body,
+  Future<int> getUnreadShopDarwingNotificationsCount(int userId) async {
+    final data = await _get(
+      'shop-darwing-notification/unread-count?userId=$userId',
+    );
+    return (data['count'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> markShopDarwingNotificationRead({
+    required int notificationId,
+    required int userId,
   }) async {
-    return _post('private-chat/messages', {
-      'senderEmail': senderEmail.trim().toLowerCase(),
-      'senderName': senderName,
-      'receiverEmail': receiverEmail.trim().toLowerCase(),
-      'body': body,
+    await _put('shop-darwing-notification/$notificationId/read', {
+      'userId': userId,
     });
   }
 
@@ -2178,5 +2180,207 @@ class ApiStorageService {
     );
     final r = await http.delete(uri);
     if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  Future<int> getShopDrawingPendingCount(int userId) async {
+    final data = await _get('shop-drawing/pending-count?userId=$userId');
+    return (data['count'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<List<ShopDrawingModel>> getShopDrawingInbox({
+    required int userId,
+    required String tab,
+    required String documentType,
+  }) async {
+    final path = 'shop-drawing/inbox';
+    final uri = Uri.parse(_path(path)).replace(
+      queryParameters: {
+        'userId': userId.toString(),
+        'tab': tab,
+        'documentType': documentType,
+      },
+    );
+    final r = await _httpGet(uri);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) => ShopDrawingModel.fromMap(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+  }
+
+  Future<ShopDrawingModel> getShopDrawingDetail(int drawingId) async {
+    final path = 'shop-drawing/$drawingId';
+    final r = await _httpGet(Uri.parse(_path(path)));
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    return ShopDrawingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<Map<String, String>> getShopDrawingAttachmentData({
+    required int drawingId,
+    required int attachmentId,
+  }) async {
+    final path = 'shop-drawing/$drawingId/attachments/$attachmentId';
+    final uri = Uri.parse(_path(path));
+    final r = await _httpGet(uri);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    final data = Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+    return {
+      'file_name': (data['file_name'] ?? '').toString(),
+      'mime_type': (data['mime_type'] ?? '').toString(),
+      'data_base64': (data['data_base64'] ?? '').toString(),
+    };
+  }
+
+  Future<ShopDrawingModel> createShopDrawing({
+    required int userId,
+    required int projectId,
+    String? notes,
+    required List<Map<String, dynamic>> attachments,
+    required String documentType,
+    String? externalUrl,
+  }) async {
+    final uri = Uri.parse(_path('shop-drawing'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'projectId': projectId,
+        'documentType': documentType,
+        if (notes != null && notes.isNotEmpty) 'notes': notes,
+        'attachments': attachments,
+        if (externalUrl != null && externalUrl.isNotEmpty)
+          'externalUrl': externalUrl,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ShopDrawingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ShopDrawingModel> updateShopDrawing({
+    required int drawingId,
+    required int userId,
+    required int projectId,
+    String? notes,
+    required List<Map<String, dynamic>> attachments,
+    String? externalUrl,
+  }) async {
+    final uri = Uri.parse(_path('shop-drawing/$drawingId'));
+    final r = await http.put(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'projectId': projectId,
+        if (notes != null) 'notes': notes,
+        'attachments': attachments,
+        'externalUrl': externalUrl,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ShopDrawingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ShopDrawingModel> pmApproveShopDrawing({
+    required int drawingId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('shop-drawing/$drawingId/pm-approve'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'userId': userId}),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ShopDrawingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ShopDrawingModel> pmReturnShopDrawing({
+    required int drawingId,
+    required int userId,
+    required String reason,
+  }) async {
+    final uri = Uri.parse(_path('shop-drawing/$drawingId/pm-return'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'userId': userId, 'reason': reason}),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ShopDrawingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ShopDrawingModel> omApproveShopDrawing({
+    required int drawingId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('shop-drawing/$drawingId/om-approve'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'userId': userId}),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ShopDrawingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<void> deleteShopDrawing({
+    required int drawingId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('shop-drawing/$drawingId')).replace(
+      queryParameters: {'userId': userId.toString()},
+    );
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  Future<List<ShopDarwingNotificationModel>> getShopDrawingModuleNotifications(
+    int userId, {
+    required String documentType,
+  }) async {
+    final list = await _getList(
+      'shop-drawing/module-notifications?userId=$userId&documentType=$documentType',
+    );
+    return list
+        .map(
+          (e) => ShopDarwingNotificationModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<int> getUnreadShopDrawingModuleNotificationsCount(
+    int userId, {
+    required String documentType,
+  }) async {
+    final data = await _get(
+      'shop-drawing/module-notifications/unread-count?userId=$userId&documentType=$documentType',
+    );
+    return (data['count'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> markShopDrawingModuleNotificationRead({
+    required int notificationId,
+    required int userId,
+  }) async {
+    await _put('shop-drawing/module-notifications/$notificationId/read', {
+      'userId': userId,
+    });
   }
 }

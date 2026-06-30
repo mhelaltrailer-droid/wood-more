@@ -3,6 +3,7 @@ import '../models/user_model.dart';
 
 const String homeIconIdIconsControl = 'icons_control';
 const String homeIconIdSiteEngineerExpensesReport = 'site_engineer_expenses_report';
+const String homeIconIdShopDrawing = 'shop_drawing';
 
 List<String> defaultHomeIconOrderForUser(UserModel user) {
   final roleItems = IconVisibilityService.roleIcons[user.role] ?? const [];
@@ -23,6 +24,9 @@ List<String> defaultHomeIconOrderForUser(UserModel user) {
     } else {
       out.add(homeIconIdSiteEngineerExpensesReport);
     }
+  }
+  if (user.canAccessShopDrawingHomeIcon && !out.contains(homeIconIdShopDrawing)) {
+    out.insert(0, homeIconIdShopDrawing);
   }
   return out;
 }
@@ -63,6 +67,9 @@ bool _isHomeIconAvailable({
           IconVisibilityService.isVisible(iconConfig, iconId);
     case 'reports_sys':
       return user.canParticipateInReportsSys &&
+          IconVisibilityService.isVisible(iconConfig, iconId);
+    case homeIconIdShopDrawing:
+      return user.canAccessShopDrawingHomeIcon &&
           IconVisibilityService.isVisible(iconConfig, iconId);
     default:
       return IconVisibilityService.isVisible(iconConfig, iconId);
