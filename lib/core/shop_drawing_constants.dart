@@ -13,7 +13,12 @@ const shopDrawingDocumentTypeShopDrawing = 'shop_drawing';
 /// قيمة API لنوع PO.
 const shopDrawingDocumentTypePo = 'po';
 
-const shopDrawingHomeIconLabel = 'Shop-Drawing & PO';
+const shopDrawingHomeIconLabel = 'SD & PO';
+
+/// قيمة القائمة المنسدلة لاختيار مشروع غير موجود في جدول المشاريع.
+const shopDrawingOtherProjectDropdownValue = -1;
+
+const shopDrawingOtherProjectDropdownLabel = 'مشروع آخر';
 
 bool isShopDrawingPmEmail(String email) =>
     email.trim().toLowerCase() == shopDrawingPmEmail.toLowerCase();

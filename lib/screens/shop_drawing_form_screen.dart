@@ -44,6 +44,7 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _notesController = TextEditingController();
   final _urlController = TextEditingController();
+  final _customProjectNameController = TextEditingController();
   final _storage = getStorage();
 
   int? _selectedProjectId;
@@ -54,6 +55,9 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
   List<ProjectModel> _projects = const [];
 
   bool get _isEdit => widget.existing != null;
+
+  bool get _isOtherProject =>
+      _selectedProjectId == shopDrawingOtherProjectDropdownValue;
 
   String get _typeLabel => shopDrawingDocumentTypeLabel(
         widget.existing?.documentType ?? widget.documentType,
@@ -66,7 +70,12 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
     if (e != null) {
       _notesController.text = e.notes ?? '';
       _urlController.text = e.externalUrl ?? '';
-      _selectedProjectId = e.projectId;
+      if (e.projectId == null && e.projectName.trim().isNotEmpty) {
+        _selectedProjectId = shopDrawingOtherProjectDropdownValue;
+        _customProjectNameController.text = e.projectName.trim();
+      } else {
+        _selectedProjectId = e.projectId;
+      }
     }
     _loadProjects();
   }
@@ -75,6 +84,7 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
   void dispose() {
     _notesController.dispose();
     _urlController.dispose();
+    _customProjectNameController.dispose();
     super.dispose();
   }
 
@@ -205,6 +215,13 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
       );
       return;
     }
+    final customProjectName = _customProjectNameController.text.trim();
+    if (_isOtherProject && customProjectName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('أدخل اسم المشروع')),
+      );
+      return;
+    }
     if (_attachments.isEmpty && _urlController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -238,11 +255,14 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
     setState(() => _saving = true);
     try {
       final notes = _notesController.text.trim();
+      final projectId = _isOtherProject ? null : _selectedProjectId;
+      final projectName = _isOtherProject ? customProjectName : null;
       if (_isEdit) {
         await _storage.updateShopDrawing(
           drawingId: widget.existing!.id,
           userId: widget.currentUser.id,
-          projectId: _selectedProjectId!,
+          projectId: projectId,
+          projectName: projectName,
           notes: notes,
           attachments: _attachmentsPayload(),
           externalUrl: externalUrl,
@@ -250,7 +270,8 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
       } else {
         await _storage.createShopDrawing(
           userId: widget.currentUser.id,
-          projectId: _selectedProjectId!,
+          projectId: projectId,
+          projectName: projectName,
           notes: notes.isEmpty ? null : notes,
           attachments: _attachmentsPayload(),
           documentType: widget.documentType,
@@ -271,6 +292,7 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final customProjectName = _customProjectNameController.text.trim();
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEdit ? 'تعديل $_typeLabel' : 'رفع $_typeLabel'),
@@ -294,21 +316,50 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
                   labelText: 'المشروع *',
                   border: OutlineInputBorder(),
                 ),
-                items: _projects
-                    .map(
-                      (p) => DropdownMenuItem(
-                        value: p.id,
-                        child: Text(
-                          p.name,
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
+                items: [
+                  ..._projects.map(
+                    (p) => DropdownMenuItem(
+                      value: p.id,
+                      child: Text(
+                        p.name,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
-                    )
-                    .toList(),
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: shopDrawingOtherProjectDropdownValue,
+                    child: Text(
+                      _isOtherProject && customProjectName.isNotEmpty
+                          ? '$shopDrawingOtherProjectDropdownLabel ($customProjectName)'
+                          : shopDrawingOtherProjectDropdownLabel,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                  ),
+                ],
                 onChanged: (v) => setState(() => _selectedProjectId = v),
                 validator: (v) => v == null ? 'المشروع مطلوب' : null,
               ),
+            if (_isOtherProject) ...[
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _customProjectNameController,
+                decoration: const InputDecoration(
+                  labelText: 'اسم المشروع *',
+                  hintText: 'اكتب اسم المشروع يدوياً',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (_) => setState(() {}),
+                validator: (v) {
+                  if (!_isOtherProject) return null;
+                  if (v == null || v.trim().isEmpty) {
+                    return 'اسم المشروع مطلوب';
+                  }
+                  return null;
+                },
+              ),
+            ],
             const SizedBox(height: 16),
             TextFormField(
               controller: _notesController,

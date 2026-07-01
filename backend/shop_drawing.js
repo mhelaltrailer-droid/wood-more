@@ -310,8 +310,22 @@ async function shopDrawingLoadDetail(pool, drawingId) {
 
 async function shopDrawingResolveProject(pool, body) {
   const projectIdRaw = body.projectId ?? body.project_id;
-  const projectId = projectIdRaw != null ? parseInt(String(projectIdRaw), 10) : null;
-  if (projectId == null || Number.isNaN(projectId)) {
+  const manualName = String(body.projectName ?? body.project_name ?? '').trim();
+  const hasProjectId = projectIdRaw != null &&
+    projectIdRaw !== '' &&
+    projectIdRaw !== -1 &&
+    projectIdRaw !== 'other';
+
+  if (!hasProjectId) {
+    if (!manualName) return { error: 'project_name_required' };
+    return {
+      project_id: null,
+      project_name: manualName,
+    };
+  }
+
+  const projectId = parseInt(String(projectIdRaw), 10);
+  if (Number.isNaN(projectId)) {
     return { error: 'project_required' };
   }
   const pr = await pool.query('SELECT id, name FROM projects WHERE id = $1', [projectId]);

@@ -2237,7 +2237,8 @@ class ApiStorageService {
 
   Future<ShopDrawingModel> createShopDrawing({
     required int userId,
-    required int projectId,
+    int? projectId,
+    String? projectName,
     String? notes,
     required List<Map<String, dynamic>> attachments,
     required String documentType,
@@ -2249,7 +2250,9 @@ class ApiStorageService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'userId': userId,
-        'projectId': projectId,
+        if (projectId != null) 'projectId': projectId,
+        if (projectName != null && projectName.isNotEmpty)
+          'projectName': projectName,
         'documentType': documentType,
         if (notes != null && notes.isNotEmpty) 'notes': notes,
         'attachments': attachments,
@@ -2266,7 +2269,8 @@ class ApiStorageService {
   Future<ShopDrawingModel> updateShopDrawing({
     required int drawingId,
     required int userId,
-    required int projectId,
+    int? projectId,
+    String? projectName,
     String? notes,
     required List<Map<String, dynamic>> attachments,
     String? externalUrl,
@@ -2277,7 +2281,9 @@ class ApiStorageService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'userId': userId,
-        'projectId': projectId,
+        if (projectId != null) 'projectId': projectId,
+        if (projectName != null && projectName.isNotEmpty)
+          'projectName': projectName,
         if (notes != null) 'notes': notes,
         'attachments': attachments,
         'externalUrl': externalUrl,
