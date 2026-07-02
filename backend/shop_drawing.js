@@ -1115,6 +1115,26 @@ function registerShopDrawingRoutes(app, pool, deps) {
       res.status(e.status || 500).json({ error: String(e.message) });
     }
   });
+
+  // حذف إشعار الجرس من قائمة المستخدم نفسه فقط (مدير العمليات + مسؤول التطبيق)
+  app.delete('/shop-darwing-notification/:id', async (req, res) => {
+    try {
+      const notificationId = parseInt(String(req.params.id || ''), 10);
+      const userId = parseInt(String(req.body?.userId || req.query?.userId || ''), 10);
+      if (!Number.isInteger(notificationId) || !Number.isInteger(userId)) {
+        return res.status(400).json({ error: 'notification id and userId are required' });
+      }
+      await assertBellUser(userId);
+      const r = await pool.query(
+        'DELETE FROM shop_darwing_notifications WHERE id = $1 AND recipient_user_id = $2',
+        [notificationId, userId],
+      );
+      if (r.rowCount === 0) return res.status(404).json({ error: 'not found' });
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(e.status || 500).json({ error: String(e.message) });
+    }
+  });
 }
 
 module.exports = {

@@ -618,6 +618,17 @@ class ApiStorageService {
     });
   }
 
+  Future<void> deleteShopDarwingNotification({
+    required int notificationId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(
+      _path('shop-darwing-notification/$notificationId'),
+    ).replace(queryParameters: {'userId': '$userId'});
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
   Future<List<String>> getMaterials() async {
     final list = await _getList('materials');
     return sortMaterialsForDisplay(list.map((e) => e as String));

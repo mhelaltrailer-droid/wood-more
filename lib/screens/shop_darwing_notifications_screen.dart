@@ -128,6 +128,49 @@ class _ShopDarwingNotificationsScreenState
     }
   }
 
+  Future<bool> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('حذف الإشعار'),
+        content: const Text('هل تريد حذف هذا الإشعار من قائمتك؟'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('إلغاء'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
+  Future<bool> _deleteNotification(ShopDarwingNotificationModel item) async {
+    final storage = getStorage();
+    try {
+      await storage.deleteShopDarwingNotification(
+        notificationId: item.id,
+        userId: widget.currentUser.id,
+      );
+      if (mounted) {
+        setState(() => _items = _items.where((n) => n.id != item.id).toList());
+      }
+      return true;
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر حذف الإشعار')),
+        );
+      }
+      return false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -180,10 +223,19 @@ class _ShopDarwingNotificationsScreenState
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final item = _items[index];
-        return InkWell(
-          onTap: () => _onNotificationTap(item),
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
+        return Dismissible(
+          key: ValueKey('sd_notification_${item.id}'),
+          direction: DismissDirection.horizontal,
+          confirmDismiss: (_) async {
+            if (!await _confirmDelete()) return false;
+            return _deleteNotification(item);
+          },
+          background: _dismissBackground(Alignment.centerLeft),
+          secondaryBackground: _dismissBackground(Alignment.centerRight),
+          child: InkWell(
+            onTap: () => _onNotificationTap(item),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: item.isRead
@@ -239,9 +291,22 @@ class _ShopDarwingNotificationsScreenState
                 ),
               ],
             ),
+            ),
           ),
         );
       },
+    );
+  }
+
+  Widget _dismissBackground(Alignment alignment) {
+    return Container(
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: Colors.red.shade600,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Icon(Icons.delete_outline, color: Colors.white),
     );
   }
 }
