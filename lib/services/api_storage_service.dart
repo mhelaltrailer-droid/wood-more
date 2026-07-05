@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:http/http.dart' as http;
 import '../models/user_model.dart';
 import '../models/project_model.dart';
@@ -31,6 +33,7 @@ import '../models/postpone_fine_report_row_model.dart';
 import '../models/reports_sys_model.dart';
 import '../models/shop_drawing_model.dart';
 import '../models/app_release_info_model.dart';
+import '../utils/http_upload_progress.dart';
 import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
@@ -2427,25 +2430,92 @@ class ApiStorageService {
     return info.hasUpdate;
   }
 
-  Future<AppReleaseDownloadModel> downloadAppRelease(int userId) async {
-    final uri = Uri.parse(_path('app-release/download?userId=$userId'));
-    final r = await http.get(uri).timeout(const Duration(minutes: 10));
-    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'app-release/download');
-    final decoded = jsonDecode(r.body) as Map<String, dynamic>;
-    return AppReleaseDownloadModel.fromMap(decoded);
+  Future<AppReleaseDownloadResult> downloadAppReleaseChunked(
+    int userId, {
+    void Function(int receivedBytes, int totalBytes)? onProgress,
+  }) async {
+    final infoData = await _get('app-release/download-info?userId=$userId');
+    final info = AppReleaseDownloadInfoModel.fromMap(infoData);
+    if (!info.hasRelease || info.totalChunks <= 0) {
+      throw Exception('No release available');
+    }
+
+    final buffer = BytesBuilder(copy: false);
+    var received = 0;
+
+    for (var chunkIndex = 0; chunkIndex < info.totalChunks; chunkIndex++) {
+      final uri = Uri.parse(
+        _path(
+          'app-release/download-chunk?userId=$userId&chunkIndex=$chunkIndex',
+        ),
+      );
+      final response = await http.get(uri).timeout(const Duration(minutes: 3));
+      if (response.statusCode >= 400) {
+        throw _apiHttpException(response, path: 'app-release/download-chunk');
+      }
+      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+      var chunkData = (decoded['chunkData'] as String? ?? '').trim();
+      if (chunkData.startsWith('data:')) {
+        final comma = chunkData.indexOf(',');
+        if (comma >= 0) chunkData = chunkData.substring(comma + 1);
+      }
+      if (chunkData.isEmpty) {
+        throw Exception('Empty chunk $chunkIndex');
+      }
+      final chunkBytes = base64Decode(chunkData);
+      buffer.add(chunkBytes);
+      received += chunkBytes.length;
+      onProgress?.call(received, info.sizeBytes);
+    }
+
+    return AppReleaseDownloadResult(
+      fileName: info.fileName,
+      bytes: buffer.toBytes(),
+    );
+  }
+
+  Future<String> _encodeBase64WithProgress(
+    List<int> bytes,
+    void Function(double fraction)? onEncodeProgress,
+  ) async {
+    const chunkSize = 1024 * 1024 * 3;
+    final sb = StringBuffer();
+    for (var i = 0; i < bytes.length; i += chunkSize) {
+      final end = i + chunkSize < bytes.length ? i + chunkSize : bytes.length;
+      sb.write(base64Encode(bytes.sublist(i, end)));
+      onEncodeProgress?.call(end / bytes.length);
+      await Future<void>.delayed(Duration.zero);
+    }
+    return sb.toString();
   }
 
   Future<void> uploadAppRelease({
     required String requesterEmail,
     required String versionLabel,
     required String fileName,
-    required String fileDataBase64,
+    required List<int> fileBytes,
+    void Function(double progress)? onProgress,
   }) async {
-    await _postVoid('app-release/upload', {
-      'requesterEmail': requesterEmail.trim().toLowerCase(),
-      'versionLabel': versionLabel.trim(),
-      'fileName': fileName.trim(),
-      'fileData': fileDataBase64.trim(),
-    });
+    onProgress?.call(0);
+    final fileDataBase64 = await _encodeBase64WithProgress(
+      fileBytes,
+      (fraction) => onProgress?.call(fraction * 0.15),
+    );
+    final uri = Uri.parse(_path('app-release/upload'));
+    await postJsonWithProgress(
+      uri: uri,
+      body: {
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
+        'versionLabel': versionLabel.trim(),
+        'fileName': fileName.trim(),
+        'fileData': fileDataBase64.trim(),
+      },
+      onProgress: (sent, total) {
+        if (total <= 0) return;
+        onProgress?.call(0.15 + (0.85 * sent / total));
+      },
+      timeout: const Duration(minutes: 15),
+    );
+    onProgress?.call(1);
   }
 }

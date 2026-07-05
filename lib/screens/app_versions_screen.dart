@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -30,6 +28,9 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
   bool _loading = true;
   bool _downloading = false;
   bool _uploading = false;
+  double? _uploadProgress;
+  double? _downloadProgress;
+  String? _transferStatus;
   String? _error;
 
   bool get _usesApi => getStorage() is ApiStorageService;
@@ -97,6 +98,22 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
     });
   }
 
+  void _setTransferProgress({
+    required bool uploading,
+    required double? progress,
+    String? status,
+  }) {
+    if (!mounted) return;
+    setState(() {
+      if (uploading) {
+        _uploadProgress = progress;
+      } else {
+        _downloadProgress = progress;
+      }
+      _transferStatus = status;
+    });
+  }
+
   Future<void> _uploadRelease() async {
     if (!_canUpload) return;
     final versionLabel = _versionController.text.trim();
@@ -112,20 +129,37 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
       );
       return;
     }
-    setState(() => _uploading = true);
+    setState(() {
+      _uploading = true;
+      _uploadProgress = 0;
+      _transferStatus = 'جاري تجهيز الملف...';
+    });
     try {
       final storage = getStorage() as ApiStorageService;
       await storage.uploadAppRelease(
         requesterEmail: widget.currentUser.email,
         versionLabel: versionLabel,
         fileName: _pickedFileName ?? 'app-release.apk',
-        fileDataBase64: base64Encode(_pickedBytes!),
+        fileBytes: _pickedBytes!,
+        onProgress: (progress) {
+          final pct = (progress * 100).round();
+          final phase = progress < 0.15
+              ? 'جاري تجهيز الملف...'
+              : 'جاري الرفع إلى الخادم...';
+          _setTransferProgress(
+            uploading: true,
+            progress: progress,
+            status: '$phase $pct%',
+          );
+        },
       );
       if (!mounted) return;
       setState(() {
         _pickedBytes = null;
         _pickedFileName = null;
         _versionController.clear();
+        _uploadProgress = null;
+        _transferStatus = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم رفع النسخة الجديدة وحذف النسخة السابقة')),
@@ -137,30 +171,51 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
         SnackBar(content: Text('فشل الرفع: $e')),
       );
     } finally {
-      if (mounted) setState(() => _uploading = false);
+      if (mounted) {
+        setState(() {
+          _uploading = false;
+          _uploadProgress = null;
+          _transferStatus = null;
+        });
+      }
     }
   }
 
   Future<void> _downloadAndUpdate() async {
     if (!_usesApi || _releaseInfo?.hasRelease != true) return;
-    setState(() => _downloading = true);
+    setState(() {
+      _downloading = true;
+      _downloadProgress = 0;
+      _transferStatus = 'جاري التنزيل... 0%';
+    });
     try {
       final storage = getStorage() as ApiStorageService;
-      final payload = await storage.downloadAppRelease(widget.currentUser.id);
-      var fileData = payload.fileData.trim();
-      if (fileData.startsWith('data:')) {
-        final comma = fileData.indexOf(',');
-        if (comma >= 0) fileData = fileData.substring(comma + 1);
-      }
-      final bytes = base64Decode(fileData);
+      final payload = await storage.downloadAppReleaseChunked(
+        widget.currentUser.id,
+        onProgress: (received, total) {
+          final progress = total > 0 ? received / total : 0.0;
+          final pct = (progress * 100).round();
+          _setTransferProgress(
+            uploading: false,
+            progress: progress,
+            status:
+                'جاري التنزيل... $pct% (${_formatBytes(received)} / ${_formatBytes(total)})',
+          );
+        },
+      );
+      _setTransferProgress(
+        uploading: false,
+        progress: 1,
+        status: 'جاري حفظ الملف...',
+      );
       if (kIsWeb) {
         await triggerBrowserDownload(
-          bytes: bytes,
+          bytes: payload.bytes,
           fileName: payload.fileName,
         );
       } else {
         final openError = await saveAndOpenAppRelease(
-          bytes: bytes,
+          bytes: payload.bytes,
           fileName: payload.fileName,
         );
         if (openError != null && mounted) {
@@ -186,7 +241,13 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
         SnackBar(content: Text('فشل التنزيل: $e')),
       );
     } finally {
-      if (mounted) setState(() => _downloading = false);
+      if (mounted) {
+        setState(() {
+          _downloading = false;
+          _downloadProgress = null;
+          _transferStatus = null;
+        });
+      }
     }
   }
 
@@ -196,6 +257,38 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
       return '${(bytes / 1024).toStringAsFixed(1)} KB';
     }
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  Widget _buildProgressIndicator({
+    required double? progress,
+    required String? status,
+  }) {
+    if (progress == null) return const SizedBox.shrink();
+    final clamped = progress.clamp(0.0, 1.0).toDouble();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LinearProgressIndicator(
+            value: progress >= 1 ? null : clamped,
+            minHeight: 8,
+            backgroundColor: Colors.grey.shade200,
+            color: const Color(0xFF1B5E20),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            status ?? '${(progress * 100).round()}%',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey.shade700,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -248,6 +341,7 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
                             const SizedBox(height: 12),
                             TextField(
                               controller: _versionController,
+                              enabled: !_uploading,
                               decoration: const InputDecoration(
                                 labelText: 'رقم الإصدار',
                                 hintText: 'V.10',
@@ -286,6 +380,11 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
                                 _uploading ? 'جاري الرفع...' : 'رفع النسخة',
                               ),
                             ),
+                            if (_uploading)
+                              _buildProgressIndicator(
+                                progress: _uploadProgress,
+                                status: _transferStatus,
+                              ),
                             const SizedBox(height: 8),
                             Text(
                               'عند اكتمال الرفع تُحذف النسخة القديمة تلقائياً ويظهر تنبيه التحديث لمن لم يحمّل النسخة الجديدة.',
@@ -352,6 +451,11 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
                             const ListTile(
                               leading: Icon(Icons.info_outline),
                               title: Text('لا توجد نسخة محدثة على الخادم بعد'),
+                            ),
+                          if (_downloading)
+                            _buildProgressIndicator(
+                              progress: _downloadProgress,
+                              status: _transferStatus,
                             ),
                           if (kIsWeb && info?.hasRelease == true)
                             Padding(

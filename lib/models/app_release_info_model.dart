@@ -65,3 +65,45 @@ class AppReleaseDownloadModel {
     );
   }
 }
+
+class AppReleaseDownloadInfoModel {
+  final bool hasRelease;
+  final int releaseId;
+  final String versionLabel;
+  final String fileName;
+  final int sizeBytes;
+  final int chunkSize;
+  final int totalChunks;
+
+  const AppReleaseDownloadInfoModel({
+    required this.hasRelease,
+    required this.releaseId,
+    required this.versionLabel,
+    required this.fileName,
+    required this.sizeBytes,
+    required this.chunkSize,
+    required this.totalChunks,
+  });
+
+  factory AppReleaseDownloadInfoModel.fromMap(Map<String, dynamic> map) {
+    return AppReleaseDownloadInfoModel(
+      hasRelease: map['hasRelease'] == true,
+      releaseId: (map['releaseId'] as num?)?.toInt() ?? 0,
+      versionLabel: map['versionLabel'] as String? ?? '',
+      fileName: map['fileName'] as String? ?? 'app-release.apk',
+      sizeBytes: (map['sizeBytes'] as num?)?.toInt() ?? 0,
+      chunkSize: (map['chunkSize'] as num?)?.toInt() ?? 0,
+      totalChunks: (map['totalChunks'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class AppReleaseDownloadResult {
+  final String fileName;
+  final List<int> bytes;
+
+  const AppReleaseDownloadResult({
+    required this.fileName,
+    required this.bytes,
+  });
+}
