@@ -147,6 +147,17 @@ async function ensureNotificationsTable() {
 }
 
 const APP_RELEASE_MAX_BYTES = 100 * 1024 * 1024;
+const APP_RELEASE_CHUNK_BYTES = 4 * 1024 * 1024;
+
+async function fetchLatestAppReleaseMeta() {
+  const r = await pool.query(
+    `SELECT id, version_label, file_name, size_bytes
+     FROM app_releases
+     ORDER BY version_code DESC, id DESC
+     LIMIT 1`,
+  );
+  return r.rows.length > 0 ? r.rows[0] : null;
+}
 
 function parseAppVersionCode(versionLabel) {
   const digits = String(versionLabel || '').match(/\d+/g);
@@ -535,15 +546,18 @@ async function ensureWithdrawalRequestsTable() {
 function withdrawalFormatSubmittedAt(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
+  const tz = { timeZone: 'Africa/Cairo' };
   const date = d.toLocaleDateString('ar-EG', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
+    ...tz,
   });
   const time = d.toLocaleTimeString('ar-EG', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
+    ...tz,
   });
   return `${date} — ${time}`;
 }
@@ -5894,23 +5908,125 @@ app.get('/app-release/latest', async (req, res) => {
   }
 });
 
+app.get('/app-release/download-info', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId || ''), 10);
+    const row = await fetchLatestAppReleaseMeta();
+    if (!row) {
+      return res.json({ hasRelease: false });
+    }
+    const releaseId = parseInt(row.id, 10);
+    const sizeBytes = parseInt(row.size_bytes, 10);
+    const totalChunks = Math.max(1, Math.ceil(sizeBytes / APP_RELEASE_CHUNK_BYTES));
+    let hasUpdate = true;
+    if (Number.isInteger(userId)) {
+      const dl = await pool.query(
+        'SELECT 1 FROM app_release_downloads WHERE user_id = $1 AND release_id = $2 LIMIT 1',
+        [userId, releaseId],
+      );
+      hasUpdate = dl.rows.length === 0;
+    }
+    res.json({
+      hasRelease: true,
+      hasUpdate,
+      releaseId,
+      versionLabel: row.version_label,
+      fileName: row.file_name,
+      sizeBytes,
+      chunkSize: APP_RELEASE_CHUNK_BYTES,
+      totalChunks,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/app-release/download-chunk', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId || ''), 10);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    const chunkIndex = parseInt(String(req.query.chunkIndex ?? ''), 10);
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
+      return res.status(400).json({ error: 'chunkIndex is required' });
+    }
+    const row = await fetchLatestAppReleaseMeta();
+    if (!row) {
+      return res.status(404).json({ error: 'No release available' });
+    }
+    const releaseId = parseInt(row.id, 10);
+    const sizeBytes = parseInt(row.size_bytes, 10);
+    const totalChunks = Math.max(1, Math.ceil(sizeBytes / APP_RELEASE_CHUNK_BYTES));
+    if (chunkIndex >= totalChunks) {
+      return res.status(400).json({ error: 'chunkIndex out of range' });
+    }
+    const byteOffset = chunkIndex * APP_RELEASE_CHUNK_BYTES;
+    const chunkByteSize = Math.min(APP_RELEASE_CHUNK_BYTES, sizeBytes - byteOffset);
+    const pgOffset = byteOffset + 1;
+    const chunkR = await pool.query(
+      `SELECT encode(
+         substring(decode(file_data, 'base64') FROM $1 FOR $2),
+         'base64'
+       ) AS chunk_data
+       FROM app_releases
+       WHERE id = $3`,
+      [pgOffset, chunkByteSize, releaseId],
+    );
+    const chunkData = chunkR.rows[0]?.chunk_data ?? '';
+    const isLast = chunkIndex === totalChunks - 1;
+    if (isLast) {
+      const now = new Date().toISOString();
+      await pool.query(
+        `INSERT INTO app_release_downloads (user_id, release_id, downloaded_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, release_id) DO UPDATE SET downloaded_at = EXCLUDED.downloaded_at`,
+        [userId, releaseId, now],
+      );
+    }
+    res.json({
+      releaseId,
+      chunkIndex,
+      totalChunks,
+      chunkByteSize,
+      isLast,
+      chunkData,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 app.get('/app-release/download', async (req, res) => {
   try {
     const userId = parseInt(String(req.query.userId || ''), 10);
     if (!Number.isInteger(userId)) {
       return res.status(400).json({ error: 'userId is required' });
     }
+    const row = await fetchLatestAppReleaseMeta();
+    if (!row) {
+      return res.status(404).json({ error: 'No release available' });
+    }
+    const sizeBytes = parseInt(row.size_bytes, 10);
+    if (sizeBytes > APP_RELEASE_CHUNK_BYTES) {
+      return res.status(400).json({
+        error: 'Release too large for single download; use /app-release/download-chunk',
+        chunkSize: APP_RELEASE_CHUNK_BYTES,
+        useChunked: true,
+      });
+    }
     const r = await pool.query(
       `SELECT id, version_label, file_name, file_data, size_bytes
        FROM app_releases
-       ORDER BY version_code DESC, id DESC
+       WHERE id = $1
        LIMIT 1`,
+      [parseInt(row.id, 10)],
     );
     if (r.rows.length === 0) {
       return res.status(404).json({ error: 'No release available' });
     }
-    const row = r.rows[0];
-    const releaseId = parseInt(row.id, 10);
+    const full = r.rows[0];
+    const releaseId = parseInt(full.id, 10);
     const now = new Date().toISOString();
     await pool.query(
       `INSERT INTO app_release_downloads (user_id, release_id, downloaded_at)
@@ -5920,10 +6036,10 @@ app.get('/app-release/download', async (req, res) => {
     );
     res.json({
       releaseId,
-      versionLabel: row.version_label,
-      fileName: row.file_name,
-      sizeBytes: parseInt(row.size_bytes, 10),
-      fileData: row.file_data,
+      versionLabel: full.version_label,
+      fileName: full.file_name,
+      sizeBytes: parseInt(full.size_bytes, 10),
+      fileData: full.file_data,
     });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
