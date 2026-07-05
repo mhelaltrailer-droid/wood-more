@@ -12,7 +12,7 @@ const { Pool } = require('pg');
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '30mb' }));
+app.use(express.json({ limit: '120mb' }));
 const PRIMARY_APP_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 
 async function ensureActivityLogsTable() {
@@ -143,6 +143,46 @@ async function ensureNotificationsTable() {
     console.log('ensureNotificationsTable: ok');
   } catch (e) {
     console.warn('ensureNotificationsTable:', e.message);
+  }
+}
+
+const APP_RELEASE_MAX_BYTES = 100 * 1024 * 1024;
+
+function parseAppVersionCode(versionLabel) {
+  const digits = String(versionLabel || '').match(/\d+/g);
+  if (!digits || digits.length === 0) return 0;
+  const n = parseInt(digits.join(''), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function ensureAppReleaseTables() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_releases (
+        id SERIAL PRIMARY KEY,
+        version_label TEXT NOT NULL,
+        version_code INTEGER NOT NULL,
+        file_name TEXT NOT NULL,
+        file_data TEXT NOT NULL,
+        size_bytes BIGINT NOT NULL,
+        uploaded_by_email TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_release_downloads (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        release_id INTEGER NOT NULL REFERENCES app_releases(id) ON DELETE CASCADE,
+        downloaded_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, release_id)
+      )
+    `);
+    await pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_app_release_downloads_release ON app_release_downloads(release_id)',
+    ).catch(() => {});
+    console.log('ensureAppReleaseTables: ok');
+  } catch (e) {
+    console.warn('ensureAppReleaseTables:', e.message);
   }
 }
 
@@ -5798,6 +5838,143 @@ app.get('/postpone-reasons', async (req, res) => {
   }
 });
 
+app.get('/app-release/latest', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId || ''), 10);
+    const r = await pool.query(
+      `SELECT id, version_label, version_code, file_name, size_bytes, uploaded_by_email, created_at
+       FROM app_releases
+       ORDER BY version_code DESC, id DESC
+       LIMIT 1`,
+    );
+    if (r.rows.length === 0) {
+      return res.json({ hasRelease: false, hasUpdate: false });
+    }
+    const row = r.rows[0];
+    const releaseId = parseInt(row.id, 10);
+    let hasUpdate = true;
+    if (Number.isInteger(userId)) {
+      const dl = await pool.query(
+        'SELECT 1 FROM app_release_downloads WHERE user_id = $1 AND release_id = $2 LIMIT 1',
+        [userId, releaseId],
+      );
+      hasUpdate = dl.rows.length === 0;
+    }
+    res.json({
+      hasRelease: true,
+      hasUpdate,
+      releaseId,
+      versionLabel: row.version_label,
+      versionCode: parseInt(row.version_code, 10),
+      fileName: row.file_name,
+      sizeBytes: parseInt(row.size_bytes, 10),
+      uploadedByEmail: row.uploaded_by_email,
+      createdAt: row.created_at,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/app-release/download', async (req, res) => {
+  try {
+    const userId = parseInt(String(req.query.userId || ''), 10);
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    const r = await pool.query(
+      `SELECT id, version_label, file_name, file_data, size_bytes
+       FROM app_releases
+       ORDER BY version_code DESC, id DESC
+       LIMIT 1`,
+    );
+    if (r.rows.length === 0) {
+      return res.status(404).json({ error: 'No release available' });
+    }
+    const row = r.rows[0];
+    const releaseId = parseInt(row.id, 10);
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO app_release_downloads (user_id, release_id, downloaded_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, release_id) DO UPDATE SET downloaded_at = EXCLUDED.downloaded_at`,
+      [userId, releaseId, now],
+    );
+    res.json({
+      releaseId,
+      versionLabel: row.version_label,
+      fileName: row.file_name,
+      sizeBytes: parseInt(row.size_bytes, 10),
+      fileData: row.file_data,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.post('/app-release/upload', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const requesterEmail = String(b.requesterEmail ?? b.requester_email ?? '')
+      .trim()
+      .toLowerCase();
+    if (requesterEmail !== PRIMARY_APP_ADMIN_EMAIL) {
+      return res.status(403).json({ error: 'غير مصرح برفع نسخ التطبيق' });
+    }
+    const versionLabel = String(b.versionLabel ?? b.version_label ?? '').trim();
+    if (!versionLabel) {
+      return res.status(400).json({ error: 'versionLabel is required (مثل V.10)' });
+    }
+    const versionCode = parseAppVersionCode(versionLabel);
+    if (versionCode <= 0) {
+      return res.status(400).json({ error: 'صيغة الإصدار غير صالحة (مثل V.10)' });
+    }
+    const fileName = String(b.fileName ?? b.file_name ?? '').trim();
+    let fileData = String(b.fileData ?? b.file_data ?? '').trim();
+    if (!fileName.toLowerCase().endsWith('.apk')) {
+      return res.status(400).json({ error: 'يجب رفع ملف APK فقط' });
+    }
+    if (!fileData) {
+      return res.status(400).json({ error: 'fileData is required' });
+    }
+    if (fileData.startsWith('data:')) {
+      const comma = fileData.indexOf(',');
+      if (comma >= 0) fileData = fileData.slice(comma + 1);
+    }
+    let sizeBytes = 0;
+    try {
+      sizeBytes = Buffer.from(fileData, 'base64').length;
+    } catch (_) {
+      return res.status(400).json({ error: 'fileData must be valid base64' });
+    }
+    if (sizeBytes <= 0) {
+      return res.status(400).json({ error: 'ملف APK فارغ' });
+    }
+    if (sizeBytes > APP_RELEASE_MAX_BYTES) {
+      return res.status(400).json({ error: 'حجم الملف يتجاوز الحد المسموح (100 ميجا)' });
+    }
+    const now = new Date().toISOString();
+    await pool.query('DELETE FROM app_release_downloads');
+    await pool.query('DELETE FROM app_releases');
+    const ins = await pool.query(
+      `INSERT INTO app_releases
+        (version_label, version_code, file_name, file_data, size_bytes, uploaded_by_email, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
+      [versionLabel, versionCode, fileName, fileData, sizeBytes, requesterEmail, now],
+    );
+    res.json({
+      ok: true,
+      releaseId: parseInt(ins.rows[0].id, 10),
+      versionLabel,
+      versionCode,
+      sizeBytes,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 const PORT = parseInt(process.env.PORT || '3000', 10);
 registerShopDrawingRoutes(app, pool, { runNotificationSafely });
 ensurePasswordColumn()
@@ -5812,6 +5989,7 @@ ensurePasswordColumn()
   .then(() => ensurePostponeReasonsTable())
   .then(() => ensureNotificationsTable())
   .then(() => ensureShopDarwingNotificationsTable())
+  .then(() => ensureAppReleaseTables())
   .then(() => ensureShopDrawingTables(pool))
   .then(() => ensureIrMirUploadsTable())
   .then(() => ensureMsSdTables())

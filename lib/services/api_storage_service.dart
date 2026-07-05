@@ -30,6 +30,7 @@ import '../models/pending_postpone_fine_action_model.dart';
 import '../models/postpone_fine_report_row_model.dart';
 import '../models/reports_sys_model.dart';
 import '../models/shop_drawing_model.dart';
+import '../models/app_release_info_model.dart';
 import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
@@ -2398,6 +2399,42 @@ class ApiStorageService {
   }) async {
     await _put('shop-drawing/module-notifications/$notificationId/read', {
       'userId': userId,
+    });
+  }
+
+  Future<AppReleaseInfoModel> getAppReleaseLatest(int userId) async {
+    try {
+      final data = await _get('app-release/latest?userId=$userId');
+      return AppReleaseInfoModel.fromMap(data);
+    } catch (_) {
+      return AppReleaseInfoModel.none();
+    }
+  }
+
+  Future<bool> hasAppReleaseUpdate(int userId) async {
+    final info = await getAppReleaseLatest(userId);
+    return info.hasUpdate;
+  }
+
+  Future<AppReleaseDownloadModel> downloadAppRelease(int userId) async {
+    final uri = Uri.parse(_path('app-release/download?userId=$userId'));
+    final r = await http.get(uri).timeout(const Duration(minutes: 10));
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'app-release/download');
+    final decoded = jsonDecode(r.body) as Map<String, dynamic>;
+    return AppReleaseDownloadModel.fromMap(decoded);
+  }
+
+  Future<void> uploadAppRelease({
+    required String requesterEmail,
+    required String versionLabel,
+    required String fileName,
+    required String fileDataBase64,
+  }) async {
+    await _postVoid('app-release/upload', {
+      'requesterEmail': requesterEmail.trim().toLowerCase(),
+      'versionLabel': versionLabel.trim(),
+      'fileName': fileName.trim(),
+      'fileData': fileDataBase64.trim(),
     });
   }
 }

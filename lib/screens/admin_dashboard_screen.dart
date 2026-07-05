@@ -15,6 +15,7 @@ import 'admin_warehouse_withdraw_screen.dart';
 import 'admin_units_screen.dart';
 import 'admin_building_materials_screen.dart';
 import 'admin_cutlists_screen.dart';
+import 'app_versions_screen.dart';
 import 'worker_hours_report_screen.dart';
 import 'home_screen.dart';
 
@@ -81,6 +82,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final items = <_Item>[
+      if (widget.currentUser.canManageAppVersions)
+        _Item(
+          'Versions',
+          'رفع نسخة APK محدثة وإدارة تحديثات التطبيق لجميع المستخدمين',
+          Icons.system_update_alt,
+          () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AppVersionsScreen(currentUser: widget.currentUser),
+            ),
+          ),
+        ),
       _Item('إدارة المستخدمين', 'إضافة وتعديل وحذف المستخدمين والأدوار', Icons.people, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminUsersScreen(admin: widget.currentUser)))),
       _Item('إدارة المشاريع', 'إضافة وتعديل وحذف المشاريع', Icons.business, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminProjectsScreen(admin: widget.currentUser)))),
       _Item('إدارة المناطق (زون)', 'المناطق داخل كل مشروع', Icons.map, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminZonesScreen(admin: widget.currentUser)))),

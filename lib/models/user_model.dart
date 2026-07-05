@@ -84,6 +84,10 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   bool get canActOnWithdrawalRequests =>
       role == 'site_engineer_manager' || role == 'operation_manager';
 
+  /// رفع نسخ التطبيق (APK) وإدارة الإصدارات — البريد الأساسي فقط.
+  bool get canManageAppVersions =>
+      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+
   /// إدارة إلغاء سحب الخامات من المخزن (لوحة التحكم): مسؤول التطبيق بهذا البريد فقط.
   bool get canManageWarehouseWithdrawalReset =>
       isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';

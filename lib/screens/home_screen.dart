@@ -9,6 +9,7 @@ import '../core/route_observer.dart';
 import 'login_screen.dart';
 import 'notifications_screen.dart';
 import 'shop_darwing_notifications_screen.dart';
+import 'app_versions_screen.dart';
 import 'manager_withdrawal_requests_screen.dart';
 import 'reorderable_home_screen.dart';
 import '../widgets/shop_darwing_notification_app_bar_icon.dart';
@@ -32,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen>
   int _pendingWithdrawalRequestsCount = 0;
   int _pendingReportsSysCount = 0;
   int _pendingShopDrawingCount = 0;
+  bool _hasAppReleaseUpdate = false;
   Timer? _notificationsPollTimer;
   late final AnimationController _wrRotateController;
 
@@ -68,6 +70,7 @@ class _HomeScreenState extends State<HomeScreen>
     _loadPendingWithdrawalActionsCount();
     _loadPendingReportsSysCount();
     _loadPendingShopDrawingCount();
+    _loadAppReleaseUpdateBadge();
   }
 
   @override
@@ -83,6 +86,7 @@ class _HomeScreenState extends State<HomeScreen>
     _loadPendingWithdrawalActionsCount();
     _loadPendingReportsSysCount();
     _loadPendingShopDrawingCount();
+    _loadAppReleaseUpdateBadge();
     _startNotificationsPollingIfManager();
   }
 
@@ -227,10 +231,27 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Future<void> _loadAppReleaseUpdateBadge() async {
+    final storage = getStorage();
+    if (storage is! ApiStorageService) {
+      if (mounted) setState(() => _hasAppReleaseUpdate = false);
+      return;
+    }
+    try {
+      final hasUpdate = await storage.hasAppReleaseUpdate(widget.currentUser.id);
+      if (!mounted) return;
+      setState(() => _hasAppReleaseUpdate = hasUpdate);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _hasAppReleaseUpdate = false);
+    }
+  }
+
   void _startNotificationsPollingIfManager() {
     if (!_canUseNotifications &&
         !_canUseShopDarwingNotification &&
-        !widget.currentUser.canAccessShopDrawingHomeIcon) {
+        !widget.currentUser.canAccessShopDrawingHomeIcon &&
+        getStorage() is! ApiStorageService) {
       return;
     }
     _notificationsPollTimer?.cancel();
@@ -244,6 +265,7 @@ class _HomeScreenState extends State<HomeScreen>
         _loadPendingWithdrawalActionsCount();
         _loadPendingReportsSysCount();
         _loadPendingShopDrawingCount();
+        _loadAppReleaseUpdateBadge();
       },
     );
   }
@@ -392,6 +414,49 @@ class _HomeScreenState extends State<HomeScreen>
                               : '$_unreadNotificationsCount',
                           textAlign: TextAlign.center,
                           style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          if (getStorage() is ApiStorageService)
+            IconButton(
+              tooltip: 'Versions',
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => AppVersionsScreen(currentUser: currentUser),
+                  ),
+                );
+                await _loadAppReleaseUpdateBadge();
+              },
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.system_update_alt),
+                  if (_hasAppReleaseUpdate)
+                    Positioned(
+                      right: -6,
+                      top: -6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(minWidth: 18),
+                        child: const Text(
+                          '1',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
                             color: Colors.white,
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
