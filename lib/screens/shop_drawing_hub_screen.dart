@@ -9,6 +9,7 @@ import '../models/shop_drawing_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
+import '../utils/notification_delete_ui.dart';
 import '../utils/shop_drawing_status_timeline.dart';
 import 'shop_drawing_detail_screen.dart';
 import 'shop_drawing_form_screen.dart';
@@ -220,6 +221,31 @@ class _ShopDrawingHubScreenState extends State<ShopDrawingHubScreen>
       return;
     }
     await _loadModuleNotifications();
+  }
+
+  Future<bool> _deleteModuleNotification(ShopDarwingNotificationModel item) async {
+    if (_storage is! ApiStorageService) return false;
+    try {
+      await _storage.deleteShopDarwingNotification(
+        notificationId: item.id,
+        userId: widget.currentUser.id,
+      );
+      if (mounted) {
+        setState(() {
+          _moduleNotifications =
+              _moduleNotifications.where((n) => n.id != item.id).toList();
+          if (!item.isRead && _moduleUnread > 0) _moduleUnread--;
+        });
+      }
+      return true;
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر حذف الإشعار')),
+        );
+      }
+      return false;
+    }
   }
 
   @override
@@ -442,7 +468,17 @@ class _ShopDrawingHubScreenState extends State<ShopDrawingHubScreen>
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (context, index) {
           final item = _moduleNotifications[index];
-          return InkWell(
+          return Dismissible(
+            key: ValueKey('sd_module_notification_${item.id}'),
+            direction: DismissDirection.horizontal,
+            confirmDismiss: (_) async {
+              if (!await confirmDeleteNotification(context)) return false;
+              return _deleteModuleNotification(item);
+            },
+            background: notificationDismissDeleteBackground(Alignment.centerLeft),
+            secondaryBackground:
+                notificationDismissDeleteBackground(Alignment.centerRight),
+            child: InkWell(
             onTap: () => _onModuleNotificationTap(item),
             borderRadius: BorderRadius.circular(12),
             child: Container(
@@ -479,6 +515,7 @@ class _ShopDrawingHubScreenState extends State<ShopDrawingHubScreen>
                   ),
                 ],
               ),
+            ),
             ),
           );
         },

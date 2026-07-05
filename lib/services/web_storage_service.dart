@@ -884,6 +884,21 @@ class WebStorageService {
     await prefs.setString(_notificationsKey, jsonEncode(list));
   }
 
+  Future<void> deleteNotification({
+    required int notificationId,
+    required int userId,
+  }) async {
+    await _initData();
+    final prefs = await _prefs;
+    final raw = prefs.getString(_notificationsKey) ?? '[]';
+    final list = jsonDecode(raw) as List;
+    list.removeWhere((e) {
+      final map = Map<String, dynamic>.from(e as Map);
+      return map['id'] == notificationId && map['recipient_user_id'] == userId;
+    });
+    await prefs.setString(_notificationsKey, jsonEncode(list));
+  }
+
   Future<List<ShopDarwingNotificationModel>> getShopDarwingNotifications(
     int userId,
   ) async {

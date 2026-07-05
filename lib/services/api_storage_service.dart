@@ -590,6 +590,17 @@ class ApiStorageService {
     await _put('notifications/$notificationId/read', {'userId': userId});
   }
 
+  Future<void> deleteNotification({
+    required int notificationId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('notifications/$notificationId')).replace(
+      queryParameters: {'userId': '$userId'},
+    );
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
   Future<List<ShopDarwingNotificationModel>> getShopDarwingNotifications(
     int userId,
   ) async {

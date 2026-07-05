@@ -1240,6 +1240,18 @@ class DatabaseService {
     );
   }
 
+  Future<void> deleteNotification({
+    required int notificationId,
+    required int userId,
+  }) async {
+    final db = await database;
+    await db.delete(
+      'notifications',
+      where: 'id = ? AND recipient_user_id = ?',
+      whereArgs: [notificationId, userId],
+    );
+  }
+
   Future<List<ShopDarwingNotificationModel>> getShopDarwingNotifications(
     int userId,
   ) async {
@@ -1272,6 +1284,18 @@ class DatabaseService {
     await db.update(
       'shop_darwing_notifications',
       {'is_read': 1, 'read_at': DateTime.now().toIso8601String()},
+      where: 'id = ? AND recipient_user_id = ?',
+      whereArgs: [notificationId, userId],
+    );
+  }
+
+  Future<void> deleteShopDarwingNotification({
+    required int notificationId,
+    required int userId,
+  }) async {
+    final db = await database;
+    await db.delete(
+      'shop_darwing_notifications',
       where: 'id = ? AND recipient_user_id = ?',
       whereArgs: [notificationId, userId],
     );

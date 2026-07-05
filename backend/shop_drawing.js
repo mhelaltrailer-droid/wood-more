@@ -1116,7 +1116,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
     }
   });
 
-  // حذف إشعار الجرس من قائمة المستخدم نفسه فقط (مدير العمليات + مسؤول التطبيق)
+  // حذف إشعار من قائمة المستلم نفسه (جرس SD-PO أو تبويب الإشعارات داخل الوحدة)
   app.delete('/shop-darwing-notification/:id', async (req, res) => {
     try {
       const notificationId = parseInt(String(req.params.id || ''), 10);
@@ -1124,7 +1124,8 @@ function registerShopDrawingRoutes(app, pool, deps) {
       if (!Number.isInteger(notificationId) || !Number.isInteger(userId)) {
         return res.status(400).json({ error: 'notification id and userId are required' });
       }
-      await assertBellUser(userId);
+      const user = await shopDrawingGetUser(pool, userId);
+      if (!user) return res.status(404).json({ error: 'user not found' });
       const r = await pool.query(
         'DELETE FROM shop_darwing_notifications WHERE id = $1 AND recipient_user_id = $2',
         [notificationId, userId],

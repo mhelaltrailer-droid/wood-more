@@ -5,6 +5,7 @@ import '../models/user_model.dart';
 import '../models/notification_item_model.dart';
 import '../services/storage_service.dart';
 import '../services/api_storage_service.dart';
+import '../utils/notification_delete_ui.dart';
 import 'reports_sys_detail_screen.dart';
 import 'reports_sys_hub_screen.dart';
 
@@ -129,6 +130,27 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
+  Future<bool> _deleteNotification(NotificationItemModel item) async {
+    final storage = getStorage();
+    try {
+      await storage.deleteNotification(
+        notificationId: item.id,
+        userId: widget.currentUser.id,
+      );
+      if (mounted) {
+        setState(() => _items = _items.where((n) => n.id != item.id).toList());
+      }
+      return true;
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر حذف الإشعار')),
+        );
+      }
+      return false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -181,7 +203,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         final item = _items[index];
-        return InkWell(
+        return Dismissible(
+          key: ValueKey('notification_${item.id}'),
+          direction: DismissDirection.horizontal,
+          confirmDismiss: (_) async {
+            if (!await confirmDeleteNotification(context)) return false;
+            return _deleteNotification(item);
+          },
+          background: notificationDismissDeleteBackground(Alignment.centerLeft),
+          secondaryBackground:
+              notificationDismissDeleteBackground(Alignment.centerRight),
+          child: InkWell(
           onTap: () {
             if (item.eventType.startsWith('reports_sys_')) {
               _onNotificationTap(item);
@@ -246,6 +278,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ),
               ],
             ),
+          ),
           ),
         );
       },

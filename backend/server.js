@@ -2075,6 +2075,24 @@ app.put('/notifications/:id/read', async (req, res) => {
   }
 });
 
+app.delete('/notifications/:id', async (req, res) => {
+  try {
+    const notificationId = parseInt(String(req.params.id || ''), 10);
+    const userId = parseInt(String(req.body?.userId || req.query?.userId || ''), 10);
+    if (!Number.isInteger(notificationId) || !Number.isInteger(userId)) {
+      return res.status(400).json({ error: 'notification id and userId are required' });
+    }
+    const r = await pool.query(
+      'DELETE FROM notifications WHERE id = $1 AND recipient_user_id = $2',
+      [notificationId, userId],
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 app.get('/ir-mir/uploads', async (req, res) => {
   try {
     const projectId = parseInt(req.query.projectId ?? req.query.project_id ?? '', 10);

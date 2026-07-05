@@ -5,6 +5,7 @@ import '../models/user_model.dart';
 import '../models/shop_darwing_notification_model.dart';
 import '../services/storage_service.dart';
 import '../services/api_storage_service.dart';
+import '../utils/notification_delete_ui.dart';
 import '../widgets/shop_darwing_notification_app_bar_icon.dart';
 import 'shop_drawing_detail_screen.dart';
 
@@ -128,27 +129,7 @@ class _ShopDarwingNotificationsScreenState
     }
   }
 
-  Future<bool> _confirmDelete() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('حذف الإشعار'),
-        content: const Text('هل تريد حذف هذا الإشعار من قائمتك؟'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('إلغاء'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('حذف'),
-          ),
-        ],
-      ),
-    );
-    return confirmed ?? false;
-  }
+  Future<bool> _confirmDelete() => confirmDeleteNotification(context);
 
   Future<bool> _deleteNotification(ShopDarwingNotificationModel item) async {
     final storage = getStorage();
@@ -230,8 +211,9 @@ class _ShopDarwingNotificationsScreenState
             if (!await _confirmDelete()) return false;
             return _deleteNotification(item);
           },
-          background: _dismissBackground(Alignment.centerLeft),
-          secondaryBackground: _dismissBackground(Alignment.centerRight),
+          background: notificationDismissDeleteBackground(Alignment.centerLeft),
+          secondaryBackground:
+              notificationDismissDeleteBackground(Alignment.centerRight),
           child: InkWell(
             onTap: () => _onNotificationTap(item),
             borderRadius: BorderRadius.circular(12),
@@ -295,18 +277,6 @@ class _ShopDarwingNotificationsScreenState
           ),
         );
       },
-    );
-  }
-
-  Widget _dismissBackground(Alignment alignment) {
-    return Container(
-      alignment: alignment,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        color: Colors.red.shade600,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: const Icon(Icons.delete_outline, color: Colors.white),
     );
   }
 }
