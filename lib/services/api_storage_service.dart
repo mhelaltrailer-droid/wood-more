@@ -2430,6 +2430,15 @@ class ApiStorageService {
     return info.hasUpdate;
   }
 
+  String _normalizeBase64(String value) {
+    var data = value.trim();
+    if (data.startsWith('data:')) {
+      final comma = data.indexOf(',');
+      if (comma >= 0) data = data.substring(comma + 1);
+    }
+    return data.replaceAll(RegExp(r'\s+'), '');
+  }
+
   Future<AppReleaseDownloadResult> downloadAppReleaseChunked(
     int userId, {
     void Function(int receivedBytes, int totalBytes)? onProgress,
@@ -2454,15 +2463,12 @@ class ApiStorageService {
         throw _apiHttpException(response, path: 'app-release/download-chunk');
       }
       final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      var chunkData = (decoded['chunkData'] as String? ?? '').trim();
-      if (chunkData.startsWith('data:')) {
-        final comma = chunkData.indexOf(',');
-        if (comma >= 0) chunkData = chunkData.substring(comma + 1);
-      }
+      var chunkData = decoded['chunkData'] as String? ?? '';
+      chunkData = _normalizeBase64(chunkData);
       if (chunkData.isEmpty) {
         throw Exception('Empty chunk $chunkIndex');
       }
-      final chunkBytes = base64Decode(chunkData);
+      final chunkBytes = base64Decode(_normalizeBase64(chunkData));
       buffer.add(chunkBytes);
       received += chunkBytes.length;
       onProgress?.call(received, info.sizeBytes);

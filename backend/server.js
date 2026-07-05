@@ -5973,7 +5973,7 @@ app.get('/app-release/download-chunk', async (req, res) => {
        WHERE id = $3`,
       [pgOffset, chunkByteSize, releaseId],
     );
-    const chunkData = chunkR.rows[0]?.chunk_data ?? '';
+    const chunkData = String(chunkR.rows[0]?.chunk_data ?? '').replace(/\s/g, '');
     const isLast = chunkIndex === totalChunks - 1;
     if (isLast) {
       const now = new Date().toISOString();
