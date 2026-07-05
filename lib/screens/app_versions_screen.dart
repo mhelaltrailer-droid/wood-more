@@ -6,8 +6,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../models/app_release_info_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
+import '../services/pending_app_release_service.dart';
 import '../services/storage_service.dart';
 import '../utils/app_release_download.dart';
+import '../widgets/app_release_install_bottom_sheet.dart';
 
 /// شاشة إصدارات التطبيق — تحديث للمستخدمين ورفع APK للمسؤول الأساسي.
 class AppVersionsScreen extends StatefulWidget {
@@ -21,7 +23,9 @@ class AppVersionsScreen extends StatefulWidget {
 
 class _AppVersionsScreenState extends State<AppVersionsScreen> {
   final _versionController = TextEditingController();
+  final _pendingService = PendingAppReleaseService();
   AppReleaseInfoModel? _releaseInfo;
+  PendingAppRelease? _pendingInstall;
   String? _deviceVersion;
   String? _pickedFileName;
   List<int>? _pickedBytes;
@@ -40,6 +44,74 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
   void initState() {
     super.initState();
     _load();
+    _loadPendingInstall();
+  }
+
+  Future<void> _loadPendingInstall() async {
+    if (kIsWeb) return;
+    final pending = await _pendingService.load();
+    if (pending == null) {
+      if (mounted) setState(() => _pendingInstall = null);
+      return;
+    }
+    final exists = await appReleaseFileExists(pending.apkPath);
+    if (!exists) {
+      await _pendingService.clear();
+      if (mounted) setState(() => _pendingInstall = null);
+      return;
+    }
+    if (mounted) setState(() => _pendingInstall = pending);
+  }
+
+  Future<void> _clearPendingInstall() async {
+    await _pendingService.clear();
+    if (mounted) setState(() => _pendingInstall = null);
+  }
+
+  Future<void> _savePendingInstall({
+    required String apkPath,
+    required String versionLabel,
+    required String fileName,
+    required int sizeBytes,
+  }) async {
+    final pending = PendingAppRelease(
+      apkPath: apkPath,
+      versionLabel: versionLabel,
+      fileName: fileName,
+      sizeBytes: sizeBytes,
+    );
+    await _pendingService.save(pending);
+    if (mounted) setState(() => _pendingInstall = pending);
+  }
+
+  Future<String?> _openPendingInstaller() async {
+    final pending = _pendingInstall;
+    if (pending == null) return 'لا يوجد ملف محفوظ للتثبيت';
+    if (!await appReleaseFileExists(pending.apkPath)) {
+      await _clearPendingInstall();
+      return 'انتهت صلاحية الملف المحمّل — أعد التنزيل';
+    }
+    return openAppReleaseInstaller(pending.apkPath);
+  }
+
+  Future<void> _showInstallBottomSheet({
+    required String versionLabel,
+    required int sizeBytes,
+  }) async {
+    if (!mounted) return;
+    await AppReleaseInstallBottomSheet.show(
+      context,
+      versionLabel: versionLabel,
+      fileSizeLabel: _formatBytes(sizeBytes),
+      onInstallNow: _openPendingInstaller,
+      onVerifyUpdated: () async {
+        final updated = await appReleaseVersionMatchesLabel(versionLabel);
+        if (updated) await _clearPendingInstall();
+        if (mounted) await _load();
+        return updated;
+      },
+    );
+    await _loadPendingInstall();
   }
 
   @override
@@ -213,28 +285,32 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
           bytes: payload.bytes,
           fileName: payload.fileName,
         );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم تنزيل APK — ثبّته على جهاز Android'),
+          ),
+        );
       } else {
-        final openError = await saveAndOpenAppRelease(
+        final apkPath = await saveAppReleaseToFile(
           bytes: payload.bytes,
           fileName: payload.fileName,
         );
-        if (openError != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(openError)),
-          );
-        }
+        final versionLabel = _releaseInfo?.versionLabel ?? '—';
+        final sizeBytes = payload.bytes.length;
+        await _savePendingInstall(
+          apkPath: apkPath,
+          versionLabel: versionLabel,
+          fileName: payload.fileName,
+          sizeBytes: sizeBytes,
+        );
+        if (!mounted) return;
+        await _load();
+        await _showInstallBottomSheet(
+          versionLabel: versionLabel,
+          sizeBytes: sizeBytes,
+        );
       }
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            kIsWeb
-                ? 'تم تنزيل APK — ثبّته على جهاز Android'
-                : 'تم التنزيل — أكمل التثبيت من شاشة النظام',
-          ),
-        ),
-      );
-      await _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -324,6 +400,56 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
                         ),
                       ),
                     ),
+                  if (!kIsWeb && _pendingInstall != null)
+                    Card(
+                      color: Colors.orange.shade50,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.pending_actions,
+                                    color: Colors.orange.shade800),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'النسخة ${_pendingInstall!.versionLabel} جاهزة للتثبيت',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'تم تنزيل الملف (${_formatBytes(_pendingInstall!.sizeBytes)}) — أكمل التثبيت.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey.shade800,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.icon(
+                              onPressed: () => _showInstallBottomSheet(
+                                versionLabel: _pendingInstall!.versionLabel,
+                                sizeBytes: _pendingInstall!.sizeBytes,
+                              ),
+                              icon: const Icon(Icons.install_mobile),
+                              label: const Text('متابعة التثبيت'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF1B5E20),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (!kIsWeb && _pendingInstall != null)
+                    const SizedBox(height: 12),
                   if (_canUpload) ...[
                     Card(
                       child: Padding(
