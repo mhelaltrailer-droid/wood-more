@@ -1,3 +1,5 @@
+const { formatArDateTimeEgypt } = require('./egypt_local_time');
+
 const SHOP_DRAWING_PM_EMAIL = 'abdelrhmanellaithy828@gmail.com';
 const SHOP_DRAWING_PRIMARY_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 const SHOP_DRAWING_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -23,21 +25,7 @@ function shopDrawingAppendDocumentTypeFilter(sql, documentType, params) {
   return `${sql} AND document_type = $${params.length}`;
 }
 
-function shopDrawingFormatArDateTime(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const date = d.toLocaleDateString('ar-EG', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const time = d.toLocaleTimeString('ar-EG', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  });
-  return `${date} — ${time}`;
-}
+const shopDrawingFormatArDateTime = formatArDateTimeEgypt;
 
 async function ensureShopDrawingTables(pool) {
   await pool.query(`

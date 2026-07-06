@@ -1,4 +1,7 @@
 # Miscellaneous
+.gradle/
+.tmp/
+*.hprof
 *.class
 *.log
 *.pyc

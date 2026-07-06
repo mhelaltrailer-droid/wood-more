@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../models/user_model.dart';
 import '../models/shop_darwing_notification_model.dart';
 import '../services/storage_service.dart';
 import '../services/api_storage_service.dart';
 import '../utils/notification_delete_ui.dart';
+import '../utils/notification_time_display.dart';
 import '../widgets/shop_darwing_notification_app_bar_icon.dart';
 import 'shop_drawing_detail_screen.dart';
 
@@ -268,7 +268,7 @@ class _ShopDarwingNotificationsScreenState
                 Text(item.body),
                 const SizedBox(height: 6),
                 Text(
-                  DateFormat('yyyy/MM/dd hh:mm a', 'ar').format(item.createdAt),
+                  formatNotificationDateTime(item.createdAt),
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 ),
               ],

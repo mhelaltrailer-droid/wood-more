@@ -1,6 +1,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const { formatArDateTimeEgypt } = require('./egypt_local_time');
 const { splitSqlChunks } = require('./scripts/lib/xlsx_project_locations');
 const {
   ensureShopDrawingTables,
@@ -543,24 +544,7 @@ async function ensureWithdrawalRequestsTable() {
   }
 }
 
-function withdrawalFormatSubmittedAt(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const tz = { timeZone: 'Africa/Cairo' };
-  const date = d.toLocaleDateString('ar-EG', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    ...tz,
-  });
-  const time = d.toLocaleTimeString('ar-EG', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-    ...tz,
-  });
-  return `${date} — ${time}`;
-}
+const withdrawalFormatSubmittedAt = formatArDateTimeEgypt;
 
 async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
   const title = fields.title;

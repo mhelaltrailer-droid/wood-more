@@ -10,6 +10,7 @@ import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
 import '../utils/notification_delete_ui.dart';
+import '../utils/notification_time_display.dart';
 import '../utils/shop_drawing_status_timeline.dart';
 import 'shop_drawing_detail_screen.dart';
 import 'shop_drawing_form_screen.dart';
@@ -510,7 +511,7 @@ class _ShopDrawingHubScreenState extends State<ShopDrawingHubScreen>
                   Text(item.body),
                   const SizedBox(height: 4),
                   Text(
-                    fmt.format(item.createdAt),
+                    formatNotificationDateTimeCompact(item.createdAt),
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                   ),
                 ],
