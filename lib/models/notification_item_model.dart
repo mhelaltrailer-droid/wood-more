@@ -11,6 +11,9 @@ class NotificationItemModel {
   final DateTime createdAt;
   final bool isRead;
   final DateTime? readAt;
+  /// مرتبط بطلب سحب خامات — لمنع الحذف قبل اتخاذ إجراء من المدير.
+  final int? withdrawalRequestId;
+  final DateTime? actionTakenAt;
 
   const NotificationItemModel({
     required this.id,
@@ -25,7 +28,13 @@ class NotificationItemModel {
     required this.createdAt,
     required this.isRead,
     this.readAt,
+    this.withdrawalRequestId,
+    this.actionTakenAt,
   });
+
+  /// إشعار طلب سحب بانتظار موافقة/رفض من المستلم.
+  bool get isWithdrawalPendingAction =>
+      withdrawalRequestId != null && actionTakenAt == null;
 
   factory NotificationItemModel.fromMap(Map<String, dynamic> map) {
     DateTime parseDate(dynamic v) {
@@ -52,6 +61,11 @@ class NotificationItemModel {
       createdAt: parseDate(map['created_at']),
       isRead: (map['is_read'] == true) || (map['is_read'] == 1),
       readAt: parseDateOrNull(map['read_at']),
+      withdrawalRequestId: map['withdrawal_request_id'] as int? ??
+          int.tryParse(map['withdrawalRequestId']?.toString() ?? ''),
+      actionTakenAt: parseDateOrNull(
+        map['action_taken_at'] ?? map['actionTakenAt'],
+      ),
     );
   }
 
@@ -69,6 +83,8 @@ class NotificationItemModel {
       'created_at': createdAt.toIso8601String(),
       'is_read': isRead ? 1 : 0,
       'read_at': readAt?.toIso8601String(),
+      'withdrawal_request_id': withdrawalRequestId,
+      'action_taken_at': actionTakenAt?.toIso8601String(),
     };
   }
 }

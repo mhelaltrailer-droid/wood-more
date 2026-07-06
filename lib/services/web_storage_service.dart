@@ -892,6 +892,18 @@ class WebStorageService {
     final prefs = await _prefs;
     final raw = prefs.getString(_notificationsKey) ?? '[]';
     final list = jsonDecode(raw) as List;
+    for (final e in list) {
+      final map = Map<String, dynamic>.from(e as Map);
+      if (map['id'] != notificationId || map['recipient_user_id'] != userId) {
+        continue;
+      }
+      final wrId = map['withdrawal_request_id'];
+      final actionAt = map['action_taken_at'];
+      if (wrId != null && (actionAt == null || actionAt.toString().isEmpty)) {
+        throw Exception('action_required_before_delete');
+      }
+      break;
+    }
     list.removeWhere((e) {
       final map = Map<String, dynamic>.from(e as Map);
       return map['id'] == notificationId && map['recipient_user_id'] == userId;

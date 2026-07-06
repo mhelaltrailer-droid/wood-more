@@ -54,7 +54,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 36,
+      version: 37,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -415,6 +415,18 @@ class DatabaseService {
     if (oldVersion < 36) {
       await _createShopDarwingNotificationsTable(db);
     }
+    if (oldVersion < 37) {
+      try {
+        await db.execute(
+          'ALTER TABLE notifications ADD COLUMN withdrawal_request_id INTEGER',
+        );
+      } catch (_) {}
+      try {
+        await db.execute(
+          'ALTER TABLE notifications ADD COLUMN action_taken_at TEXT',
+        );
+      } catch (_) {}
+    }
   }
 
   Future<void> _trimMaterialsCatalog(Database db) async {
@@ -497,7 +509,9 @@ class DatabaseService {
         project_name TEXT,
         created_at TEXT NOT NULL,
         is_read INTEGER NOT NULL DEFAULT 0,
-        read_at TEXT
+        read_at TEXT,
+        withdrawal_request_id INTEGER,
+        action_taken_at TEXT
       )
     ''');
   }
@@ -1245,6 +1259,18 @@ class DatabaseService {
     required int userId,
   }) async {
     final db = await database;
+    final rows = await db.query(
+      'notifications',
+      columns: ['withdrawal_request_id', 'action_taken_at'],
+      where: 'id = ? AND recipient_user_id = ?',
+      whereArgs: [notificationId, userId],
+    );
+    if (rows.isEmpty) return;
+    final wrId = rows.first['withdrawal_request_id'];
+    final actionAt = rows.first['action_taken_at'];
+    if (wrId != null && (actionAt == null || actionAt.toString().isEmpty)) {
+      throw Exception('action_required_before_delete');
+    }
     await db.delete(
       'notifications',
       where: 'id = ? AND recipient_user_id = ?',
@@ -3411,6 +3437,8 @@ class DatabaseService {
     int? actorUserId,
     String? actorUserName,
     String? projectName,
+    int? withdrawalRequestId,
+    String? actionTakenAt,
   }) async {
     if (roles.isEmpty) return;
     final placeholders = List.filled(roles.length, '?').join(',');
@@ -3431,7 +3459,82 @@ class DatabaseService {
         'project_name': projectName,
         'created_at': now,
         'is_read': 0,
+        'withdrawal_request_id': withdrawalRequestId,
+        'action_taken_at': actionTakenAt,
       });
+    }
+  }
+
+  String _wrBuildSemNewRequestBody(
+    String engName,
+    String projectName,
+    String pathLabel,
+    int requestId,
+    String createdAtIso,
+  ) {
+    return 'طلب من "$engName" — مشروع "$projectName" — موقع: ${pathLabel.isEmpty ? '—' : pathLabel}\n'
+        'رقم الطلب: $requestId\n'
+        'تاريخ ووقت الإرسال: ${_formatWithdrawalSubmittedAt(createdAtIso)}';
+  }
+
+  String _wrBuildOmRequestBody(
+    String engName,
+    String projectName,
+    String pathLabel,
+    int requestId,
+    String createdAtIso,
+    String semApprovedAtIso,
+  ) {
+    return 'قام المهندس "$engName"\n'
+        'بطلب سحب — مشروع "$projectName" — موقع: ${pathLabel.isEmpty ? '—' : pathLabel}\n'
+        'رقم الطلب: $requestId\n'
+        'تاريخ ووقت الإرسال: ${_formatWithdrawalSubmittedAt(createdAtIso)}\n\n'
+        'وافق مدير المشروعات على الطلب — ${_formatWithdrawalSubmittedAt(semApprovedAtIso)}';
+  }
+
+  Future<void> _wrAppendAndMarkActionTaken(
+    Database db, {
+    required int withdrawalRequestId,
+    required String recipientRole,
+    required String appendLine,
+  }) async {
+    final now = DateTime.now().toIso8601String();
+    final rows = await db.query(
+      'notifications',
+      where:
+          'withdrawal_request_id = ? AND recipient_role = ? AND action_taken_at IS NULL',
+      whereArgs: [withdrawalRequestId, recipientRole],
+    );
+    for (final row in rows) {
+      final body = '${row['body']}\n$appendLine';
+      await db.update(
+        'notifications',
+        {'body': body, 'action_taken_at': now},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+    }
+  }
+
+  Future<void> _wrAppendToWithdrawalNotification(
+    Database db, {
+    required int withdrawalRequestId,
+    required String recipientRole,
+    required String appendLine,
+  }) async {
+    final rows = await db.query(
+      'notifications',
+      where: 'withdrawal_request_id = ? AND recipient_role = ?',
+      whereArgs: [withdrawalRequestId, recipientRole],
+    );
+    for (final row in rows) {
+      final body = '${row['body']}\n$appendLine';
+      await db.update(
+        'notifications',
+        {'body': body},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
     }
   }
 
@@ -3561,19 +3664,23 @@ class DatabaseService {
     });
     final p = await db.query('projects', where: 'id = ?', whereArgs: [projectId]);
     final projectName = p.isNotEmpty ? (p.first['name'] as String? ?? '') : '';
-    final bodyN =
-        'طلب من "$engineerUserName" — مشروع "$projectName" — موقع: ${locationPathLabel.isEmpty ? '—' : locationPathLabel}\n'
-        'رقم الطلب: $id\n'
-        'تاريخ ووقت الإرسال: ${_formatWithdrawalSubmittedAt(now)}';
+    final bodyN = _wrBuildSemNewRequestBody(
+      engineerUserName,
+      projectName,
+      locationPathLabel,
+      id,
+      now,
+    );
     await _wrNotifyRoles(
       db,
-      ['site_engineer_manager', 'operation_manager', 'app_admin'],
+      ['site_engineer_manager'],
       title: 'طلب سحب خامات',
       body: bodyN,
       eventType: 'withdrawal_request_new',
       actorUserId: engineerUserId,
       actorUserName: engineerUserName,
       projectName: projectName.isEmpty ? null : projectName,
+      withdrawalRequestId: id,
     );
     final row = await db.query('withdrawal_requests', where: 'id = ?', whereArgs: [id]);
     return _wrFromRow(row.first);
@@ -3589,7 +3696,7 @@ class DatabaseService {
     final clause = role == 'site_engineer_manager'
         ? "overall_status = 'pending' AND sem_status = 'pending' AND fulfilled_at IS NULL"
         : role == 'operation_manager'
-        ? "overall_status = 'pending' AND om_status = 'pending' AND fulfilled_at IS NULL"
+        ? "overall_status = 'pending' AND om_status = 'pending' AND sem_status = 'approved' AND fulfilled_at IS NULL"
         : null;
     if (clause == null) return 0;
     final v = Sqflite.firstIntValue(
@@ -3608,7 +3715,7 @@ class DatabaseService {
     final where = role == 'site_engineer_manager'
         ? "wr.overall_status = 'pending' AND wr.sem_status = 'pending' AND wr.fulfilled_at IS NULL"
         : role == 'operation_manager'
-        ? "wr.overall_status = 'pending' AND wr.om_status = 'pending' AND wr.fulfilled_at IS NULL"
+        ? "wr.overall_status = 'pending' AND wr.om_status = 'pending' AND wr.sem_status = 'approved' AND wr.fulfilled_at IS NULL"
         : null;
     if (where == null) return [];
     final rows = await db.rawQuery(
@@ -3672,18 +3779,17 @@ class DatabaseService {
           where: 'id = ?',
           whereArgs: [requestId],
         );
+        await _wrAppendAndMarkActionTaken(
+          db,
+          withdrawalRequestId: requestId,
+          recipientRole: 'site_engineer_manager',
+          appendLine:
+              'تم رفض الطلب — ${_formatWithdrawalSubmittedAt(now)}\nالسبب: ${reason.trim()}',
+        );
         await _wrNotifyUser(db, engId,
             title: 'رفض طلب سحب خامات',
             body: 'تم رفض طلبك بسبب: ${reason.trim()}',
             eventType: 'withdrawal_request_rejected',
-            actorUserId: managerUserId,
-            actorUserName: actorName,
-            projectName: projectName.isEmpty ? null : projectName);
-        await _wrNotifyRoles(db, ['operation_manager'],
-            title: 'طلب سحب خامات — مرفوض',
-            body:
-                'رُفض الطلب من ${UserModel.siteEngineerManagerRoleLabel}. السبب: ${reason.trim()}\nالمهندس: $engName — $pathLabel',
-            eventType: 'withdrawal_request_rejected_by_sem',
             actorUserId: managerUserId,
             actorUserName: actorName,
             projectName: projectName.isEmpty ? null : projectName);
@@ -3699,37 +3805,38 @@ class DatabaseService {
         where: 'id = ?',
         whereArgs: [requestId],
       );
-      if (row['om_status'] == WithdrawalRequestModel.statusApproved) {
-        await db.update(
-          'withdrawal_requests',
-          {
-            'overall_status': WithdrawalRequestModel.statusApproved,
-            'updated_at': now,
-          },
-          where: 'id = ?',
-          whereArgs: [requestId],
-        );
-        await _wrNotifyUser(db, engId,
-            title: 'تمت الموافقة على طلب سحب الخامات',
-            body:
-                'يمكنك الآن إكمال سحب الخامات من الموقع: $pathLabel — مشروع "$projectName"',
-            eventType: 'withdrawal_request_approved',
-            actorUserId: managerUserId,
-            actorUserName: actorName,
-            projectName: projectName.isEmpty ? null : projectName);
-      } else {
-        await _wrNotifyRoles(db, ['operation_manager'],
-            title: 'بانتظار موافقتكم — طلب سحب خامات',
-            body:
-                'وافق ${UserModel.siteEngineerManagerRoleLabel}. بانتظار موافقة مدير العمليات.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
-            eventType: 'withdrawal_request_waiting_om',
-            actorUserId: engId,
-            actorUserName: engName,
-            projectName: projectName.isEmpty ? null : projectName);
-      }
+      await _wrAppendAndMarkActionTaken(
+        db,
+        withdrawalRequestId: requestId,
+        recipientRole: 'site_engineer_manager',
+        appendLine: 'تم الموافقة على الطلب — ${_formatWithdrawalSubmittedAt(now)}',
+      );
+      final createdAt = (row['created_at'] as String?) ?? now;
+      final omBody = _wrBuildOmRequestBody(
+        engName,
+        projectName,
+        pathLabel,
+        requestId,
+        createdAt,
+        now,
+      );
+      await _wrNotifyRoles(
+        db,
+        ['operation_manager'],
+        title: 'طلب سحب خامات',
+        body: omBody,
+        eventType: 'withdrawal_request_pending_om',
+        actorUserId: engId,
+        actorUserName: engName,
+        projectName: projectName.isEmpty ? null : projectName,
+        withdrawalRequestId: requestId,
+      );
       return;
     }
 
+    if (row['sem_status'] != WithdrawalRequestModel.statusApproved) {
+      throw Exception('sem_approval_required');
+    }
     if (row['om_status'] != WithdrawalRequestModel.statusPending) {
       throw Exception('already_responded');
     }
@@ -3746,18 +3853,24 @@ class DatabaseService {
         where: 'id = ?',
         whereArgs: [requestId],
       );
+      await _wrAppendAndMarkActionTaken(
+        db,
+        withdrawalRequestId: requestId,
+        recipientRole: 'operation_manager',
+        appendLine:
+            'تم رفض الطلب — ${_formatWithdrawalSubmittedAt(now)}\nالسبب: ${reason.trim()}',
+      );
+      await _wrAppendToWithdrawalNotification(
+        db,
+        withdrawalRequestId: requestId,
+        recipientRole: 'site_engineer_manager',
+        appendLine:
+            'رُفض من مدير العمليات — ${_formatWithdrawalSubmittedAt(now)}\nالسبب: ${reason.trim()}',
+      );
       await _wrNotifyUser(db, engId,
           title: 'رفض طلب سحب خامات',
           body: 'تم رفض طلبك بسبب: ${reason.trim()}',
           eventType: 'withdrawal_request_rejected',
-          actorUserId: managerUserId,
-          actorUserName: actorName,
-          projectName: projectName.isEmpty ? null : projectName);
-      await _wrNotifyRoles(db, ['site_engineer_manager'],
-          title: 'طلب سحب خامات — مرفوض',
-          body:
-              'رُفض الطلب من مدير العمليات. السبب: ${reason.trim()}\nالمهندس: $engName — $pathLabel',
-          eventType: 'withdrawal_request_rejected_by_om',
           actorUserId: managerUserId,
           actorUserName: actorName,
           projectName: projectName.isEmpty ? null : projectName);
@@ -3768,39 +3881,33 @@ class DatabaseService {
       {
         'om_status': WithdrawalRequestModel.statusApproved,
         'om_responded_at': now,
+        'overall_status': WithdrawalRequestModel.statusApproved,
         'updated_at': now,
       },
       where: 'id = ?',
       whereArgs: [requestId],
     );
-    if (row['sem_status'] == WithdrawalRequestModel.statusApproved) {
-      await db.update(
-        'withdrawal_requests',
-        {
-          'overall_status': WithdrawalRequestModel.statusApproved,
-          'updated_at': now,
-        },
-        where: 'id = ?',
-        whereArgs: [requestId],
-      );
-      await _wrNotifyUser(db, engId,
-          title: 'تمت الموافقة على طلب سحب الخامات',
-          body:
-              'يمكنك الآن إكمال سحب الخامات من الموقع: $pathLabel — مشروع "$projectName"',
-          eventType: 'withdrawal_request_approved',
-          actorUserId: managerUserId,
-          actorUserName: actorName,
-          projectName: projectName.isEmpty ? null : projectName);
-    } else {
-      await _wrNotifyRoles(db, ['site_engineer_manager'],
-          title: 'بانتظار موافقتكم — طلب سحب خامات',
-          body:
-              'وافق مدير العمليات. بانتظار موافقة ${UserModel.siteEngineerManagerRoleLabel}.\nالمهندس: $engName — $pathLabel — رقم الطلب: $requestId',
-          eventType: 'withdrawal_request_waiting_sem',
-          actorUserId: engId,
-          actorUserName: engName,
-          projectName: projectName.isEmpty ? null : projectName);
-    }
+    await _wrAppendAndMarkActionTaken(
+      db,
+      withdrawalRequestId: requestId,
+      recipientRole: 'operation_manager',
+      appendLine: 'تم الموافقة على الطلب — ${_formatWithdrawalSubmittedAt(now)}',
+    );
+    await _wrAppendToWithdrawalNotification(
+      db,
+      withdrawalRequestId: requestId,
+      recipientRole: 'site_engineer_manager',
+      appendLine:
+          'وافق مدير العمليات على الطلب — ${_formatWithdrawalSubmittedAt(now)}',
+    );
+    await _wrNotifyUser(db, engId,
+        title: 'تمت الموافقة على طلب سحب الخامات',
+        body:
+            'يمكنك الآن إكمال سحب الخامات من الموقع: $pathLabel — مشروع "$projectName"',
+        eventType: 'withdrawal_request_approved',
+        actorUserId: managerUserId,
+        actorUserName: actorName,
+        projectName: projectName.isEmpty ? null : projectName);
   }
 
   Future<void> fulfillWithdrawalRequest({

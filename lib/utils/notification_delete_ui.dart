@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+/// رسالة عند محاولة حذف إشعار طلب سحب قبل اتخاذ إجراء.
+const String withdrawalNotificationDeleteBlockedMessage =
+    'لا يمكن حذف الإشعار قبل اتخاذ إجراء على الطلب (موافقة أو رفض)';
+
 /// تأكيد حذف إشعار فردي (مشترك بين كل شاشات الإشعارات).
 Future<bool> confirmDeleteNotification(BuildContext context) async {
   final confirmed = await showDialog<bool>(

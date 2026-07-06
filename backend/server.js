@@ -136,11 +136,15 @@ async function ensureNotificationsTable() {
         project_name TEXT,
         created_at TEXT NOT NULL,
         is_read BOOLEAN NOT NULL DEFAULT FALSE,
-        read_at TEXT
+        read_at TEXT,
+        withdrawal_request_id INTEGER,
+        action_taken_at TEXT
       )
     `);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created ON notifications(recipient_user_id, created_at DESC)').catch(() => {});
     await pool.query('CREATE INDEX IF NOT EXISTS idx_notifications_recipient_unread ON notifications(recipient_user_id, is_read)').catch(() => {});
+    await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS withdrawal_request_id INTEGER').catch(() => {});
+    await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS action_taken_at TEXT').catch(() => {});
     console.log('ensureNotificationsTable: ok');
   } catch (e) {
     console.warn('ensureNotificationsTable:', e.message);
@@ -546,6 +550,24 @@ async function ensureWithdrawalRequestsTable() {
 
 const withdrawalFormatSubmittedAt = formatArDateTimeEgypt;
 
+function wrBuildSemNewRequestBody(engName, projectName, pathLabel, requestId, createdAtIso) {
+  return (
+    `طلب من "${engName}" — مشروع "${projectName}" — موقع: ${pathLabel || '—'}\n` +
+    `رقم الطلب: ${requestId}\n` +
+    `تاريخ ووقت الإرسال: ${withdrawalFormatSubmittedAt(createdAtIso)}`
+  );
+}
+
+function wrBuildOmRequestBody(engName, projectName, pathLabel, requestId, createdAtIso, semApprovedAtIso) {
+  return (
+    `قام المهندس "${engName}"\n` +
+    `بطلب سحب — مشروع "${projectName}" — موقع: ${pathLabel || '—'}\n` +
+    `رقم الطلب: ${requestId}\n` +
+    `تاريخ ووقت الإرسال: ${withdrawalFormatSubmittedAt(createdAtIso)}\n\n` +
+    `وافق مدير المشروعات على الطلب — ${withdrawalFormatSubmittedAt(semApprovedAtIso)}`
+  );
+}
+
 async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
   const title = fields.title;
   const body = fields.body;
@@ -553,17 +575,47 @@ async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
   const actorUserId = fields.actorUserId ?? fields.actor_user_id ?? null;
   const actorUserName = fields.actorUserName ?? fields.actor_user_name ?? null;
   const projectName = fields.projectName ?? fields.project_name ?? null;
+  const withdrawalRequestId = fields.withdrawalRequestId ?? fields.withdrawal_request_id ?? null;
+  const actionTakenAt = fields.actionTakenAt ?? fields.action_taken_at ?? null;
   const now = new Date().toISOString();
   await pool.query(
     `INSERT INTO notifications (
       recipient_user_id, recipient_role, title, body, event_type,
-      actor_user_id, actor_user_name, project_name, created_at, is_read
+      actor_user_id, actor_user_name, project_name, created_at, is_read,
+      withdrawal_request_id, action_taken_at
     )
-    SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE
+    SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE, $8, $9
     FROM users
-    WHERE role = ANY($8::text[])`,
-    [title, body, eventType, actorUserId, actorUserName, projectName, now, roles]
+    WHERE role = ANY($10::text[])`,
+    [title, body, eventType, actorUserId, actorUserName, projectName, now, withdrawalRequestId, actionTakenAt, roles]
   );
+}
+
+async function wrAppendAndMarkActionTaken(pool, { withdrawalRequestId, recipientRole, appendLine }) {
+  const now = new Date().toISOString();
+  const r = await pool.query(
+    `SELECT id, body FROM notifications
+     WHERE withdrawal_request_id = $1 AND recipient_role = $2 AND action_taken_at IS NULL`,
+    [withdrawalRequestId, recipientRole]
+  );
+  for (const row of r.rows) {
+    const newBody = `${row.body}\n${appendLine}`;
+    await pool.query(
+      'UPDATE notifications SET body = $1, action_taken_at = $2 WHERE id = $3',
+      [newBody, now, row.id]
+    );
+  }
+}
+
+async function wrAppendToWithdrawalNotification(pool, { withdrawalRequestId, recipientRole, appendLine }) {
+  const r = await pool.query(
+    `SELECT id, body FROM notifications
+     WHERE withdrawal_request_id = $1 AND recipient_role = $2`,
+    [withdrawalRequestId, recipientRole]
+  );
+  for (const row of r.rows) {
+    await pool.query('UPDATE notifications SET body = $1 WHERE id = $2', [`${row.body}\n${appendLine}`, row.id]);
+  }
 }
 
 async function withdrawalNotifyEngineer(pool, engineerUserId, fields) {
@@ -2033,6 +2085,9 @@ app.get('/notifications', async (req, res) => {
         created_at: row.created_at,
         is_read: row.is_read === true,
         read_at: row.read_at,
+        withdrawal_request_id:
+          row.withdrawal_request_id != null ? parseInt(row.withdrawal_request_id, 10) : null,
+        action_taken_at: row.action_taken_at,
       }))
     );
   } catch (e) {
@@ -2079,6 +2134,15 @@ app.delete('/notifications/:id', async (req, res) => {
     const userId = parseInt(String(req.body?.userId || req.query?.userId || ''), 10);
     if (!Number.isInteger(notificationId) || !Number.isInteger(userId)) {
       return res.status(400).json({ error: 'notification id and userId are required' });
+    }
+    const existing = await pool.query(
+      'SELECT withdrawal_request_id, action_taken_at FROM notifications WHERE id = $1 AND recipient_user_id = $2',
+      [notificationId, userId],
+    );
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const row = existing.rows[0];
+    if (row.withdrawal_request_id != null && row.action_taken_at == null) {
+      return res.status(403).json({ error: 'action_required_before_delete' });
     }
     const r = await pool.query(
       'DELETE FROM notifications WHERE id = $1 AND recipient_user_id = $2',
@@ -3965,22 +4029,22 @@ app.post('/withdrawal-requests', async (req, res) => {
     );
     const row = ins.rows[0];
     const idNum = parseInt(row.id, 10);
-    const bodyN =
-      `طلب من "${userName}" — مشروع "${projectName}" — موقع: ${locationPathLabel || '—'}\n` +
-      `رقم الطلب: ${idNum}\n` +
-      `تاريخ ووقت الإرسال: ${withdrawalFormatSubmittedAt(now)}`;
-    await withdrawalInsertNotificationsForRoles(
-      pool,
-      ['site_engineer_manager', 'operation_manager', 'app_admin'],
-      {
-        title: 'طلب سحب خامات',
-        body: bodyN,
-        event_type: 'withdrawal_request_new',
-        actor_user_id: userId,
-        actor_user_name: userName,
-        project_name: projectName,
-      }
+    const bodyN = wrBuildSemNewRequestBody(
+      userName,
+      projectName,
+      locationPathLabel || '',
+      idNum,
+      now,
     );
+    await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
+      title: 'طلب سحب خامات',
+      body: bodyN,
+      event_type: 'withdrawal_request_new',
+      actor_user_id: userId,
+      actor_user_name: userName,
+      project_name: projectName,
+      withdrawal_request_id: idNum,
+    });
     res.json({ ...withdrawalRequestRowToJson(row), existing: false });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -4045,7 +4109,8 @@ app.get('/withdrawal-requests/action-count', async (req, res) => {
       ) AS c`;
     } else if (role === 'operation_manager') {
       q = `SELECT COUNT(*)::int AS c FROM withdrawal_requests
-           WHERE overall_status = 'pending' AND om_status = 'pending' AND fulfilled_at IS NULL`;
+           WHERE overall_status = 'pending' AND om_status = 'pending'
+             AND sem_status = 'approved' AND fulfilled_at IS NULL`;
     } else {
       return res.json({ count: 0 });
     }
@@ -4077,7 +4142,8 @@ app.get('/withdrawal-requests/pending-actions', async (req, res) => {
       r = await pool.query(
         `SELECT wr.*, p.name AS project_name FROM withdrawal_requests wr
          INNER JOIN projects p ON p.id = wr.project_id
-         WHERE wr.overall_status = 'pending' AND wr.om_status = 'pending' AND wr.fulfilled_at IS NULL
+         WHERE wr.overall_status = 'pending' AND wr.om_status = 'pending'
+           AND wr.sem_status = 'approved' AND wr.fulfilled_at IS NULL
          ORDER BY wr.id DESC`
       );
     } else {
@@ -4138,18 +4204,15 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
            overall_status = 'rejected', updated_at = $2 WHERE id = $3`,
           [reason, now, id]
         );
+        await wrAppendAndMarkActionTaken(pool, {
+          withdrawalRequestId: id,
+          recipientRole: 'site_engineer_manager',
+          appendLine: `تم رفض الطلب — ${withdrawalFormatSubmittedAt(now)}\nالسبب: ${reason}`,
+        });
         await withdrawalNotifyEngineer(pool, engId, {
           title: 'رفض طلب سحب خامات',
           body: `تم رفض طلبك بسبب: ${reason}`,
           event_type: 'withdrawal_request_rejected',
-          actor_user_id: userId,
-          actor_user_name: actor.rows[0].name,
-          project_name: projectName,
-        });
-        await withdrawalInsertNotificationsForRoles(pool, ['operation_manager'], {
-          title: 'طلب سحب خامات — مرفوض',
-          body: `رُفض الطلب من مدير المشروعات. السبب: ${reason}\nالمهندس: ${engName} — ${pathLabel}`,
-          event_type: 'withdrawal_request_rejected_by_sem',
           actor_user_id: userId,
           actor_user_name: actor.rows[0].name,
           project_name: projectName,
@@ -4160,33 +4223,35 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
         `UPDATE withdrawal_requests SET sem_status = 'approved', sem_responded_at = $1, updated_at = $1 WHERE id = $2`,
         [now, id]
       );
-      if (String(row.om_status) === 'approved') {
-        await pool.query(
-          `UPDATE withdrawal_requests SET overall_status = 'approved', updated_at = $1 WHERE id = $2`,
-          [now, id]
-        );
-        await withdrawalNotifyEngineer(pool, engId, {
-          title: 'تمت الموافقة على طلب سحب الخامات',
-          body: `يمكنك الآن إكمال سحب الخامات من الموقع: ${pathLabel} — مشروع "${projectName}"`,
-          event_type: 'withdrawal_request_approved',
-          actor_user_id: userId,
-          actor_user_name: actor.rows[0].name,
-          project_name: projectName,
-        });
-      } else {
-        await withdrawalInsertNotificationsForRoles(pool, ['operation_manager'], {
-          title: 'بانتظار موافقتكم — طلب سحب خامات',
-          body: `وافق مدير المشروعات. بانتظار موافقة مدير العمليات.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
-          event_type: 'withdrawal_request_waiting_om',
-          actor_user_id: engId,
-          actor_user_name: engName,
-          project_name: projectName,
-        });
-      }
+      await wrAppendAndMarkActionTaken(pool, {
+        withdrawalRequestId: id,
+        recipientRole: 'site_engineer_manager',
+        appendLine: `تم الموافقة على الطلب — ${withdrawalFormatSubmittedAt(now)}`,
+      });
+      const omBody = wrBuildOmRequestBody(
+        engName,
+        projectName,
+        pathLabel,
+        id,
+        row.created_at,
+        now,
+      );
+      await withdrawalInsertNotificationsForRoles(pool, ['operation_manager'], {
+        title: 'طلب سحب خامات',
+        body: omBody,
+        event_type: 'withdrawal_request_pending_om',
+        actor_user_id: engId,
+        actor_user_name: engName,
+        project_name: projectName,
+        withdrawal_request_id: id,
+      });
       return res.json({ ok: true });
     }
 
     if (actorRole === 'operation_manager') {
+      if (String(row.sem_status) !== 'approved') {
+        return res.status(400).json({ error: 'sem_approval_required' });
+      }
       if (String(row.om_status) !== 'pending') {
         return res.status(400).json({ error: 'already_responded' });
       }
@@ -4196,18 +4261,20 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
            overall_status = 'rejected', updated_at = $2 WHERE id = $3`,
           [reason, now, id]
         );
+        await wrAppendAndMarkActionTaken(pool, {
+          withdrawalRequestId: id,
+          recipientRole: 'operation_manager',
+          appendLine: `تم رفض الطلب — ${withdrawalFormatSubmittedAt(now)}\nالسبب: ${reason}`,
+        });
+        await wrAppendToWithdrawalNotification(pool, {
+          withdrawalRequestId: id,
+          recipientRole: 'site_engineer_manager',
+          appendLine: `رُفض من مدير العمليات — ${withdrawalFormatSubmittedAt(now)}\nالسبب: ${reason}`,
+        });
         await withdrawalNotifyEngineer(pool, engId, {
           title: 'رفض طلب سحب خامات',
           body: `تم رفض طلبك بسبب: ${reason}`,
           event_type: 'withdrawal_request_rejected',
-          actor_user_id: userId,
-          actor_user_name: actor.rows[0].name,
-          project_name: projectName,
-        });
-        await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
-          title: 'طلب سحب خامات — مرفوض',
-          body: `رُفض الطلب من مدير العمليات. السبب: ${reason}\nالمهندس: ${engName} — ${pathLabel}`,
-          event_type: 'withdrawal_request_rejected_by_om',
           actor_user_id: userId,
           actor_user_name: actor.rows[0].name,
           project_name: projectName,
@@ -4218,29 +4285,28 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
         `UPDATE withdrawal_requests SET om_status = 'approved', om_responded_at = $1, updated_at = $1 WHERE id = $2`,
         [now, id]
       );
-      if (String(row.sem_status) === 'approved') {
-        await pool.query(
-          `UPDATE withdrawal_requests SET overall_status = 'approved', updated_at = $1 WHERE id = $2`,
-          [now, id]
-        );
-        await withdrawalNotifyEngineer(pool, engId, {
-          title: 'تمت الموافقة على طلب سحب الخامات',
-          body: `يمكنك الآن إكمال سحب الخامات من الموقع: ${pathLabel} — مشروع "${projectName}"`,
-          event_type: 'withdrawal_request_approved',
-          actor_user_id: userId,
-          actor_user_name: actor.rows[0].name,
-          project_name: projectName,
-        });
-      } else {
-        await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
-          title: 'بانتظار موافقتكم — طلب سحب خامات',
-          body: `وافق مدير العمليات. بانتظار موافقة مدير المشروعات.\nالمهندس: ${engName} — ${pathLabel} — رقم الطلب: ${id}`,
-          event_type: 'withdrawal_request_waiting_sem',
-          actor_user_id: engId,
-          actor_user_name: engName,
-          project_name: projectName,
-        });
-      }
+      await pool.query(
+        `UPDATE withdrawal_requests SET overall_status = 'approved', updated_at = $1 WHERE id = $2`,
+        [now, id]
+      );
+      await wrAppendAndMarkActionTaken(pool, {
+        withdrawalRequestId: id,
+        recipientRole: 'operation_manager',
+        appendLine: `تم الموافقة على الطلب — ${withdrawalFormatSubmittedAt(now)}`,
+      });
+      await wrAppendToWithdrawalNotification(pool, {
+        withdrawalRequestId: id,
+        recipientRole: 'site_engineer_manager',
+        appendLine: `وافق مدير العمليات على الطلب — ${withdrawalFormatSubmittedAt(now)}`,
+      });
+      await withdrawalNotifyEngineer(pool, engId, {
+        title: 'تمت الموافقة على طلب سحب الخامات',
+        body: `يمكنك الآن إكمال سحب الخامات من الموقع: ${pathLabel} — مشروع "${projectName}"`,
+        event_type: 'withdrawal_request_approved',
+        actor_user_id: userId,
+        actor_user_name: actor.rows[0].name,
+        project_name: projectName,
+      });
       return res.json({ ok: true });
     }
     return res.status(403).json({ error: 'forbidden' });

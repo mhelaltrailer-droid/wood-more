@@ -110,6 +110,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             createdAt: n.createdAt,
             isRead: true,
             readAt: DateTime.now(),
+            withdrawalRequestId: n.withdrawalRequestId,
+            actionTakenAt: n.actionTakenAt,
           );
         }).toList();
       });
@@ -131,6 +133,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   Future<bool> _deleteNotification(NotificationItemModel item) async {
+    if (item.isWithdrawalPendingAction) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(withdrawalNotificationDeleteBlockedMessage)),
+        );
+      }
+      return false;
+    }
     final storage = getStorage();
     try {
       await storage.deleteNotification(
@@ -141,10 +151,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         setState(() => _items = _items.where((n) => n.id != item.id).toList());
       }
       return true;
-    } catch (_) {
+    } catch (e) {
+      final msg = '$e';
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تعذر حذف الإشعار')),
+          SnackBar(
+            content: Text(
+              msg.contains('action_required_before_delete')
+                  ? withdrawalNotificationDeleteBlockedMessage
+                  : 'تعذر حذف الإشعار',
+            ),
+          ),
         );
       }
       return false;
@@ -207,6 +224,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           key: ValueKey('notification_${item.id}'),
           direction: DismissDirection.horizontal,
           confirmDismiss: (_) async {
+            if (item.isWithdrawalPendingAction) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(withdrawalNotificationDeleteBlockedMessage),
+                  ),
+                );
+              }
+              return false;
+            }
             if (!await confirmDeleteNotification(context)) return false;
             return _deleteNotification(item);
           },

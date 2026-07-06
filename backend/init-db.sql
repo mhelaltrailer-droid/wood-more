@@ -73,7 +73,9 @@ CREATE TABLE IF NOT EXISTS notifications (
   project_name TEXT,
   created_at TEXT NOT NULL,
   is_read BOOLEAN NOT NULL DEFAULT FALSE,
-  read_at TEXT
+  read_at TEXT,
+  withdrawal_request_id INTEGER,
+  action_taken_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created
