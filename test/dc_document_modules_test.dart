@@ -334,6 +334,20 @@ void main() {
       expect(shopDrawingBoolFromMap({'content_sd': 'true'}, 'content_sd', 'contentSd'), isTrue);
       expect(shopDrawingBoolFromMap({'contentQs': '1'}, 'content_qs', 'contentQs'), isTrue);
     });
+
+    test('ShopDrawingModel.fromMap يقرأ ملاحظات مدير العمليات', () {
+      final m = ShopDrawingModel.fromMap({
+        'id': 10,
+        'project_name': 'P',
+        'status': 'approved',
+        'created_by_user_id': 1,
+        'created_by_user_name': 'TO',
+        'created_at': '2026-07-07T10:00:00.000Z',
+        'updated_at': '2026-07-07T12:00:00.000Z',
+        'om_notes': '  ملاحظة OM  ',
+      });
+      expect(m.omNotes, 'ملاحظة OM');
+    });
   });
 
   group('حد حجم الملف 5MB', () {

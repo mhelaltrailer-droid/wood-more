@@ -132,7 +132,26 @@ async function ensureShopDrawingTables(pool) {
       END $$
     `).catch(() => {});
   }
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'shop_drawings' AND column_name = 'om_notes'
+      ) THEN
+        ALTER TABLE shop_drawings ADD COLUMN om_notes TEXT;
+      END IF;
+    END $$
+  `).catch(() => {});
   console.log('ensureShopDrawingTables: ok');
+}
+
+function shopDrawingParseOmNotes(body) {
+  const b = body || {};
+  if (b.omNotes == null && b.om_notes == null) return null;
+  const text = String(b.omNotes ?? b.om_notes ?? '').trim();
+  return text || null;
 }
 
 function shopDrawingBoolValue(value) {
@@ -254,6 +273,7 @@ function shopDrawingMapRow(row, attachments = [], actions = []) {
     content_sd: shopDrawingBoolValue(row.content_sd),
     content_qs: shopDrawingBoolValue(row.content_qs),
     content_dashboard: shopDrawingBoolValue(row.content_dashboard),
+    om_notes: row.om_notes || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     approved_at: row.approved_at || null,
@@ -1020,16 +1040,19 @@ function registerShopDrawingRoutes(app, pool, deps) {
         return res.status(400).json({ error: 'invalid_status' });
       }
 
+      const omNotes = shopDrawingParseOmNotes(req.body);
       const now = new Date().toISOString();
       await pool.query(
-        `UPDATE shop_drawings SET status='approved', approved_at=$1, updated_at=$1 WHERE id=$2`,
-        [now, id],
+        `UPDATE shop_drawings SET status='approved', approved_at=$1, updated_at=$1,
+         om_notes=$2 WHERE id=$3`,
+        [now, omNotes, id],
       );
       await shopDrawingInsertAction(pool, {
         drawingId: id,
         actorUserId: userId,
         actorUserName: actor.name,
         action: 'om_approve',
+        comment: omNotes,
         createdAt: now,
       });
 
@@ -1055,6 +1078,38 @@ function registerShopDrawingRoutes(app, pool, deps) {
         body: shopDrawingNotificationBody(actor.name, 'اعتماد نهائي لـ', projectName, now),
         shopDrawingId: id,
       });
+
+      res.json(await shopDrawingLoadDetail(pool, id));
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.put('/shop-drawing/:id/om-notes', async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const userId = parseInt(String(req.body?.userId ?? req.body?.user_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'invalid' });
+      }
+
+      const actor = await shopDrawingGetUser(pool, userId);
+      if (!actor || String(actor.role) !== 'operation_manager') {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const rq = await pool.query('SELECT status FROM shop_drawings WHERE id = $1', [id]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      if (String(rq.rows[0].status) !== 'approved') {
+        return res.status(400).json({ error: 'not_editable' });
+      }
+
+      const omNotes = shopDrawingParseOmNotes(req.body);
+      const now = new Date().toISOString();
+      await pool.query(
+        'UPDATE shop_drawings SET om_notes=$1, updated_at=$2 WHERE id=$3',
+        [omNotes, now, id],
+      );
 
       res.json(await shopDrawingLoadDetail(pool, id));
     } catch (e) {

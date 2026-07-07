@@ -31,11 +31,16 @@ class ShopDrawingDetailScreen extends StatefulWidget {
 class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
   final _storage = getStorage();
   final _returnReasonController = TextEditingController();
+  final _omNotesController = TextEditingController();
 
   ShopDrawingModel? _drawing;
   bool _loading = true;
   bool _acting = false;
   String? _error;
+
+  void _syncOmNotesController(ShopDrawingModel drawing) {
+    _omNotesController.text = drawing.omNotes?.trim() ?? '';
+  }
 
   @override
   void initState() {
@@ -46,6 +51,7 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
   @override
   void dispose() {
     _returnReasonController.dispose();
+    _omNotesController.dispose();
     super.dispose();
   }
 
@@ -64,6 +70,7 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
         _drawing = drawing;
         _loading = false;
       });
+      _syncOmNotesController(drawing);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -141,9 +148,11 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
     if (_storage is! ApiStorageService) return;
     setState(() => _acting = true);
     try {
+      final notes = _omNotesController.text.trim();
       await _storage.omApproveShopDrawing(
         drawingId: widget.drawingId,
         userId: widget.currentUser.id,
+        omNotes: notes.isEmpty ? null : notes,
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -155,6 +164,94 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
     } finally {
       if (mounted) setState(() => _acting = false);
     }
+  }
+
+  Future<void> _saveOmNotes() async {
+    if (_storage is! ApiStorageService) return;
+    setState(() => _acting = true);
+    try {
+      final notes = _omNotesController.text.trim();
+      final updated = await _storage.updateShopDrawingOmNotes(
+        drawingId: widget.drawingId,
+        userId: widget.currentUser.id,
+        omNotes: notes.isEmpty ? null : notes,
+      );
+      if (!mounted) return;
+      setState(() => _drawing = updated);
+      _syncOmNotesController(updated);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم حفظ ملاحظات مدير العمليات')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  Widget _buildOmNotesReadOnlyCard(String notes) {
+    return Card(
+      color: const Color(0xFFE8F5E9),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'ملاحظات مدير العمليات',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(notes),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOmNotesEditor({
+    required bool readOnly,
+    String? saveLabel,
+    VoidCallback? onSave,
+  }) {
+    return Card(
+      color: readOnly ? null : const Color(0xFFF1F8E9),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              readOnly ? 'ملاحظات مدير العمليات' : 'ملاحظات مدير العمليات (اختياري)',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _omNotesController,
+              readOnly: readOnly,
+              decoration: const InputDecoration(
+                hintText: 'أضف ملاحظاتك هنا...',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 4,
+            ),
+            if (onSave != null) ...[
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: _acting ? null : onSave,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B5E20),
+                ),
+                child: Text(saveLabel ?? 'حفظ الملاحظات'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _deleteDrawing() async {
@@ -303,6 +400,12 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
         d.status == ShopDrawingModel.statusPendingPm;
     final canOmAct = user.canApproveShopDrawingAsOm &&
         d.status == ShopDrawingModel.statusPendingOm;
+    final canOmEditNotes = user.canApproveShopDrawingAsOm &&
+        d.status == ShopDrawingModel.statusApproved;
+    final showOmNotesReadOnly = d.status == ShopDrawingModel.statusApproved &&
+        !canOmEditNotes &&
+        d.omNotes != null &&
+        d.omNotes!.trim().isNotEmpty;
     final canEdit = user.isTechnicalOffice &&
         d.status == ShopDrawingModel.statusReturnedToTo &&
         d.createdByUserId == user.id;
@@ -382,6 +485,10 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
         ),
         const SizedBox(height: 12),
         ShopDrawingTimeline(actions: d.actions),
+        if (showOmNotesReadOnly) ...[
+          const SizedBox(height: 12),
+          _buildOmNotesReadOnlyCard(d.omNotes!.trim()),
+        ],
         if (canEdit) ...[
           const SizedBox(height: 16),
           FilledButton.icon(
@@ -427,6 +534,8 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
         ],
         if (canOmAct) ...[
           const SizedBox(height: 16),
+          _buildOmNotesEditor(readOnly: false),
+          const SizedBox(height: 12),
           FilledButton(
             onPressed: _acting ? null : _omApprove,
             style: FilledButton.styleFrom(
@@ -434,6 +543,14 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
             child: const Text('اعتماد / حفظ'),
+          ),
+        ],
+        if (canOmEditNotes) ...[
+          const SizedBox(height: 16),
+          _buildOmNotesEditor(
+            readOnly: false,
+            saveLabel: 'حفظ الملاحظات',
+            onSave: _saveOmNotes,
           ),
         ],
       ],

@@ -2369,12 +2369,38 @@ class ApiStorageService {
   Future<ShopDrawingModel> omApproveShopDrawing({
     required int drawingId,
     required int userId,
+    String? omNotes,
   }) async {
     final uri = Uri.parse(_path('shop-drawing/$drawingId/om-approve'));
+    final trimmed = omNotes?.trim();
     final r = await http.post(
       uri,
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'userId': userId}),
+      body: jsonEncode({
+        'userId': userId,
+        if (trimmed != null && trimmed.isNotEmpty) 'omNotes': trimmed,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ShopDrawingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ShopDrawingModel> updateShopDrawingOmNotes({
+    required int drawingId,
+    required int userId,
+    String? omNotes,
+  }) async {
+    final uri = Uri.parse(_path('shop-drawing/$drawingId/om-notes'));
+    final trimmed = omNotes?.trim();
+    final r = await http.put(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'omNotes': trimmed ?? '',
+      }),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
     return ShopDrawingModel.fromMap(

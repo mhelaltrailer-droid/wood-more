@@ -112,6 +112,7 @@ class ShopDrawingModel {
   final bool contentSd;
   final bool contentQs;
   final bool contentDashboard;
+  final String? omNotes;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? approvedAt;
@@ -134,6 +135,7 @@ class ShopDrawingModel {
     this.contentSd = false,
     this.contentQs = false,
     this.contentDashboard = false,
+    this.omNotes,
     required this.createdAt,
     required this.updatedAt,
     this.approvedAt,
@@ -174,6 +176,7 @@ class ShopDrawingModel {
         'content_dashboard',
         'contentDashboard',
       ),
+      omNotes: _nullableTrimmedString(map['om_notes'] ?? map['omNotes']),
       createdAt: parseDate(map['created_at']),
       updatedAt: parseDate(map['updated_at']),
       approvedAt: parseDateOrNull(map['approved_at']),
@@ -228,6 +231,12 @@ bool shopDrawingBoolFromMap(
     return normalized == 'true' || normalized == 't' || normalized == '1';
   }
   return false;
+}
+
+String? _nullableTrimmedString(dynamic value) {
+  if (value == null) return null;
+  final text = value.toString().trim();
+  return text.isEmpty ? null : text;
 }
 
 String shopDrawingNormalizeDocumentTypeFromMap(Map<String, dynamic> map) {
