@@ -71,6 +71,9 @@ bool _isHomeIconAvailable({
     case homeIconIdShopDrawing:
       return user.canAccessShopDrawingHomeIcon &&
           IconVisibilityService.isVisible(iconConfig, iconId);
+    case 'projects_dashboard':
+      return user.canAccessProjectsDashboard &&
+          IconVisibilityService.isVisible(iconConfig, iconId);
     default:
       return IconVisibilityService.isVisible(iconConfig, iconId);
   }

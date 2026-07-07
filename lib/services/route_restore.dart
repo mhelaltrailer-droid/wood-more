@@ -30,6 +30,7 @@ import '../screens/mos_itp_screen.dart';
 import '../screens/module_placeholder_screen.dart';
 import '../screens/warehouses_view_screen.dart';
 import '../screens/reports_sys_hub_screen.dart';
+import '../screens/projects_dashboard_screen.dart';
 import 'route_persistence.dart';
 
 /// Build the screen for a given route name (for restore after refresh). Returns null if unknown.
@@ -106,6 +107,8 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return MosItpScreen(currentUser: user);
     case 'reports-sys':
       return ReportsSysHubScreen(currentUser: user);
+    case 'projects-dashboard':
+      return ProjectsDashboardScreen(currentUser: user);
     default:
       return null;
   }

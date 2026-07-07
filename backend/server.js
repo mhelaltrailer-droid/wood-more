@@ -7,6 +7,10 @@ const {
   ensureShopDrawingTables,
   registerShopDrawingRoutes,
 } = require('./shop_drawing');
+const {
+  ensureProjectsDashboardTables,
+  registerProjectsDashboardRoutes,
+} = require('./projects_dashboard');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -1236,6 +1240,7 @@ async function ensureHomeIconsVisibilitySetting() {
         ms_sd: true,
         qs_invs: true,
         mos_itp: true,
+        projects_dashboard: true,
       },
       app_admin: {
         attendance_reports: true,
@@ -1252,6 +1257,7 @@ async function ensureHomeIconsVisibilitySetting() {
         ms_sd: true,
         qs_invs: true,
         mos_itp: true,
+        projects_dashboard: true,
       },
       document_controller: {
         ir_mir: true,
@@ -1263,6 +1269,7 @@ async function ensureHomeIconsVisibilitySetting() {
       },
       technical_office: {
         shop_drawing: true,
+        projects_dashboard: true,
       },
       top_management: {
         shop_drawing: true,
@@ -6161,6 +6168,7 @@ app.post('/app-release/upload', async (req, res) => {
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 registerShopDrawingRoutes(app, pool, { runNotificationSafely });
+registerProjectsDashboardRoutes(app, pool);
 ensurePasswordColumn()
   .then(() => ensureSystemLockTable())
   .then(() => ensureHomeIconsVisibilitySetting())
@@ -6175,6 +6183,7 @@ ensurePasswordColumn()
   .then(() => ensureShopDarwingNotificationsTable())
   .then(() => ensureAppReleaseTables())
   .then(() => ensureShopDrawingTables(pool))
+  .then(() => ensureProjectsDashboardTables(pool))
   .then(() => ensureIrMirUploadsTable())
   .then(() => ensureMsSdTables())
   .then(() => ensureMosItpTables())

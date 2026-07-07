@@ -159,6 +159,30 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   bool get canManageShopDrawingApproved =>
       email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
 
+  bool get isPrimaryAppAdmin =>
+      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+
+  /// Projects Dashboard — المكتب الفني، مدير العمليات، والمسؤول الأساسي.
+  bool get canAccessProjectsDashboard =>
+      isTechnicalOffice || isOperationManager || isPrimaryAppAdmin;
+
+  bool get canEditProjectsDashboardSheet => canAccessProjectsDashboard;
+
+  bool get canUploadProjectsDashboardInitial => isTechnicalOffice;
+
+  bool get canDeleteProjectsDashboardNotes =>
+      isAdmin && isPrimaryAppAdmin;
+
+  /// ملاحظات الطرف الآخر في Projects Dashboard.
+  String get projectsDashboardPeerNotesRole {
+    if (isTechnicalOffice) return 'operation_manager';
+    if (isOperationManager || isPrimaryAppAdmin) return 'technical_office';
+    return '';
+  }
+
+  /// عرض جميع الملاحظات (الطرفين) — المسؤول الأساسي فقط.
+  bool get canViewAllProjectsDashboardNotes => isPrimaryAppAdmin;
+
   /// جرس shop-darwing-notification في الشاشة الرئيسية (مدير العمليات + المسؤول).
   bool get canUseShopDarwingNotification =>
       isOperationManager || canManageShopDrawingApproved;

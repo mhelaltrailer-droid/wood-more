@@ -65,7 +65,10 @@ class IconVisibilityService {
   };
 
   static const Map<String, List<HomeIconItem>> roleIcons = {
-    roleTechnicalOffice: _shopDrawingOnlyHomeIcons,
+    roleTechnicalOffice: [
+      ..._shopDrawingOnlyHomeIcons,
+      HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
+    ],
     roleTopManagement: _shopDrawingOnlyHomeIcons,
     roleSiteEngineer: [
       HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),
@@ -117,6 +120,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
+      HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -140,6 +144,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
       HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
+      HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
     ],
   };
 

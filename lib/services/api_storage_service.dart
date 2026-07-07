@@ -33,6 +33,8 @@ import '../models/postpone_fine_report_row_model.dart';
 import '../models/reports_sys_model.dart';
 import '../models/shop_drawing_model.dart';
 import '../models/app_release_info_model.dart';
+import '../models/projects_dashboard_note_model.dart';
+import '../models/projects_dashboard_sheet_model.dart';
 import '../utils/http_upload_progress.dart';
 import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
@@ -2561,5 +2563,132 @@ class ApiStorageService {
       timeout: const Duration(minutes: 15),
     );
     onProgress?.call(1);
+  }
+
+  Future<ProjectsDashboardSheetModel?> getProjectsDashboardSheet({
+    required int userId,
+    bool includeData = true,
+  }) async {
+    final uri = Uri.parse(_path('projects-dashboard/sheet')).replace(
+      queryParameters: {
+        'userId': userId.toString(),
+        'includeData': includeData.toString(),
+      },
+    );
+    final r = await http.get(uri);
+    if (r.statusCode == 404) return null;
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ProjectsDashboardSheetModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<void> saveProjectsDashboardSheet({
+    required int userId,
+    required String userName,
+    String? fileName,
+    String? fileMime,
+    String? fileData,
+    List<List<String>>? rowsJson,
+    String? sheetName,
+  }) async {
+    final body = <String, dynamic>{
+      'userId': userId,
+      'userName': userName,
+    };
+    if (fileName != null) body['fileName'] = fileName;
+    if (fileMime != null) body['fileMime'] = fileMime;
+    if (fileData != null) body['fileData'] = fileData;
+    if (rowsJson != null) body['rowsJson'] = rowsJson;
+    if (sheetName != null) body['sheetName'] = sheetName;
+
+    final r = await http.put(
+      Uri.parse(_path('projects-dashboard/sheet')),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (r.statusCode == 403) {
+      final body = r.body;
+      if (body.contains('initial_upload_technical_office_only')) {
+        throw Exception('رفع الشيت لأول مرة من المكتب الفني فقط');
+      }
+      throw Exception('غير مصرح');
+    }
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  Future<List<ProjectsDashboardNoteModel>> listProjectsDashboardNotes({
+    required int userId,
+    required String authorRole,
+  }) async {
+    final uri = Uri.parse(_path('projects-dashboard/notes')).replace(
+      queryParameters: {
+        'userId': userId.toString(),
+        'authorRole': authorRole,
+      },
+    );
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) => ProjectsDashboardNoteModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<ProjectsDashboardNoteModel?> getLatestProjectsDashboardNote({
+    required int userId,
+    required String authorRole,
+  }) async {
+    final uri = Uri.parse(_path('projects-dashboard/notes/latest')).replace(
+      queryParameters: {
+        'userId': userId.toString(),
+        'authorRole': authorRole,
+      },
+    );
+    final r = await http.get(uri);
+    if (r.statusCode == 404) return null;
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ProjectsDashboardNoteModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ProjectsDashboardNoteModel> addProjectsDashboardNote({
+    required int userId,
+    required String userName,
+    required String body,
+  }) async {
+    final r = await http.post(
+      Uri.parse(_path('projects-dashboard/notes')),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'userName': userName,
+        'body': body.trim(),
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ProjectsDashboardNoteModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<void> deleteProjectsDashboardNote({
+    required int noteId,
+    required String requesterEmail,
+  }) async {
+    final uri = Uri.parse(_path('projects-dashboard/notes/$noteId')).replace(
+      queryParameters: {
+        'requesterEmail': requesterEmail.trim().toLowerCase(),
+      },
+    );
+    final r = await http.delete(uri);
+    if (r.statusCode == 403) throw Exception('غير مصرح بحذف الملاحظة');
+    if (r.statusCode == 404) throw Exception('الملاحظة غير موجودة');
+    if (r.statusCode >= 400) throw Exception(r.body);
   }
 }

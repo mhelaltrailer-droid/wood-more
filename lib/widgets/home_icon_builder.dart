@@ -30,6 +30,7 @@ import '../screens/today_work_plan_screen.dart';
 import '../screens/tomorrow_work_plan_screen.dart';
 import '../screens/warehouses_view_screen.dart';
 import '../screens/work_plan_tracking_report_screen.dart';
+import '../screens/projects_dashboard_screen.dart';
 import '../services/home_icon_order_service.dart';
 import '../services/route_restore.dart';
 import '../services/storage_service.dart';
@@ -416,6 +417,23 @@ class HomeIconBuilder {
           title: 'MoS-ITP',
           subtitle: mosItpSubtitle,
           onTap: () => pushAndSaveRoute(context, 'mos-itp', mosItpScreen),
+        );
+      case 'projects_dashboard':
+        if (!user.canAccessProjectsDashboard) {
+          return const SizedBox.shrink();
+        }
+        return _lightCard(
+          icon: Icons.dashboard_customize_outlined,
+          iconSize: 56,
+          title: 'Projects Dashboard',
+          subtitle:
+              'شيت Excel مشترك — تعديل من المكتب الفني ومدير العمليات مع ملاحظات متبادلة',
+          padding: 28,
+          onTap: () => pushAndSaveRoute(
+            context,
+            'projects-dashboard',
+            ProjectsDashboardScreen(currentUser: user),
+          ),
         );
       case 'shop_drawing':
         return _gradientCard(
