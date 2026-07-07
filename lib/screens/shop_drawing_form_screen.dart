@@ -8,6 +8,7 @@ import '../models/project_model.dart';
 import '../models/shop_drawing_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
+import '../widgets/shop_drawing_content_flags_panel.dart';
 import '../services/storage_service.dart';
 
 class ShopDrawingFormScreen extends StatefulWidget {
@@ -53,6 +54,9 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
   String? _projectsError;
   final List<_PendingAttachment> _attachments = [];
   List<ProjectModel> _projects = const [];
+  bool _contentSd = false;
+  bool _contentQs = false;
+  bool _contentDashboard = false;
 
   bool get _isEdit => widget.existing != null;
 
@@ -76,6 +80,9 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
       } else {
         _selectedProjectId = e.projectId;
       }
+      _contentSd = e.contentSd;
+      _contentQs = e.contentQs;
+      _contentDashboard = e.contentDashboard;
     }
     _loadProjects();
   }
@@ -266,6 +273,9 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
           notes: notes,
           attachments: _attachmentsPayload(),
           externalUrl: externalUrl,
+          contentSd: _contentSd,
+          contentQs: _contentQs,
+          contentDashboard: _contentDashboard,
         );
       } else {
         await _storage.createShopDrawing(
@@ -276,6 +286,9 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
           attachments: _attachmentsPayload(),
           documentType: widget.documentType,
           externalUrl: externalUrl,
+          contentSd: _contentSd,
+          contentQs: _contentQs,
+          contentDashboard: _contentDashboard,
         );
       }
       if (!mounted) return;
@@ -425,27 +438,45 @@ class _ShopDrawingFormScreenState extends State<ShopDrawingFormScreen> {
                   ),
                 );
               }),
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _saving ? null : _save,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF1B5E20),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+            const SizedBox(height: 28),
+            ShopDrawingContentFlagsPanel(
+              contentSd: _contentSd,
+              contentQs: _contentQs,
+              contentDashboard: _contentDashboard,
+              onSdChanged: (v) => setState(() => _contentSd = v),
+              onQsChanged: (v) => setState(() => _contentQs = v),
+              onDashboardChanged: (v) => setState(() => _contentDashboard = v),
+            ),
+            const SizedBox(height: 28),
+            Center(
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _saving ? null : _save,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF1B5E20),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: _saving
+                      ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(
+                          _isEdit ? 'إعادة الإرسال' : 'إرسال لمدير المشروعات',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                ),
               ),
-              child: _saving
-                  ? const SizedBox(
-                      height: 22,
-                      width: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : Text(
-                      _isEdit ? 'إعادة الإرسال' : 'إرسال لمدير المشروعات',
-                      style: const TextStyle(color: Colors.white),
-                    ),
             ),
           ],
         ),

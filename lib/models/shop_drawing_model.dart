@@ -109,6 +109,9 @@ class ShopDrawingModel {
   final String? currentAssigneeUserName;
   final String? returnReason;
   final String? externalUrl;
+  final bool contentSd;
+  final bool contentQs;
+  final bool contentDashboard;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? approvedAt;
@@ -128,6 +131,9 @@ class ShopDrawingModel {
     this.currentAssigneeUserName,
     this.returnReason,
     this.externalUrl,
+    this.contentSd = false,
+    this.contentQs = false,
+    this.contentDashboard = false,
     required this.createdAt,
     required this.updatedAt,
     this.approvedAt,
@@ -161,6 +167,13 @@ class ShopDrawingModel {
           map['current_assignee_user_name']?.toString(),
       returnReason: map['return_reason']?.toString(),
       externalUrl: map['external_url']?.toString() ?? map['externalUrl']?.toString(),
+      contentSd: shopDrawingBoolFromMap(map, 'content_sd', 'contentSd'),
+      contentQs: shopDrawingBoolFromMap(map, 'content_qs', 'contentQs'),
+      contentDashboard: shopDrawingBoolFromMap(
+        map,
+        'content_dashboard',
+        'contentDashboard',
+      ),
       createdAt: parseDate(map['created_at']),
       updatedAt: parseDate(map['updated_at']),
       approvedAt: parseDateOrNull(map['approved_at']),
@@ -201,6 +214,20 @@ class ShopDrawingModel {
         return status;
     }
   }
+}
+
+bool shopDrawingBoolFromMap(
+  Map<String, dynamic> map,
+  String snakeKey,
+  String camelKey,
+) {
+  final value = map[snakeKey] ?? map[camelKey];
+  if (value == true || value == 1) return true;
+  if (value is String) {
+    final normalized = value.trim().toLowerCase();
+    return normalized == 'true' || normalized == 't' || normalized == '1';
+  }
+  return false;
 }
 
 String shopDrawingNormalizeDocumentTypeFromMap(Map<String, dynamic> map) {

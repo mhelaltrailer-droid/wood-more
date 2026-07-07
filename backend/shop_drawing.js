@@ -117,7 +117,36 @@ async function ensureShopDrawingTables(pool) {
       END IF;
     END $$
   `).catch(() => {});
+  for (const col of ['content_sd', 'content_qs', 'content_dashboard']) {
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'shop_drawings' AND column_name = '${col}'
+        ) THEN
+          ALTER TABLE shop_drawings
+            ADD COLUMN ${col} BOOLEAN NOT NULL DEFAULT FALSE;
+        END IF;
+      END $$
+    `).catch(() => {});
+  }
   console.log('ensureShopDrawingTables: ok');
+}
+
+function shopDrawingBoolValue(value) {
+  return value === true || value === 1 || value === '1' ||
+    String(value ?? '').trim().toLowerCase() === 'true';
+}
+
+function shopDrawingParseContentFlags(body) {
+  const b = body || {};
+  return {
+    content_sd: shopDrawingBoolValue(b.contentSd ?? b.content_sd),
+    content_qs: shopDrawingBoolValue(b.contentQs ?? b.content_qs),
+    content_dashboard: shopDrawingBoolValue(b.contentDashboard ?? b.content_dashboard),
+  };
 }
 
 async function shopDrawingGetUser(pool, userId) {
@@ -222,6 +251,9 @@ function shopDrawingMapRow(row, attachments = [], actions = []) {
     return_reason: row.return_reason || null,
     document_type: shopDrawingNormalizeDocumentType(row.document_type),
     external_url: row.external_url || null,
+    content_sd: shopDrawingBoolValue(row.content_sd),
+    content_qs: shopDrawingBoolValue(row.content_qs),
+    content_dashboard: shopDrawingBoolValue(row.content_dashboard),
     created_at: row.created_at,
     updated_at: row.updated_at,
     approved_at: row.approved_at || null,
@@ -693,21 +725,26 @@ function registerShopDrawingRoutes(app, pool, deps) {
         b.externalUrl ?? b.external_url,
       );
       if (contentCheck.error) return res.status(400).json({ error: contentCheck.error });
+      const contentFlags = shopDrawingParseContentFlags(b);
 
       const now = new Date().toISOString();
       const ins = await pool.query(
         `INSERT INTO shop_drawings (
           project_id, project_name, notes, status, document_type, external_url,
+          content_sd, content_qs, content_dashboard,
           created_by_user_id, created_by_user_name,
           current_assignee_user_id, current_assignee_user_name,
           created_at, updated_at
-        ) VALUES ($1,$2,$3,'pending_pm',$4,$5,$6,$7,$8,$9,$10,$10) RETURNING id`,
+        ) VALUES ($1,$2,$3,'pending_pm',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13) RETURNING id`,
         [
           project.project_id,
           project.project_name,
           notes || null,
           documentType,
           contentCheck.externalUrl,
+          contentFlags.content_sd,
+          contentFlags.content_qs,
+          contentFlags.content_dashboard,
           userId,
           actor.name,
           parseInt(pm.id, 10),
@@ -781,18 +818,23 @@ function registerShopDrawingRoutes(app, pool, deps) {
         b.externalUrl ?? b.external_url,
       );
       if (contentCheck.error) return res.status(400).json({ error: contentCheck.error });
+      const contentFlags = shopDrawingParseContentFlags(b);
 
       const now = new Date().toISOString();
       await pool.query(
         `UPDATE shop_drawings SET project_id=$1, project_name=$2, notes=$3,
          status='pending_pm', return_reason=NULL, external_url=$4,
-         current_assignee_user_id=$5, current_assignee_user_name=$6,
-         updated_at=$7 WHERE id=$8`,
+         content_sd=$5, content_qs=$6, content_dashboard=$7,
+         current_assignee_user_id=$8, current_assignee_user_name=$9,
+         updated_at=$10 WHERE id=$11`,
         [
           project.project_id,
           project.project_name,
           notes || null,
           contentCheck.externalUrl,
+          contentFlags.content_sd,
+          contentFlags.content_qs,
+          contentFlags.content_dashboard,
           parseInt(pm.id, 10),
           pm.name,
           now,

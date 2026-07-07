@@ -9,6 +9,7 @@ import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
 import '../widgets/reports_sys_attachments_panel.dart';
+import '../widgets/shop_drawing_content_flags_panel.dart';
 import '../widgets/shop_drawing_timeline.dart';
 import 'shop_drawing_form_screen.dart';
 
@@ -372,6 +373,13 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
             readOnly: true,
           ),
         ],
+        const SizedBox(height: 20),
+        ShopDrawingContentFlagsPanel(
+          contentSd: d.contentSd,
+          contentQs: d.contentQs,
+          contentDashboard: d.contentDashboard,
+          readOnly: true,
+        ),
         const SizedBox(height: 12),
         ShopDrawingTimeline(actions: d.actions),
         if (canEdit) ...[

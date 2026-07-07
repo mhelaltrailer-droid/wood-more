@@ -313,6 +313,27 @@ void main() {
       expect(MosItpRecordModel.kindLabel('mos'), 'MoS');
       expect(MosItpRecordModel.kindLabel('itp'), 'ITP');
     });
+
+    test('ShopDrawingModel.fromMap يقرأ خانات SD / QS / Dashboard', () {
+      final m = ShopDrawingModel.fromMap({
+        'id': 9,
+        'project_name': 'P',
+        'status': 'pending_pm',
+        'created_by_user_id': 1,
+        'created_by_user_name': 'TO',
+        'created_at': '2026-07-07T10:00:00.000Z',
+        'updated_at': '2026-07-07T10:00:00.000Z',
+        'content_sd': true,
+        'content_qs': false,
+        'content_dashboard': true,
+      });
+      expect(m.contentSd, isTrue);
+      expect(m.contentQs, isFalse);
+      expect(m.contentDashboard, isTrue);
+
+      expect(shopDrawingBoolFromMap({'content_sd': 'true'}, 'content_sd', 'contentSd'), isTrue);
+      expect(shopDrawingBoolFromMap({'contentQs': '1'}, 'content_qs', 'contentQs'), isTrue);
+    });
   });
 
   group('حد حجم الملف 5MB', () {

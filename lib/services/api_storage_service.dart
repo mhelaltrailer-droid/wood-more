@@ -2269,6 +2269,9 @@ class ApiStorageService {
     required List<Map<String, dynamic>> attachments,
     required String documentType,
     String? externalUrl,
+    bool contentSd = false,
+    bool contentQs = false,
+    bool contentDashboard = false,
   }) async {
     final uri = Uri.parse(_path('shop-drawing'));
     final r = await http.post(
@@ -2284,6 +2287,9 @@ class ApiStorageService {
         'attachments': attachments,
         if (externalUrl != null && externalUrl.isNotEmpty)
           'externalUrl': externalUrl,
+        'contentSd': contentSd,
+        'contentQs': contentQs,
+        'contentDashboard': contentDashboard,
       }),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
@@ -2300,6 +2306,9 @@ class ApiStorageService {
     String? notes,
     required List<Map<String, dynamic>> attachments,
     String? externalUrl,
+    bool contentSd = false,
+    bool contentQs = false,
+    bool contentDashboard = false,
   }) async {
     final uri = Uri.parse(_path('shop-drawing/$drawingId'));
     final r = await http.put(
@@ -2313,6 +2322,9 @@ class ApiStorageService {
         if (notes != null) 'notes': notes,
         'attachments': attachments,
         'externalUrl': externalUrl,
+        'contentSd': contentSd,
+        'contentQs': contentQs,
+        'contentDashboard': contentDashboard,
       }),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
