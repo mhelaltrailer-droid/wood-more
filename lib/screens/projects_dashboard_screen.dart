@@ -7,7 +7,10 @@ import '../models/projects_dashboard_note_model.dart';
 import '../models/projects_dashboard_sheet_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
+import '../services/auth_persistence.dart';
 import '../services/storage_service.dart';
+import '../widgets/excel_sheet_view.dart';
+import 'login_screen.dart';
 
 class ProjectsDashboardScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -26,9 +29,9 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
 
   ProjectsDashboardSheetModel? _sheetMeta;
   String _fileName = 'projects_dashboard.xlsx';
-  String _sheetName = 'Sheet1';
-  List<List<String>> _rows = [];
-  final Map<String, TextEditingController> _cellControllers = {};
+  String? _fileData;
+  bool _sheetViewReady = false;
+  final ExcelSheetController _excelController = ExcelSheetController();
 
   ProjectsDashboardNoteModel? _latestPeerNote;
   ProjectsDashboardNoteModel? _latestTechnicalOfficeNote;
@@ -52,58 +55,26 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
 
   @override
   void dispose() {
-    for (final c in _cellControllers.values) {
-      c.dispose();
-    }
     _noteController.dispose();
     super.dispose();
-  }
-
-  String _cellKey(int r, int c) => '$r:$c';
-
-  void _disposeCellControllers() {
-    for (final c in _cellControllers.values) {
-      c.dispose();
-    }
-    _cellControllers.clear();
-  }
-
-  void _bindRowsToControllers() {
-    _disposeCellControllers();
-    for (var r = 0; r < _rows.length; r++) {
-      for (var c = 0; c < _rows[r].length; c++) {
-        final key = _cellKey(r, c);
-        _cellControllers[key] = TextEditingController(text: _rows[r][c]);
-      }
-    }
   }
 
   void _applySheet(ProjectsDashboardSheetModel sheet) {
     _sheetMeta = sheet;
     _fileName = sheet.fileName;
-    _sheetName = sheet.sheetName;
-    _rows = sheet.rowsJson.isEmpty ? [['']] : sheet.rowsJson;
-    _bindRowsToControllers();
-  }
-
-  void _syncControllersToRows() {
-    for (var r = 0; r < _rows.length; r++) {
-      for (var c = 0; c < _rows[r].length; c++) {
-        final key = _cellKey(r, c);
-        _rows[r][c] = _cellControllers[key]?.text ?? _rows[r][c];
-      }
-    }
+    _fileData = sheet.fileData;
   }
 
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
+      _sheetViewReady = false;
     });
     try {
       final sheet = await _api.getProjectsDashboardSheet(
         userId: widget.currentUser.id,
-        includeData: false,
+        includeData: true,
       );
       ProjectsDashboardNoteModel? latestPeer;
       ProjectsDashboardNoteModel? latestTo;
@@ -193,15 +164,28 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
   }
 
   Future<void> _saveSheet() async {
+    if (!_sheetViewReady) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('انتظر اكتمال تحميل الشيت أولاً')),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
-      _syncControllersToRows();
+      final b64 = await _excelController.exportXlsx();
+      if (b64.isEmpty) {
+        throw Exception('تعذر تصدير محتوى الشيت');
+      }
+      final name = _fileName.toLowerCase().endsWith('.xlsx')
+          ? _fileName
+          : '${_fileName.replaceAll(RegExp(r'\.[^.]+$'), '')}.xlsx';
       await _api.saveProjectsDashboardSheet(
         userId: widget.currentUser.id,
         userName: widget.currentUser.name,
-        fileName: _fileName,
-        rowsJson: _rows,
-        sheetName: _sheetName,
+        fileName: name,
+        fileMime:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        fileData: b64,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -290,6 +274,34 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
     }
   }
 
+  Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تسجيل الخروج'),
+        content: const Text('هل تريد تسجيل الخروج من الحساب؟'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('تسجيل الخروج'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    await clearCurrentUser();
+    await clearLastRoute();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
   String get _peerLabel {
     if (widget.currentUser.isTechnicalOffice) return 'مدير العمليات';
     if (widget.currentUser.isOperationManager) return 'المكتب الفني';
@@ -337,65 +349,37 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
   }
 
   Widget _buildSheetGrid() {
-    if (_rows.isEmpty) {
-      return const Center(child: Text('الشيت فارغ'));
+    final data = _fileData;
+    if (data == null || data.trim().isEmpty) {
+      return const Center(child: Text('لا يمكن عرض الشيت (لا توجد بيانات ملف)'));
     }
-    final colCount = _rows
-        .map((r) => r.length)
-        .fold<int>(0, (a, b) => a > b ? a : b);
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SingleChildScrollView(
-        child: DataTable(
-          headingRowHeight: 0,
-          columns: List.generate(
-            colCount,
-            (c) => const DataColumn(label: SizedBox.shrink()),
-          ),
-          rows: List.generate(_rows.length, (r) {
-            return DataRow(
-              cells: List.generate(colCount, (c) {
-                final key = _cellKey(r, c);
-                final controller = _cellControllers.putIfAbsent(
-                  key,
-                  () => TextEditingController(
-                    text: c < _rows[r].length ? _rows[r][c] : '',
-                  ),
-                );
-                return DataCell(
-                  SizedBox(
-                    width: 140,
-                    child: TextField(
-                      controller: controller,
-                      maxLines: 3,
-                      minLines: 1,
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.all(8),
-                      ),
-                      onChanged: widget.currentUser.canEditProjectsDashboardSheet
-                          ? (v) {
-                              while (_rows.length <= r) {
-                                _rows.add([]);
-                              }
-                              while (_rows[r].length <= c) {
-                                _rows[r].add('');
-                              }
-                              _rows[r][c] = v;
-                            }
-                          : null,
-                      readOnly:
-                          !widget.currentUser.canEditProjectsDashboardSheet,
-                    ),
-                  ),
-                );
-              }),
+    return Stack(
+      children: [
+        ExcelSheetView(
+          base64Data: data,
+          editable: widget.currentUser.canEditProjectsDashboardSheet,
+          controller: _excelController,
+          onReady: () {
+            if (mounted) setState(() => _sheetViewReady = true);
+          },
+          onError: (message) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('خطأ في عرض الشيت: $message'),
+                backgroundColor: Colors.red,
+              ),
             );
-          }),
+          },
         ),
-      ),
+        if (!_sheetViewReady)
+          const Positioned.fill(
+            child: ColoredBox(
+              color: Colors.white,
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          ),
+      ],
     );
   }
 
@@ -498,7 +482,16 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
   Widget build(BuildContext context) {
     if (!widget.currentUser.canAccessProjectsDashboard) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Projects Dashboard')),
+        appBar: AppBar(
+          title: const Text('Projects Dashboard'),
+          actions: [
+            IconButton(
+              onPressed: _logout,
+              icon: const Icon(Icons.logout),
+              tooltip: 'تسجيل الخروج',
+            ),
+          ],
+        ),
         body: const Center(child: Text('غير مصرح')),
       );
     }
@@ -520,6 +513,11 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
                   : const Icon(Icons.save_outlined),
               tooltip: 'حفظ الشيت',
             ),
+          IconButton(
+            onPressed: _logout,
+            icon: const Icon(Icons.logout),
+            tooltip: 'تسجيل الخروج',
+          ),
         ],
       ),
       body: _loading

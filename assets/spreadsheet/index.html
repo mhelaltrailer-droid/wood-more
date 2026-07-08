@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Excel Viewer</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/css/pluginsCss.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/plugins.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/css/luckysheet.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/assets/iconfont/iconfont.css" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    #luckysheet {
+      margin: 0;
+      padding: 0;
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      left: 0;
+      top: 0;
+    }
+    #wm-status {
+      position: absolute;
+      z-index: 1000;
+      left: 0;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #ffffff;
+      color: #1b5e20;
+      font-family: sans-serif;
+      font-size: 16px;
+    }
+    #wm-status.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="wm-status">جارٍ تحميل الشيت…</div>
+  <div id="luckysheet"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/js/plugin.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/luckysheet.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luckyexcel@1.0.1/dist/luckyexcel.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <script>
+    (function () {
+      var originalBase64 = null;
+
+      function post(obj) {
+        try {
+          if (window.Bridge && window.Bridge.postMessage) {
+            window.Bridge.postMessage(JSON.stringify(obj));
+          }
+        } catch (e) {}
+      }
+
+      function showStatus(text) {
+        var el = document.getElementById('wm-status');
+        if (!el) return;
+        if (text) {
+          el.textContent = text;
+          el.classList.remove('hidden');
+        } else {
+          el.classList.add('hidden');
+        }
+      }
+
+      function stripDataUrl(b64) {
+        var s = String(b64 || '').trim();
+        var comma = s.indexOf(',');
+        if (s.indexOf('data:') === 0 && comma >= 0) {
+          return s.slice(comma + 1);
+        }
+        return s;
+      }
+
+      function base64ToUint8Array(b64) {
+        var raw = atob(stripDataUrl(b64));
+        var len = raw.length;
+        var bytes = new Uint8Array(len);
+        for (var i = 0; i < len; i++) {
+          bytes[i] = raw.charCodeAt(i);
+        }
+        return bytes;
+      }
+
+      function uint8ToBase64(bytes) {
+        var CHUNK = 0x8000;
+        var out = '';
+        for (var i = 0; i < bytes.length; i += CHUNK) {
+          out += String.fromCharCode.apply(
+            null,
+            bytes.subarray(i, i + CHUNK)
+          );
+        }
+        return btoa(out);
+      }
+
+      function base64ToFile(b64, name) {
+        var bytes = base64ToUint8Array(b64);
+        return new File([bytes], name || 'sheet.xlsx', {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+      }
+
+      function cellValue(cell) {
+        if (cell == null) return '';
+        if (typeof cell !== 'object') return cell;
+        if (cell.v != null) return cell.v;
+        if (cell.m != null) return cell.m;
+        return '';
+      }
+
+      // Build a dense 2D value grid for one luckysheet sheet.
+      function buildGrid(sheet) {
+        var data = sheet && sheet.data;
+        if (data && data.length) {
+          return data.map(function (row) {
+            return (row || []).map(function (c) {
+              return cellValue(c);
+            });
+          });
+        }
+        var cd = (sheet && sheet.celldata) || [];
+        var maxR = 0;
+        var maxC = 0;
+        cd.forEach(function (o) {
+          if (o.r > maxR) maxR = o.r;
+          if (o.c > maxC) maxC = o.c;
+        });
+        var grid = [];
+        for (var r = 0; r <= maxR; r++) {
+          grid.push(new Array(maxC + 1).fill(''));
+        }
+        cd.forEach(function (o) {
+          grid[o.r][o.c] = cellValue(o.v);
+        });
+        return grid;
+      }
+
+      function createLuckysheet(sheets, title, editable) {
+        try {
+          window.luckysheet.destroy();
+        } catch (e) {}
+        window.luckysheet.create({
+          container: 'luckysheet',
+          title: title || 'Projects Dashboard',
+          lang: 'en',
+          allowEdit: !!editable,
+          showtoolbar: !!editable,
+          showtoolbarConfig: {
+            print: false,
+            chart: false,
+            pivotTable: false,
+            screenshot: false,
+          },
+          showinfobar: false,
+          showsheetbar: true,
+          showstatisticBar: false,
+          enableAddRow: !!editable,
+          enableAddBackTop: false,
+          sheetFormulaBar: !!editable,
+          data: sheets,
+          hook: {
+            workbookCreateAfter: function () {
+              showStatus(null);
+            },
+          },
+        });
+      }
+
+      window.WM = {
+        loadWorkbook: function (b64, editable) {
+          originalBase64 = stripDataUrl(b64);
+          showStatus('جارٍ تحميل الشيت…');
+          try {
+            var file = base64ToFile(originalBase64, 'sheet.xlsx');
+            window.LuckyExcel.transformExcelToLucky(
+              file,
+              function (exportJson) {
+                if (!exportJson || !exportJson.sheets || !exportJson.sheets.length) {
+                  showStatus('تعذر قراءة محتوى الملف');
+                  post({ type: 'error', message: 'empty_workbook' });
+                  return;
+                }
+                createLuckysheet(
+                  exportJson.sheets,
+                  exportJson.info && exportJson.info.name,
+                  editable
+                );
+                post({ type: 'loaded' });
+              },
+              function (err) {
+                showStatus('تعذر تحويل الملف');
+                post({ type: 'error', message: String(err) });
+              }
+            );
+          } catch (e) {
+            showStatus('خطأ: ' + e);
+            post({ type: 'error', message: String(e) });
+          }
+        },
+
+        exportWorkbook: function () {
+          (async function () {
+            try {
+              var wb = new ExcelJS.Workbook();
+              if (originalBase64) {
+                var buf = base64ToUint8Array(originalBase64).buffer;
+                await wb.xlsx.load(buf);
+              }
+              var sheets = window.luckysheet.getAllSheets();
+              for (var i = 0; i < sheets.length; i++) {
+                var s = sheets[i];
+                var ws = wb.worksheets[i];
+                if (!ws) {
+                  ws = wb.addWorksheet(s.name || 'Sheet' + (i + 1));
+                }
+                var grid = buildGrid(s);
+                for (var r = 0; r < grid.length; r++) {
+                  var row = grid[r];
+                  for (var c = 0; c < row.length; c++) {
+                    var v = row[c];
+                    var cell = ws.getRow(r + 1).getCell(c + 1);
+                    cell.value = v === '' || v == null ? null : v;
+                  }
+                }
+              }
+              var outBuf = await wb.xlsx.writeBuffer();
+              var b64 = uint8ToBase64(new Uint8Array(outBuf));
+              post({ type: 'exported', data: b64 });
+            } catch (e) {
+              post({ type: 'error', message: String(e) });
+            }
+          })();
+        },
+      };
+
+      function signalReady() {
+        if (
+          window.luckysheet &&
+          window.LuckyExcel &&
+          window.ExcelJS
+        ) {
+          post({ type: 'ready' });
+        } else {
+          setTimeout(signalReady, 150);
+        }
+      }
+
+      if (document.readyState === 'complete') {
+        signalReady();
+      } else {
+        window.addEventListener('load', signalReady);
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -72,6 +72,7 @@ dependencies:
   image: ^4.8.0
   open_file: ^3.5.11
   package_info_plus: ^8.3.0
+  webview_flutter: ^4.14.1
 
 dev_dependencies:
   flutter_test:
@@ -99,6 +100,7 @@ flutter:
   assets:
     - assets/images/
     - assets/config.json
+    - assets/spreadsheet/index.html
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

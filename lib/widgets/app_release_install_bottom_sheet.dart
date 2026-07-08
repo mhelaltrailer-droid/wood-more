@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../utils/app_release_install_messages.dart';
+
 /// Bottom sheet يظهر بعد تنزيل APK — خطوات: تنزيل → تثبيت → فتح.
 class AppReleaseInstallBottomSheet extends StatefulWidget {
   final String versionLabel;
@@ -60,19 +62,23 @@ class _AppReleaseInstallBottomSheetState
   bool _installing = false;
   bool _verifying = false;
   String? _installError;
+  String? _installInfo;
 
   Future<void> _handleInstall() async {
     setState(() {
       _installing = true;
       _installError = null;
+      _installInfo = null;
     });
     try {
-      final error = await widget.onInstallNow();
+      final message = await widget.onInstallNow();
       if (!mounted) return;
+      final settingsInfo = isInstallSettingsMessage(message);
       setState(() {
-        _installAttempted = true;
+        _installAttempted = message == null;
         _installing = false;
-        _installError = error;
+        _installError = settingsInfo ? null : message;
+        _installInfo = settingsInfo ? installSettingsUserMessage(message!) : null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -87,6 +93,7 @@ class _AppReleaseInstallBottomSheetState
     setState(() {
       _verifying = true;
       _installError = null;
+      _installInfo = null;
     });
     try {
       final updated = await widget.onVerifyUpdated();
@@ -188,6 +195,20 @@ class _AppReleaseInstallBottomSheetState
           Text(
             _installError!,
             style: TextStyle(color: Colors.red.shade700, fontSize: 13),
+          ),
+        ],
+        if (_installInfo != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              _installInfo!,
+              style: TextStyle(fontSize: 13, color: Colors.orange.shade900),
+            ),
           ),
         ],
         const SizedBox(height: 16),
