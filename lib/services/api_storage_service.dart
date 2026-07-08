@@ -35,7 +35,6 @@ import '../models/shop_drawing_model.dart';
 import '../models/app_release_info_model.dart';
 import '../models/projects_dashboard_note_model.dart';
 import '../models/projects_dashboard_sheet_model.dart';
-import '../utils/http_upload_progress.dart';
 import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
@@ -2535,6 +2534,8 @@ class ApiStorageService {
     return sb.toString();
   }
 
+  /// Uploads an app release in small base64 chunks so large APKs transfer
+  /// reliably (avoids a single huge request) and report real progress.
   Future<void> uploadAppRelease({
     required String requesterEmail,
     required String versionLabel,
@@ -2543,25 +2544,67 @@ class ApiStorageService {
     void Function(double progress)? onProgress,
   }) async {
     onProgress?.call(0);
+    final email = requesterEmail.trim().toLowerCase();
+
+    // Encoding phase: 0 -> 0.1
     final fileDataBase64 = await _encodeBase64WithProgress(
       fileBytes,
-      (fraction) => onProgress?.call(fraction * 0.15),
+      (fraction) => onProgress?.call(fraction * 0.1),
     );
-    final uri = Uri.parse(_path('app-release/upload'));
-    await postJsonWithProgress(
-      uri: uri,
-      body: {
-        'requesterEmail': requesterEmail.trim().toLowerCase(),
-        'versionLabel': versionLabel.trim(),
-        'fileName': fileName.trim(),
-        'fileData': fileDataBase64.trim(),
-      },
-      onProgress: (sent, total) {
-        if (total <= 0) return;
-        onProgress?.call(0.15 + (0.85 * sent / total));
-      },
-      timeout: const Duration(minutes: 15),
-    );
+
+    final uploadId =
+        '${DateTime.now().millisecondsSinceEpoch}_${fileBytes.length}';
+
+    // Split the base64 STRING into fixed-size pieces (string concatenation on
+    // the server reproduces the exact original base64).
+    const chunkChars = 3 * 1024 * 1024; // ~3MB per request
+    final totalChunks = (fileDataBase64.length / chunkChars).ceil();
+
+    Future<Map<String, dynamic>> post(
+      String path,
+      Map<String, dynamic> body,
+    ) async {
+      final r = await http
+          .post(
+            Uri.parse(_path(path)),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(minutes: 5));
+      if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+      return r.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(r.body) as Map<String, dynamic>;
+    }
+
+    await post('app-release/upload-init', {
+      'requesterEmail': email,
+      'uploadId': uploadId,
+    });
+
+    for (var i = 0; i < totalChunks; i++) {
+      final start = i * chunkChars;
+      final end =
+          start + chunkChars < fileDataBase64.length
+              ? start + chunkChars
+              : fileDataBase64.length;
+      await post('app-release/upload-chunk', {
+        'requesterEmail': email,
+        'uploadId': uploadId,
+        'chunkIndex': i,
+        'chunkData': fileDataBase64.substring(start, end),
+      });
+      onProgress?.call(0.1 + (0.9 * (i + 1) / totalChunks));
+    }
+
+    await post('app-release/upload-finalize', {
+      'requesterEmail': email,
+      'uploadId': uploadId,
+      'versionLabel': versionLabel.trim(),
+      'fileName': fileName.trim(),
+      'totalChunks': totalChunks,
+    });
+
     onProgress?.call(1);
   }
 

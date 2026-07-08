@@ -215,7 +215,7 @@ class _AppVersionsScreenState extends State<AppVersionsScreen> {
         fileBytes: _pickedBytes!,
         onProgress: (progress) {
           final pct = (progress * 100).round();
-          final phase = progress < 0.15
+          final phase = progress < 0.1
               ? 'جاري تجهيز الملف...'
               : 'جاري الرفع إلى الخادم...';
           _setTransferProgress(

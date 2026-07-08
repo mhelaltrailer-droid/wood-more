@@ -200,6 +200,15 @@ async function ensureAppReleaseTables() {
     await pool.query(
       'CREATE INDEX IF NOT EXISTS idx_app_release_downloads_release ON app_release_downloads(release_id)',
     ).catch(() => {});
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_release_upload_chunks (
+        upload_id TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        chunk_data TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (upload_id, chunk_index)
+      )
+    `);
     console.log('ensureAppReleaseTables: ok');
   } catch (e) {
     console.warn('ensureAppReleaseTables:', e.message);
@@ -6154,6 +6163,146 @@ app.post('/app-release/upload', async (req, res) => {
        RETURNING id`,
       [versionLabel, versionCode, fileName, fileData, sizeBytes, requesterEmail, now],
     );
+    res.json({
+      ok: true,
+      releaseId: parseInt(ins.rows[0].id, 10),
+      versionLabel,
+      versionCode,
+      sizeBytes,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+function appReleaseChunkAuth(b) {
+  const requesterEmail = String(b.requesterEmail ?? b.requester_email ?? '')
+    .trim()
+    .toLowerCase();
+  return requesterEmail === PRIMARY_APP_ADMIN_EMAIL ? requesterEmail : null;
+}
+
+// Chunked upload: start a new upload session (clears any previous chunks for this uploadId).
+app.post('/app-release/upload-init', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!appReleaseChunkAuth(b)) {
+      return res.status(403).json({ error: 'غير مصرح برفع نسخ التطبيق' });
+    }
+    const uploadId = String(b.uploadId ?? b.upload_id ?? '').trim();
+    if (!uploadId) {
+      return res.status(400).json({ error: 'uploadId is required' });
+    }
+    await pool.query('DELETE FROM app_release_upload_chunks WHERE upload_id = $1', [uploadId]);
+    res.json({ ok: true, uploadId, chunkSize: APP_RELEASE_CHUNK_BYTES });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+// Chunked upload: store a single base64 string chunk.
+app.post('/app-release/upload-chunk', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!appReleaseChunkAuth(b)) {
+      return res.status(403).json({ error: 'غير مصرح برفع نسخ التطبيق' });
+    }
+    const uploadId = String(b.uploadId ?? b.upload_id ?? '').trim();
+    const chunkIndex = parseInt(String(b.chunkIndex ?? b.chunk_index ?? ''), 10);
+    let chunkData = String(b.chunkData ?? b.chunk_data ?? '');
+    if (!uploadId) return res.status(400).json({ error: 'uploadId is required' });
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
+      return res.status(400).json({ error: 'chunkIndex is required' });
+    }
+    if (chunkData.startsWith('data:')) {
+      const comma = chunkData.indexOf(',');
+      if (comma >= 0) chunkData = chunkData.slice(comma + 1);
+    }
+    chunkData = chunkData.replace(/\s/g, '');
+    if (!chunkData) return res.status(400).json({ error: 'chunkData is required' });
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO app_release_upload_chunks (upload_id, chunk_index, chunk_data, created_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (upload_id, chunk_index) DO UPDATE SET chunk_data = EXCLUDED.chunk_data`,
+      [uploadId, chunkIndex, chunkData, now],
+    );
+    res.json({ ok: true, chunkIndex });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+// Chunked upload: assemble all chunks, validate, and publish the release.
+app.post('/app-release/upload-finalize', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!appReleaseChunkAuth(b)) {
+      return res.status(403).json({ error: 'غير مصرح برفع نسخ التطبيق' });
+    }
+    const requesterEmail = appReleaseChunkAuth(b);
+    const uploadId = String(b.uploadId ?? b.upload_id ?? '').trim();
+    const versionLabel = String(b.versionLabel ?? b.version_label ?? '').trim();
+    const fileName = String(b.fileName ?? b.file_name ?? '').trim();
+    const totalChunks = parseInt(String(b.totalChunks ?? b.total_chunks ?? ''), 10);
+    if (!uploadId) return res.status(400).json({ error: 'uploadId is required' });
+    if (!versionLabel) return res.status(400).json({ error: 'versionLabel is required (مثل V.10)' });
+    const versionCode = parseAppVersionCode(versionLabel);
+    if (versionCode <= 0) {
+      return res.status(400).json({ error: 'صيغة الإصدار غير صالحة (مثل V.10)' });
+    }
+    if (!fileName.toLowerCase().endsWith('.apk')) {
+      return res.status(400).json({ error: 'يجب رفع ملف APK فقط' });
+    }
+    if (!Number.isInteger(totalChunks) || totalChunks <= 0) {
+      return res.status(400).json({ error: 'totalChunks is required' });
+    }
+
+    const countR = await pool.query(
+      'SELECT COUNT(*)::int AS n FROM app_release_upload_chunks WHERE upload_id = $1',
+      [uploadId],
+    );
+    const have = countR.rows[0]?.n ?? 0;
+    if (have !== totalChunks) {
+      return res.status(400).json({
+        error: `chunks_incomplete (received ${have}/${totalChunks})`,
+      });
+    }
+
+    const chunksR = await pool.query(
+      `SELECT string_agg(chunk_data, '' ORDER BY chunk_index) AS file_data
+       FROM app_release_upload_chunks WHERE upload_id = $1`,
+      [uploadId],
+    );
+    let fileData = String(chunksR.rows[0]?.file_data ?? '').replace(/\s/g, '');
+    if (!fileData) {
+      return res.status(400).json({ error: 'fileData is empty' });
+    }
+
+    let sizeBytes = 0;
+    try {
+      sizeBytes = Buffer.from(fileData, 'base64').length;
+    } catch (_) {
+      return res.status(400).json({ error: 'fileData must be valid base64' });
+    }
+    if (sizeBytes <= 0) return res.status(400).json({ error: 'ملف APK فارغ' });
+    if (sizeBytes > APP_RELEASE_MAX_BYTES) {
+      await pool.query('DELETE FROM app_release_upload_chunks WHERE upload_id = $1', [uploadId]);
+      return res.status(400).json({ error: 'حجم الملف يتجاوز الحد المسموح (100 ميجا)' });
+    }
+
+    const now = new Date().toISOString();
+    await pool.query('DELETE FROM app_release_downloads');
+    await pool.query('DELETE FROM app_releases');
+    const ins = await pool.query(
+      `INSERT INTO app_releases
+        (version_label, version_code, file_name, file_data, size_bytes, uploaded_by_email, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
+      [versionLabel, versionCode, fileName, fileData, sizeBytes, requesterEmail, now],
+    );
+    await pool.query('DELETE FROM app_release_upload_chunks WHERE upload_id = $1', [uploadId]);
+
     res.json({
       ok: true,
       releaseId: parseInt(ins.rows[0].id, 10),
