@@ -58,7 +58,11 @@
       function post(obj) {
         try {
           if (window.Bridge && window.Bridge.postMessage) {
+            // Mobile: native WebView JS channel.
             window.Bridge.postMessage(JSON.stringify(obj));
+          } else if (window.parent && window.parent !== window) {
+            // Web: hosted inside an <iframe>, talk to the Flutter parent.
+            window.parent.postMessage(JSON.stringify(obj), '*');
           }
         } catch (e) {}
       }
@@ -244,6 +248,24 @@
           })();
         },
       };
+
+      // Web only: receive commands from the Flutter parent via postMessage.
+      // (On mobile the host calls window.WM.* directly through runJavaScript.)
+      window.addEventListener('message', function (ev) {
+        var raw = ev.data;
+        var obj;
+        try {
+          obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        } catch (e) {
+          return;
+        }
+        if (!obj || !obj.cmd) return;
+        if (obj.cmd === 'load') {
+          window.WM.loadWorkbook(obj.data, !!obj.editable);
+        } else if (obj.cmd === 'export') {
+          window.WM.exportWorkbook();
+        }
+      });
 
       function signalReady() {
         if (
