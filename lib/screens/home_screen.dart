@@ -98,8 +98,17 @@ class _HomeScreenState extends State<HomeScreen>
           ? await storage.getHomeIconsVisibilityConfig()
           : await storage.getHomeIconsVisibilityConfig();
       if (!mounted) return;
+      final role = widget.currentUser.role;
+      final defaults = IconVisibilityService.defaultForRole(role);
+      final stored = all[role];
+      final merged = Map<String, bool>.from(defaults);
+      if (stored != null) {
+        stored.forEach((key, value) {
+          merged[key] = value;
+        });
+      }
       setState(() {
-        _iconConfig = all[role] ?? IconVisibilityService.defaultForRole(role);
+        _iconConfig = merged;
       });
     } catch (_) {
       if (!mounted) return;

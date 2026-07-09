@@ -68,6 +68,7 @@ class IconVisibilityService {
     roleTechnicalOffice: [
       ..._shopDrawingOnlyHomeIcons,
       HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
+      HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
     ],
     roleTopManagement: _shopDrawingOnlyHomeIcons,
     roleSiteEngineer: [
@@ -121,6 +122,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
       HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
+      HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -145,6 +147,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
+      HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
     ],
   };
 

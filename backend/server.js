@@ -1250,6 +1250,7 @@ async function ensureHomeIconsVisibilitySetting() {
         qs_invs: true,
         mos_itp: true,
         projects_dashboard: true,
+        projects_dashboard_plus1: true,
       },
       app_admin: {
         attendance_reports: true,
@@ -1267,6 +1268,7 @@ async function ensureHomeIconsVisibilitySetting() {
         qs_invs: true,
         mos_itp: true,
         projects_dashboard: true,
+        projects_dashboard_plus1: true,
       },
       document_controller: {
         ir_mir: true,
@@ -1279,14 +1281,47 @@ async function ensureHomeIconsVisibilitySetting() {
       technical_office: {
         shop_drawing: true,
         projects_dashboard: true,
+        projects_dashboard_plus1: true,
       },
       top_management: {
         shop_drawing: true,
       },
     };
+
+    function mergeHomeIconsVisibilityDefaults(existing) {
+      const merged = existing && typeof existing === 'object' ? { ...existing } : {};
+      for (const [role, icons] of Object.entries(defaultConfig)) {
+        const roleMap =
+          merged[role] && typeof merged[role] === 'object' ? { ...merged[role] } : {};
+        for (const [iconId, visible] of Object.entries(icons)) {
+          if (roleMap[iconId] === undefined) roleMap[iconId] = visible;
+        }
+        merged[role] = roleMap;
+      }
+      return merged;
+    }
+
+    const r = await pool.query(
+      `SELECT value FROM app_settings WHERE key = 'home_icons_visibility' LIMIT 1`,
+    );
+    if (r.rows.length === 0) {
+      await pool.query(
+        `INSERT INTO app_settings (key, value) VALUES ('home_icons_visibility', $1)`,
+        [JSON.stringify(defaultConfig)],
+      );
+      return;
+    }
+
+    let existing = {};
+    try {
+      existing = JSON.parse(String(r.rows[0].value || '{}')) || {};
+    } catch (_) {
+      existing = {};
+    }
+    const merged = mergeHomeIconsVisibilityDefaults(existing);
     await pool.query(
-      `INSERT INTO app_settings (key, value) VALUES ('home_icons_visibility', $1) ON CONFLICT (key) DO NOTHING`,
-      [JSON.stringify(defaultConfig)]
+      `UPDATE app_settings SET value = $1 WHERE key = 'home_icons_visibility'`,
+      [JSON.stringify(merged)],
     );
   } catch (e) {
     console.warn('ensureHomeIconsVisibilitySetting:', e.message);

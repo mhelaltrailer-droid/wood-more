@@ -16,18 +16,20 @@ import '../widgets/projects_dashboard_desktop_gate.dart';
 import '../widgets/projects_dashboard_notes_section.dart';
 import 'login_screen.dart';
 
-/// Projects Dashboard — WebDAV variant (Excel saves directly to server).
-class ProjectsDashboardScreen extends StatefulWidget {
+/// Projects Dashboard +1 — download, edit in Excel, re-upload.
+class ProjectsDashboardPlus1Screen extends StatefulWidget {
   final UserModel currentUser;
 
-  const ProjectsDashboardScreen({super.key, required this.currentUser});
+  const ProjectsDashboardPlus1Screen({super.key, required this.currentUser});
 
   @override
-  State<ProjectsDashboardScreen> createState() => _ProjectsDashboardScreenState();
+  State<ProjectsDashboardPlus1Screen> createState() =>
+      _ProjectsDashboardPlus1ScreenState();
 }
 
-class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
-  static const _variant = ProjectsDashboardVariant.webdav;
+class _ProjectsDashboardPlus1ScreenState
+    extends State<ProjectsDashboardPlus1Screen> {
+  static const _variant = ProjectsDashboardVariant.upload;
 
   bool _loading = true;
   bool _busy = false;
@@ -103,7 +105,7 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
     }
   }
 
-  Future<void> _pickAndUploadInitial() async {
+  Future<void> _pickAndUpload({required bool isInitial}) async {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['xlsx', 'xls'],
@@ -127,7 +129,7 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
     try {
       final name = file.name.trim().isNotEmpty
           ? file.name.trim()
-          : 'projects_dashboard.xlsx';
+          : 'projects_dashboard_plus1.xlsx';
       final mime = name.toLowerCase().endsWith('.xls')
           ? 'application/vnd.ms-excel'
           : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -141,7 +143,11 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم رفع الشيت بنجاح')),
+        SnackBar(
+          content: Text(
+            isInitial ? 'تم رفع الشيت بنجاح' : 'تم رفع النسخة المحدّثة بنجاح',
+          ),
+        ),
       );
       await _load();
     } catch (e) {
@@ -154,36 +160,31 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
     }
   }
 
-  Future<void> _openInExcelWebdav() async {
-    if (!kIsWeb) return;
-    setState(() => _busy = true);
-    try {
-      final tokenInfo = await _api.createProjectsDashboardWebdavToken(
-        userId: widget.currentUser.id,
-        variant: _variant,
-      );
-      final officeUri = (tokenInfo['officeUri'] ?? '').toString();
-      if (officeUri.isEmpty) {
-        throw Exception('تعذر إنشاء رابط Excel');
-      }
-      openProjectsDashboardInExcel(officeUri);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'جاري فتح Excel… احفظ بـ Ctrl+S لحفظ التعديلات على السيرفر',
-          ),
-          duration: Duration(seconds: 6),
+  void _downloadSheet() {
+    if (!kIsWeb || _sheetMeta == null) return;
+    final url = _api.projectsDashboardSheetDownloadUrl(
+      userId: widget.currentUser.id,
+      variant: _variant,
+    );
+    downloadProjectsDashboardFile(url, _sheetMeta!.fileName);
+  }
+
+  void _openInExcelDirect() {
+    if (!kIsWeb || _sheetMeta == null) return;
+    final url = _api.projectsDashboardSheetDownloadUrl(
+      userId: widget.currentUser.id,
+      variant: _variant,
+    );
+    final officeUri = 'ms-excel:ofe|u|$url';
+    openProjectsDashboardInExcel(officeUri);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'جاري فتح Excel… بعد التعديل ارفع النسخة المحدّثة من الزر أدناه',
         ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+        duration: Duration(seconds: 6),
+      ),
+    );
   }
 
   Future<void> _logout() async {
@@ -224,19 +225,19 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
             const Icon(Icons.upload_file, size: 72, color: Colors.green),
             const SizedBox(height: 16),
             const Text(
-              'لم يُرفع شيت Excel بعد (WebDAV)',
+              'لم يُرفع شيت Excel بعد (+1)',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             const Text(
-              'المكتب الفني يرفع الملف لأول مرة. بعد الرفع يُفتح في Excel ويُحفظ مباشرة على السيرفر.',
+              'المكتب الفني يرفع الملف لأول مرة. بعد التعديل في Excel ارفع النسخة المحدّثة.',
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             if (widget.currentUser.canUploadProjectsDashboardInitial)
               FilledButton.icon(
-                onPressed: _busy ? null : _pickAndUploadInitial,
+                onPressed: _busy ? null : () => _pickAndUpload(isInitial: true),
                 icon: _busy
                     ? const SizedBox(
                         width: 18,
@@ -272,7 +273,7 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
                       Icon(
                         Icons.table_chart_outlined,
                         size: 40,
-                        color: Colors.green.shade700,
+                        color: Colors.orange.shade700,
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -302,13 +303,13 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
+                      color: Colors.orange.shade50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.blue.shade100),
+                      border: Border.all(color: Colors.orange.shade100),
                     ),
                     child: const Text(
-                      'الطريقة: WebDAV — افتح الملف في Microsoft Excel على ويندوز، '
-                      'عدّل ثم احفظ بـ Ctrl+S ليُحفظ مباشرة على السيرفر.',
+                      'الطريقة: تحميل → تعديل في Excel → رفع النسخة المحدّثة.\n'
+                      'بعد الحفظ محلياً على ويندوز، اضغط «رفع النسخة المحدّثة».',
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -317,10 +318,22 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
                     runSpacing: 12,
                     children: [
                       FilledButton.icon(
-                        onPressed: _busy ? null : _openInExcelWebdav,
-                        icon: const Icon(Icons.open_in_new),
-                        label: const Text('فتح في Excel (WebDAV)'),
+                        onPressed: _busy ? null : _downloadSheet,
+                        icon: const Icon(Icons.download_outlined),
+                        label: const Text('تحميل الملف'),
                       ),
+                      FilledButton.tonalIcon(
+                        onPressed: _busy ? null : _openInExcelDirect,
+                        icon: const Icon(Icons.open_in_new),
+                        label: const Text('فتح مباشرة في Excel'),
+                      ),
+                      if (widget.currentUser.canEditProjectsDashboardSheet)
+                        OutlinedButton.icon(
+                          onPressed:
+                              _busy ? null : () => _pickAndUpload(isInitial: false),
+                          icon: const Icon(Icons.upload_file),
+                          label: const Text('رفع النسخة المحدّثة'),
+                        ),
                       OutlinedButton.icon(
                         onPressed: _busy ? null : _load,
                         icon: const Icon(Icons.refresh),
@@ -369,10 +382,10 @@ class _ProjectsDashboardScreenState extends State<ProjectsDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return ProjectsDashboardDesktopGate(
-      title: 'Projects Dashboard',
+      title: 'Projects Dashboard +1',
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Projects Dashboard'),
+          title: const Text('Projects Dashboard +1'),
           actions: [
             IconButton(
               onPressed: _logout,

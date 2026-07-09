@@ -2610,12 +2610,14 @@ class ApiStorageService {
 
   Future<ProjectsDashboardSheetModel?> getProjectsDashboardSheet({
     required int userId,
-    bool includeData = true,
+    bool includeData = false,
+    String variant = 'webdav',
   }) async {
     final uri = Uri.parse(_path('projects-dashboard/sheet')).replace(
       queryParameters: {
         'userId': userId.toString(),
         'includeData': includeData.toString(),
+        'variant': variant,
       },
     );
     final r = await http.get(uri);
@@ -2626,6 +2628,35 @@ class ApiStorageService {
     );
   }
 
+  String projectsDashboardSheetDownloadUrl({
+    required int userId,
+    String variant = 'webdav',
+  }) {
+    final uri = Uri.parse(_path('projects-dashboard/sheet/download')).replace(
+      queryParameters: {
+        'userId': userId.toString(),
+        'variant': variant,
+      },
+    );
+    return uri.toString();
+  }
+
+  Future<Map<String, dynamic>> createProjectsDashboardWebdavToken({
+    required int userId,
+    String variant = 'webdav',
+  }) async {
+    final r = await http.post(
+      Uri.parse(_path('projects-dashboard/webdav/token')),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'variant': variant,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+  }
+
   Future<void> saveProjectsDashboardSheet({
     required int userId,
     required String userName,
@@ -2634,10 +2665,12 @@ class ApiStorageService {
     String? fileData,
     List<List<String>>? rowsJson,
     String? sheetName,
+    String variant = 'webdav',
   }) async {
     final body = <String, dynamic>{
       'userId': userId,
       'userName': userName,
+      'variant': variant,
     };
     if (fileName != null) body['fileName'] = fileName;
     if (fileMime != null) body['fileMime'] = fileMime;
@@ -2663,11 +2696,13 @@ class ApiStorageService {
   Future<List<ProjectsDashboardNoteModel>> listProjectsDashboardNotes({
     required int userId,
     required String authorRole,
+    String variant = 'webdav',
   }) async {
     final uri = Uri.parse(_path('projects-dashboard/notes')).replace(
       queryParameters: {
         'userId': userId.toString(),
         'authorRole': authorRole,
+        'variant': variant,
       },
     );
     final r = await http.get(uri);
@@ -2685,11 +2720,13 @@ class ApiStorageService {
   Future<ProjectsDashboardNoteModel?> getLatestProjectsDashboardNote({
     required int userId,
     required String authorRole,
+    String variant = 'webdav',
   }) async {
     final uri = Uri.parse(_path('projects-dashboard/notes/latest')).replace(
       queryParameters: {
         'userId': userId.toString(),
         'authorRole': authorRole,
+        'variant': variant,
       },
     );
     final r = await http.get(uri);
@@ -2704,6 +2741,7 @@ class ApiStorageService {
     required int userId,
     required String userName,
     required String body,
+    String variant = 'webdav',
   }) async {
     final r = await http.post(
       Uri.parse(_path('projects-dashboard/notes')),
@@ -2712,6 +2750,7 @@ class ApiStorageService {
         'userId': userId,
         'userName': userName,
         'body': body.trim(),
+        'variant': variant,
       }),
     );
     if (r.statusCode >= 400) throw Exception(r.body);

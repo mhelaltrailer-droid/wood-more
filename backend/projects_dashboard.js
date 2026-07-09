@@ -1,8 +1,20 @@
+const crypto = require('crypto');
+const express = require('express');
 const { formatArDateTimeEgypt } = require('./egypt_local_time');
 const XLSX = require('xlsx');
 
 const PD_PRIMARY_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 const PD_MAX_FILE_BYTES = 10 * 1024 * 1024;
+const PD_VARIANT_WEBDAV = 'webdav';
+const PD_VARIANT_UPLOAD = 'upload';
+const PD_WEBDAV_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const PD_WEBDAV_SECRET =
+  process.env.PD_WEBDAV_SECRET ||
+  process.env.DATABASE_URL ||
+  'wood-more-pd-webdav-dev-secret';
+
+/** @type {Map<string, { token: string, until: number, owner: string }>} */
+const pdWebdavLocks = new Map();
 
 function pdIsPrimaryAdminEmail(email) {
   return String(email || '').trim().toLowerCase() === PD_PRIMARY_ADMIN_EMAIL;
@@ -10,6 +22,12 @@ function pdIsPrimaryAdminEmail(email) {
 
 function pdNowIso() {
   return new Date().toISOString();
+}
+
+function pdNormalizeVariant(raw) {
+  const v = String(raw || PD_VARIANT_WEBDAV).trim().toLowerCase();
+  if (v === PD_VARIANT_UPLOAD) return PD_VARIANT_UPLOAD;
+  return PD_VARIANT_WEBDAV;
 }
 
 function pdEstimateBase64PayloadBytes(dataUrl) {
@@ -21,7 +39,9 @@ function pdEstimateBase64PayloadBytes(dataUrl) {
 }
 
 function pdNormalizeFileData(fileMime, fileData) {
-  const mime = String(fileMime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').trim();
+  const mime = String(
+    fileMime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ).trim();
   let data = String(fileData || '').trim();
   if (!data) return { fileMime: mime, fileData: '' };
   if (!data.startsWith('data:')) {
@@ -63,9 +83,12 @@ function pdParseXlsxToRows(buffer) {
 
 function pdRowsToXlsxBuffer(sheetName, rows) {
   const wb = XLSX.utils.book_new();
-  const safeRows = Array.isArray(rows) && rows.length
-    ? rows.map((row) => (Array.isArray(row) ? row : []).map((cell) => String(cell ?? '')))
-    : [['']];
+  const safeRows =
+    Array.isArray(rows) && rows.length
+      ? rows.map((row) =>
+          (Array.isArray(row) ? row : []).map((cell) => String(cell ?? '')),
+        )
+      : [['']];
   const ws = XLSX.utils.aoa_to_sheet(safeRows);
   XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Sheet1');
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -77,7 +100,9 @@ function pdBufferToDataUrl(buffer, mime) {
 }
 
 async function pdGetUser(pool, userId) {
-  const r = await pool.query('SELECT id, name, email, role FROM users WHERE id = $1', [userId]);
+  const r = await pool.query('SELECT id, name, email, role FROM users WHERE id = $1', [
+    userId,
+  ]);
   return r.rows[0] || null;
 }
 
@@ -115,6 +140,7 @@ function pdMapNoteRow(row) {
     body: row.body,
     createdAt,
     createdAtDisplay: formatArDateTimeEgypt(createdAt),
+    variant: row.variant || PD_VARIANT_WEBDAV,
   };
 }
 
@@ -130,6 +156,7 @@ function pdMapSheetRow(row, includeData) {
   }
   return {
     id: row.id,
+    variant: row.variant || PD_VARIANT_WEBDAV,
     fileName: row.file_name,
     fileMime: row.file_mime,
     fileData: includeData ? row.file_data : null,
@@ -145,10 +172,88 @@ function pdMapSheetRow(row, includeData) {
   };
 }
 
+function pdCreateWebdavToken(userId, variant) {
+  const exp = Date.now() + PD_WEBDAV_TOKEN_TTL_MS;
+  const payload = `${userId}:${variant}:${exp}`;
+  const sig = crypto.createHmac('sha256', PD_WEBDAV_SECRET).update(payload).digest('hex');
+  return `${exp}.${sig}`;
+}
+
+function pdVerifyWebdavToken(userId, variant, token) {
+  const raw = String(token || '').trim();
+  const dot = raw.indexOf('.');
+  if (dot < 0) return false;
+  const exp = parseInt(raw.slice(0, dot), 10);
+  const sig = raw.slice(dot + 1);
+  if (!exp || !sig || Date.now() > exp) return false;
+  const payload = `${userId}:${variant}:${exp}`;
+  const expected = crypto.createHmac('sha256', PD_WEBDAV_SECRET).update(payload).digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+  } catch (_) {
+    return false;
+  }
+}
+
+async function pdAuthFromQuery(pool, req, variant) {
+  const userId = parseInt(req.query.userId, 10);
+  const token = String(req.query.token || '').trim();
+  if (!userId || !token) return { ok: false, status: 401, error: 'auth_required' };
+  if (!pdVerifyWebdavToken(userId, variant, token)) {
+    return { ok: false, status: 401, error: 'invalid_token' };
+  }
+  const user = await pdGetUser(pool, userId);
+  if (!pdCanAccess(user)) return { ok: false, status: 403, error: 'forbidden' };
+  return { ok: true, user, userId };
+}
+
+async function pdGetSheetRow(pool, variant, includeData = false) {
+  const cols = includeData
+    ? 'id, variant, file_name, file_mime, file_data, rows_json, uploaded_by_user_id, uploaded_by_user_name, updated_by_user_id, updated_by_user_name, created_at, updated_at'
+    : 'id, variant, file_name, file_mime, rows_json, uploaded_by_user_id, uploaded_by_user_name, updated_by_user_id, updated_by_user_name, created_at, updated_at';
+  const r = await pool.query(
+    `SELECT ${cols} FROM projects_dashboard_sheet WHERE variant = $1`,
+    [variant],
+  );
+  return r.rows[0] || null;
+}
+
+function pdWebdavLockKey(variant, fileName) {
+  return `${variant}:${fileName}`;
+}
+
+function pdWebdavDateHeader(iso) {
+  try {
+    return new Date(iso).toUTCString();
+  } catch (_) {
+    return new Date().toUTCString();
+  }
+}
+
+function pdWebdavPropfindResponse({ href, fileName, updatedAt, contentLength }) {
+  const lastMod = pdWebdavDateHeader(updatedAt);
+  return `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>${href}</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:displayname>${fileName}</D:displayname>
+        <D:getlastmodified>${lastMod}</D:getlastmodified>
+        <D:getcontentlength>${contentLength}</D:getcontentlength>
+        <D:resourcetype/>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`;
+}
+
 async function ensureProjectsDashboardTables(pool) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS projects_dashboard_sheet (
-      id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      id SERIAL PRIMARY KEY,
+      variant TEXT NOT NULL DEFAULT 'webdav',
       file_name TEXT NOT NULL,
       file_mime TEXT NOT NULL DEFAULT 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       file_data TEXT NOT NULL,
@@ -163,11 +268,28 @@ async function ensureProjectsDashboardTables(pool) {
   `);
   await pool.query(`
     ALTER TABLE projects_dashboard_sheet
+      DROP CONSTRAINT IF EXISTS projects_dashboard_sheet_id_check
+  `);
+  await pool.query(`
+    ALTER TABLE projects_dashboard_sheet
+      ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT 'webdav'
+  `);
+  await pool.query(`
+    ALTER TABLE projects_dashboard_sheet
       ADD COLUMN IF NOT EXISTS rows_json TEXT NOT NULL DEFAULT '{"sheetName":"Sheet1","rows":[[""]]}'
+  `);
+  await pool.query(`
+    UPDATE projects_dashboard_sheet SET variant = 'webdav'
+    WHERE variant IS NULL OR variant = ''
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_dashboard_sheet_variant
+      ON projects_dashboard_sheet (variant)
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS projects_dashboard_notes (
       id SERIAL PRIMARY KEY,
+      variant TEXT NOT NULL DEFAULT 'webdav',
       author_role TEXT NOT NULL CHECK (author_role IN ('technical_office', 'operation_manager')),
       user_id INTEGER NOT NULL REFERENCES users(id),
       user_name TEXT NOT NULL,
@@ -176,8 +298,20 @@ async function ensureProjectsDashboardTables(pool) {
     )
   `);
   await pool.query(`
+    ALTER TABLE projects_dashboard_notes
+      ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT 'webdav'
+  `);
+  await pool.query(`
+    UPDATE projects_dashboard_notes SET variant = 'webdav'
+    WHERE variant IS NULL OR variant = ''
+  `);
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_projects_dashboard_notes_role_created
       ON projects_dashboard_notes (author_role, created_at DESC)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_projects_dashboard_notes_variant_role_created
+      ON projects_dashboard_notes (variant, author_role, created_at DESC)
   `);
 }
 
@@ -189,17 +323,219 @@ function registerProjectsDashboardRoutes(app, pool) {
       const user = await pdGetUser(pool, userId);
       if (!pdCanAccess(user)) return res.status(403).json({ error: 'forbidden' });
 
-      const includeData = String(req.query.includeData || 'true') !== 'false';
-      const cols = includeData
-        ? 'id, file_name, file_mime, file_data, rows_json, uploaded_by_user_id, uploaded_by_user_name, updated_by_user_id, updated_by_user_name, created_at, updated_at'
-        : 'id, file_name, file_mime, rows_json, uploaded_by_user_id, uploaded_by_user_name, updated_by_user_id, updated_by_user_name, created_at, updated_at';
+      const variant = pdNormalizeVariant(req.query.variant);
+      const includeData = String(req.query.includeData || 'false') === 'true';
+      const row = await pdGetSheetRow(pool, variant, includeData);
+      if (!row) return res.status(404).json({ error: 'no_sheet' });
 
-      const r = await pool.query(`SELECT ${cols} FROM projects_dashboard_sheet WHERE id = 1`);
-      if (!r.rows.length) return res.status(404).json({ error: 'no_sheet' });
-
-      res.json(pdMapSheetRow(r.rows[0], includeData));
+      res.json(pdMapSheetRow(row, includeData));
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.get('/projects-dashboard/sheet/download', async (req, res) => {
+    try {
+      const userId = parseInt(req.query.userId, 10);
+      if (!userId) return res.status(400).json({ error: 'userId required' });
+      const user = await pdGetUser(pool, userId);
+      if (!pdCanAccess(user)) return res.status(403).json({ error: 'forbidden' });
+
+      const variant = pdNormalizeVariant(req.query.variant);
+      const row = await pdGetSheetRow(pool, variant, true);
+      if (!row) return res.status(404).json({ error: 'no_sheet' });
+
+      const buffer = pdBase64ToBuffer(row.file_data);
+      const fileName = row.file_name || 'projects_dashboard.xlsx';
+      res.setHeader(
+        'Content-Type',
+        row.file_mime ||
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.setHeader('Content-Length', buffer.length);
+      res.send(buffer);
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.post('/projects-dashboard/webdav/token', async (req, res) => {
+    try {
+      const userId = parseInt((req.body || {}).userId, 10);
+      if (!userId) return res.status(400).json({ error: 'userId required' });
+      const user = await pdGetUser(pool, userId);
+      if (!pdCanEditSheet(user)) return res.status(403).json({ error: 'forbidden' });
+
+      const variant = pdNormalizeVariant((req.body || {}).variant);
+      if (variant !== PD_VARIANT_WEBDAV) {
+        return res.status(400).json({ error: 'webdav_token_webdav_only' });
+      }
+
+      const row = await pdGetSheetRow(pool, variant, false);
+      if (!row) return res.status(404).json({ error: 'no_sheet' });
+
+      const token = pdCreateWebdavToken(userId, variant);
+      const fileName = row.file_name || 'projects_dashboard.xlsx';
+      const base =
+        process.env.PD_PUBLIC_API_BASE_URL ||
+        `${req.protocol}://${req.get('host')}`;
+      const webdavUrl =
+        `${base.replace(/\/$/, '')}/projects-dashboard/webdav/${encodeURIComponent(fileName)}` +
+        `?userId=${userId}&token=${encodeURIComponent(token)}&variant=${variant}`;
+
+      res.json({
+        token,
+        fileName,
+        webdavUrl,
+        officeUri: `ms-excel:ofe|u|${webdavUrl}`,
+        expiresInMs: PD_WEBDAV_TOKEN_TTL_MS,
+      });
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  const webdavRaw = express.raw({
+    type: () => true,
+    limit: PD_MAX_FILE_BYTES + 1024,
+  });
+
+  app.all('/projects-dashboard/webdav/:fileName', webdavRaw, async (req, res) => {
+    try {
+      const variant = pdNormalizeVariant(req.query.variant);
+      if (variant !== PD_VARIANT_WEBDAV) {
+        return res.status(400).send('webdav variant only');
+      }
+
+      const auth = await pdAuthFromQuery(pool, req, variant);
+      if (!auth.ok) return res.status(auth.status).send(auth.error);
+
+      const fileName = decodeURIComponent(req.params.fileName || '');
+      const row = await pdGetSheetRow(pool, variant, true);
+      if (!row) return res.status(404).send('no_sheet');
+      if (row.file_name !== fileName) {
+        return res.status(404).send('file_name_mismatch');
+      }
+
+      const href = req.originalUrl.split('?')[0];
+      const buffer = pdBase64ToBuffer(row.file_data);
+      const lockKey = pdWebdavLockKey(variant, fileName);
+
+      if (req.method === 'OPTIONS') {
+        res.setHeader('DAV', '1,2');
+        res.setHeader('Allow', 'OPTIONS, GET, HEAD, PUT, PROPFIND, LOCK, UNLOCK');
+        return res.status(200).end();
+      }
+
+      if (req.method === 'PROPFIND') {
+        const xml = pdWebdavPropfindResponse({
+          href,
+          fileName,
+          updatedAt: row.updated_at,
+          contentLength: buffer.length,
+        });
+        res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+        return res.status(207).send(xml);
+      }
+
+      if (req.method === 'HEAD' || req.method === 'GET') {
+        res.setHeader(
+          'Content-Type',
+          row.file_mime ||
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        );
+        res.setHeader('Content-Length', buffer.length);
+        res.setHeader('Last-Modified', pdWebdavDateHeader(row.updated_at));
+        res.setHeader('DAV', '1,2');
+        if (req.method === 'HEAD') return res.status(200).end();
+        return res.send(buffer);
+      }
+
+      if (req.method === 'LOCK') {
+        const token = `opaquelocktoken:${crypto.randomUUID()}`;
+        const until = Date.now() + 30 * 60 * 1000;
+        pdWebdavLocks.set(lockKey, {
+          token,
+          until,
+          owner: String(auth.userId),
+        });
+        res.setHeader('Lock-Token', `<${token}>`);
+        res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+        return res.status(200).send(`<?xml version="1.0" encoding="utf-8"?>
+<D:prop xmlns:D="DAV:">
+  <D:lockdiscovery>
+    <D:activelock>
+      <D:locktype><D:write/></D:locktype>
+      <D:lockscope><D:exclusive/></D:lockscope>
+      <D:timeout>Second-1800</D:timeout>
+      <D:locktoken><D:href>${token}</D:href></D:locktoken>
+    </D:activelock>
+  </D:lockdiscovery>
+</D:prop>`);
+      }
+
+      if (req.method === 'UNLOCK') {
+        pdWebdavLocks.delete(lockKey);
+        return res.status(204).end();
+      }
+
+      if (req.method === 'PUT') {
+        const lock = pdWebdavLocks.get(lockKey);
+        const lockToken = String(req.headers['if'] || req.headers.lock-token || '');
+        if (lock && lock.until > Date.now() && !lockToken.includes(lock.token)) {
+          return res.status(423).send('locked');
+        }
+
+        const body = req.body;
+        let putBuffer;
+        if (Buffer.isBuffer(body)) {
+          putBuffer = body;
+        } else if (body instanceof Uint8Array) {
+          putBuffer = Buffer.from(body);
+        } else if (typeof body === 'string') {
+          putBuffer = Buffer.from(body, 'binary');
+        } else {
+          return res.status(400).send('empty_body');
+        }
+
+        if (!putBuffer.length) return res.status(400).send('empty_body');
+        if (putBuffer.length > PD_MAX_FILE_BYTES) {
+          return res.status(413).send('file_too_large');
+        }
+
+        const parsed = pdParseXlsxToRows(putBuffer);
+        const outFileData = pdBufferToDataUrl(
+          putBuffer,
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        );
+        const rowsPayload = JSON.stringify({
+          sheetName: parsed.sheetName,
+          rows: parsed.rows,
+        });
+        const now = pdNowIso();
+        const displayName = String(auth.user.name || '').trim() || '—';
+
+        await pool.query(
+          `UPDATE projects_dashboard_sheet SET
+            file_data = $1,
+            rows_json = $2,
+            updated_by_user_id = $3,
+            updated_by_user_name = $4,
+            updated_at = $5
+          WHERE variant = $6`,
+          [outFileData, rowsPayload, auth.userId, displayName, now, variant],
+        );
+
+        pdWebdavLocks.delete(lockKey);
+        res.setHeader('Last-Modified', pdWebdavDateHeader(now));
+        return res.status(204).end();
+      }
+
+      res.setHeader('Allow', 'OPTIONS, GET, HEAD, PUT, PROPFIND, LOCK, UNLOCK');
+      return res.status(405).send('method_not_allowed');
+    } catch (e) {
+      res.status(500).send(String(e.message));
     }
   });
 
@@ -213,6 +549,7 @@ function registerProjectsDashboardRoutes(app, pool) {
         fileData,
         rowsJson,
         sheetName,
+        variant: bodyVariant,
       } = req.body || {};
 
       const uid = parseInt(userId, 10);
@@ -221,7 +558,11 @@ function registerProjectsDashboardRoutes(app, pool) {
       const user = await pdGetUser(pool, uid);
       if (!pdCanEditSheet(user)) return res.status(403).json({ error: 'forbidden' });
 
-      const existing = await pool.query('SELECT id FROM projects_dashboard_sheet WHERE id = 1');
+      const variant = pdNormalizeVariant(bodyVariant);
+      const existing = await pool.query(
+        'SELECT id FROM projects_dashboard_sheet WHERE variant = $1',
+        [variant],
+      );
       const isFirstUpload = existing.rows.length === 0;
 
       if (isFirstUpload && !pdCanUploadInitial(user)) {
@@ -230,16 +571,20 @@ function registerProjectsDashboardRoutes(app, pool) {
 
       const now = pdNowIso();
       const displayName = String(userName || user.name || '').trim() || '—';
-      let outFileName = String(fileName || 'projects_dashboard.xlsx').trim();
-      let outMime = String(fileMime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').trim();
+      let outFileName = String(
+        fileName ||
+          (variant === PD_VARIANT_UPLOAD
+            ? 'projects_dashboard_plus1.xlsx'
+            : 'projects_dashboard.xlsx'),
+      ).trim();
+      let outMime = String(
+        fileMime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ).trim();
       let parsedRows;
       let parsedSheetName = String(sheetName || 'Sheet1').trim() || 'Sheet1';
       let outFileData;
 
       if (Array.isArray(rowsJson)) {
-        if (!isFirstUpload && existing.rows.length === 0) {
-          return res.status(400).json({ error: 'upload_file_first' });
-        }
         parsedRows = rowsJson.map((row) =>
           (Array.isArray(row) ? row : []).map((cell) => String(cell ?? '')),
         );
@@ -249,7 +594,7 @@ function registerProjectsDashboardRoutes(app, pool) {
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         );
         if (!outFileName.toLowerCase().endsWith('.xlsx')) {
-          outFileName = outFileName.replace(/\.[^.]+$/, '') + '.xlsx';
+          outFileName = `${outFileName.replace(/\.[^.]+$/, '')}.xlsx`;
         }
         outMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
       } else if (fileData) {
@@ -280,12 +625,21 @@ function registerProjectsDashboardRoutes(app, pool) {
       if (isFirstUpload) {
         await pool.query(
           `INSERT INTO projects_dashboard_sheet (
-            id, file_name, file_mime, file_data, rows_json,
+            variant, file_name, file_mime, file_data, rows_json,
             uploaded_by_user_id, uploaded_by_user_name,
             updated_by_user_id, updated_by_user_name,
             created_at, updated_at
-          ) VALUES (1, $1, $2, $3, $4, $5, $6, $5, $6, $7, $7)`,
-          [outFileName, outMime, outFileData, rowsPayload, uid, displayName, now],
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $6, $7, $8, $8)`,
+          [
+            variant,
+            outFileName,
+            outMime,
+            outFileData,
+            rowsPayload,
+            uid,
+            displayName,
+            now,
+          ],
         );
       } else {
         await pool.query(
@@ -297,13 +651,14 @@ function registerProjectsDashboardRoutes(app, pool) {
             updated_by_user_id = $5,
             updated_by_user_name = $6,
             updated_at = $7
-          WHERE id = 1`,
-          [outFileName, outMime, outFileData, rowsPayload, uid, displayName, now],
+          WHERE variant = $8`,
+          [outFileName, outMime, outFileData, rowsPayload, uid, displayName, now, variant],
         );
       }
 
       res.json({
         ok: true,
+        variant,
         updatedAt: now,
         updatedAtDisplay: formatArDateTimeEgypt(now),
         sheetName: parsedSheetName,
@@ -321,6 +676,7 @@ function registerProjectsDashboardRoutes(app, pool) {
       const user = await pdGetUser(pool, userId);
       if (!pdCanAccess(user)) return res.status(403).json({ error: 'forbidden' });
 
+      const variant = pdNormalizeVariant(req.query.variant);
       const authorRole = String(req.query.authorRole || '').trim();
       let roles = [];
       if (authorRole === 'all') {
@@ -335,11 +691,11 @@ function registerProjectsDashboardRoutes(app, pool) {
       }
 
       const r = await pool.query(
-        `SELECT id, author_role, user_id, user_name, body, created_at
+        `SELECT id, variant, author_role, user_id, user_name, body, created_at
          FROM projects_dashboard_notes
-         WHERE author_role = ANY($1::text[])
+         WHERE variant = $1 AND author_role = ANY($2::text[])
          ORDER BY created_at DESC`,
-        [roles],
+        [variant, roles],
       );
       res.json(r.rows.map(pdMapNoteRow));
     } catch (e) {
@@ -361,13 +717,14 @@ function registerProjectsDashboardRoutes(app, pool) {
       const user = await pdGetUser(pool, userId);
       if (!pdCanAccess(user)) return res.status(403).json({ error: 'forbidden' });
 
+      const variant = pdNormalizeVariant(req.query.variant);
       const r = await pool.query(
-        `SELECT id, author_role, user_id, user_name, body, created_at
+        `SELECT id, variant, author_role, user_id, user_name, body, created_at
          FROM projects_dashboard_notes
-         WHERE author_role = $1
+         WHERE variant = $1 AND author_role = $2
          ORDER BY created_at DESC
          LIMIT 1`,
-        [authorRole],
+        [variant, authorRole],
       );
       if (!r.rows.length) return res.status(404).json({ error: 'no_notes' });
       res.json(pdMapNoteRow(r.rows[0]));
@@ -378,7 +735,7 @@ function registerProjectsDashboardRoutes(app, pool) {
 
   app.post('/projects-dashboard/notes', async (req, res) => {
     try {
-      const { userId, userName, body } = req.body || {};
+      const { userId, userName, body, variant: bodyVariant } = req.body || {};
       const uid = parseInt(userId, 10);
       const text = String(body || '').trim();
       if (!uid || !text) return res.status(400).json({ error: 'userId and body required' });
@@ -387,17 +744,19 @@ function registerProjectsDashboardRoutes(app, pool) {
       const authorRole = pdNoteAuthorRole(user);
       if (!authorRole) return res.status(403).json({ error: 'forbidden' });
 
+      const variant = pdNormalizeVariant(bodyVariant);
       const now = pdNowIso();
       const displayName = String(userName || user.name || '').trim() || '—';
       const ins = await pool.query(
-        `INSERT INTO projects_dashboard_notes (author_role, user_id, user_name, body, created_at)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO projects_dashboard_notes (variant, author_role, user_id, user_name, body, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id`,
-        [authorRole, uid, displayName, text, now],
+        [variant, authorRole, uid, displayName, text, now],
       );
 
       res.status(201).json({
         id: ins.rows[0].id,
+        variant,
         authorRole,
         userId: uid,
         userName: displayName,
@@ -413,7 +772,9 @@ function registerProjectsDashboardRoutes(app, pool) {
   app.delete('/projects-dashboard/notes/:id', async (req, res) => {
     try {
       const noteId = parseInt(req.params.id, 10);
-      const requesterEmail = String(req.query.requesterEmail || req.body?.requesterEmail || '').trim();
+      const requesterEmail = String(
+        req.query.requesterEmail || req.body?.requesterEmail || '',
+      ).trim();
       if (!noteId) return res.status(400).json({ error: 'invalid id' });
       if (!pdIsPrimaryAdminEmail(requesterEmail)) {
         return res.status(403).json({ error: 'forbidden' });
@@ -435,4 +796,6 @@ module.exports = {
   ensureProjectsDashboardTables,
   registerProjectsDashboardRoutes,
   PD_PRIMARY_ADMIN_EMAIL,
+  PD_VARIANT_WEBDAV,
+  PD_VARIANT_UPLOAD,
 };
