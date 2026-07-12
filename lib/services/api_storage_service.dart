@@ -1885,6 +1885,41 @@ class ApiStorageService {
         .toList();
   }
 
+  /// طلبات سحب الخامات في الفترة (لتقرير متابعة خطة اليوم).
+  Future<List<WithdrawalRequestModel>> getWithdrawalRequestsForPeriod({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    int? projectId,
+    int? engineerUserId,
+  }) async {
+    final fromD = DateTime(dateFrom.year, dateFrom.month, dateFrom.day);
+    final toD = DateTime(dateTo.year, dateTo.month, dateTo.day);
+    final params = <String, String>{
+      'dateFrom':
+          '${fromD.year.toString().padLeft(4, '0')}-${fromD.month.toString().padLeft(2, '0')}-${fromD.day.toString().padLeft(2, '0')}',
+      'dateTo':
+          '${toD.year.toString().padLeft(4, '0')}-${toD.month.toString().padLeft(2, '0')}-${toD.day.toString().padLeft(2, '0')}',
+    };
+    if (projectId != null) params['projectId'] = projectId.toString();
+    if (engineerUserId != null) {
+      params['engineerUserId'] = engineerUserId.toString();
+    }
+    final uri = Uri.parse(
+      _path('withdrawal-requests-for-period'),
+    ).replace(queryParameters: params);
+    final r = await http.get(uri);
+    if (r.statusCode == 404) return [];
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) => WithdrawalRequestModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
   Future<WithdrawalRequestModel?> getOpenWithdrawalRequestForLocationPhase({
     required int locationId,
     required String phase,

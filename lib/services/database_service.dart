@@ -3651,6 +3651,50 @@ class DatabaseService {
     return maps.map(_wrFromRow).toList();
   }
 
+  Future<List<WithdrawalRequestModel>> getWithdrawalRequestsForPeriod({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    int? projectId,
+    int? engineerUserId,
+  }) async {
+    final db = await database;
+    final fromKey = DateTime(dateFrom.year, dateFrom.month, dateFrom.day);
+    final toKey = DateTime(dateTo.year, dateTo.month, dateTo.day);
+    final maps = await db.query('withdrawal_requests', orderBy: 'id ASC');
+    final projectNameById = <int, String>{};
+    try {
+      final projects = await db.query('projects', columns: ['id', 'name']);
+      for (final p in projects) {
+        final id = p['id'] is int
+            ? p['id'] as int
+            : int.tryParse(p['id']?.toString() ?? '') ?? 0;
+        if (id > 0) {
+          projectNameById[id] = (p['name']?.toString() ?? '').trim();
+        }
+      }
+    } catch (_) {}
+    final out = <WithdrawalRequestModel>[];
+    for (final m in maps) {
+      final createdStr = m['created_at']?.toString() ?? '';
+      final dt = DateTime.tryParse(createdStr);
+      if (dt == null) continue;
+      final dOnly = DateTime(dt.year, dt.month, dt.day);
+      if (dOnly.isBefore(fromKey) || dOnly.isAfter(toKey)) continue;
+      final pid = m['project_id'] is int
+          ? m['project_id'] as int
+          : int.tryParse(m['project_id']?.toString() ?? '') ?? 0;
+      if (projectId != null && pid != projectId) continue;
+      final eid = m['engineer_user_id'] is int
+          ? m['engineer_user_id'] as int
+          : int.tryParse(m['engineer_user_id']?.toString() ?? '') ?? 0;
+      if (engineerUserId != null && eid != engineerUserId) continue;
+      final row = Map<String, dynamic>.from(m);
+      row['project_name'] = projectNameById[pid];
+      out.add(WithdrawalRequestModel.fromMap(row));
+    }
+    return out;
+  }
+
   Future<WithdrawalRequestModel?> getOpenWithdrawalRequestForLocationPhase({
     required int locationId,
     required String phase,

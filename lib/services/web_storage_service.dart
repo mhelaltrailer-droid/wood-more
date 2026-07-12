@@ -2827,6 +2827,15 @@ class WebStorageService {
     _withdrawalRequestsUnsupported();
   }
 
+  Future<List<WithdrawalRequestModel>> getWithdrawalRequestsForPeriod({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    int? projectId,
+    int? engineerUserId,
+  }) async {
+    return [];
+  }
+
   Future<WithdrawalRequestModel?> getOpenWithdrawalRequestForLocationPhase({
     required int locationId,
     required String phase,

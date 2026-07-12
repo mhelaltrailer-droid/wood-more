@@ -4165,6 +4165,44 @@ app.get('/withdrawal-requests/for-engineer-project', async (req, res) => {
   }
 });
 
+// طلبات سحب الخامات ضمن فترة (لتقرير متابعة خطة اليوم — عمود سحب الخامات)
+app.get('/withdrawal-requests-for-period', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, projectId, engineerUserId } = req.query;
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'dateFrom and dateTo required' });
+    }
+    const fromD = String(dateFrom).slice(0, 10);
+    const toD = String(dateTo).slice(0, 10);
+    let sql = `
+      SELECT wr.*, p.name AS project_name
+      FROM withdrawal_requests wr
+      LEFT JOIN projects p ON p.id = wr.project_id
+      WHERE substring(wr.created_at from 1 for 10)::date >= $1::date
+        AND substring(wr.created_at from 1 for 10)::date <= $2::date
+    `;
+    const params = [fromD, toD];
+    if (projectId !== undefined && projectId !== '') {
+      params.push(parseInt(String(projectId), 10));
+      sql += ` AND wr.project_id = $${params.length}`;
+    }
+    if (engineerUserId !== undefined && engineerUserId !== '') {
+      params.push(parseInt(String(engineerUserId), 10));
+      sql += ` AND wr.engineer_user_id = $${params.length}`;
+    }
+    sql += ' ORDER BY wr.id ASC';
+    const r = await pool.query(sql, params);
+    res.json(
+      r.rows.map((row) => ({
+        ...withdrawalRequestRowToJson(row),
+        project_name: row.project_name,
+      }))
+    );
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 app.get('/withdrawal-requests/open', async (req, res) => {
   try {
     const locationId = parseInt(String(req.query.locationId ?? ''), 10);
