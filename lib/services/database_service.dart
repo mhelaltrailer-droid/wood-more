@@ -4229,7 +4229,7 @@ class DatabaseService {
         submitterId,
         title: 'تم اعتماد بيان الصرف',
         body:
-            'تم اعتماد بيان الصرف الخاص بكم من مدير المشروعات${description.isNotEmpty ? '\nالبيان: $description' : ''}\nالمبلغ: ${amount.toFixed(2)}${projectName != null && projectName.isNotEmpty ? '\nالمشروع: $projectName' : ''}',
+            'تم اعتماد بيان الصرف الخاص بكم من مدير المشروعات${description.isNotEmpty ? '\nالبيان: $description' : ''}\nالمبلغ: ${amount.toStringAsFixed(2)}${projectName != null && projectName.isNotEmpty ? '\nالمشروع: $projectName' : ''}',
         eventType: 'expense_statement_approved',
         actorUserId: actorUserId,
         actorUserName: actor['name'] as String?,
@@ -4253,7 +4253,7 @@ class DatabaseService {
         submitterId,
         title: 'تم رفض بيان الصرف',
         body:
-            'تم رفض بيان الصرف الخاص بكم من مدير المشروعات ويجب إعادة إدخاله مرة أخرى.\nسبب الرفض: ${reason.trim()}${description.isNotEmpty ? '\nالبيان: $description' : ''}\nالمبلغ: ${amount.toFixed(2)}',
+            'تم رفض بيان الصرف الخاص بكم من مدير المشروعات ويجب إعادة إدخاله مرة أخرى.\nسبب الرفض: ${reason.trim()}${description.isNotEmpty ? '\nالبيان: $description' : ''}\nالمبلغ: ${amount.toStringAsFixed(2)}',
         eventType: 'expense_statement_rejected',
         actorUserId: actorUserId,
         actorUserName: actor['name'] as String?,
