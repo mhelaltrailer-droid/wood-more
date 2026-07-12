@@ -37,13 +37,23 @@ class IconVisibilityService {
     label: 'الأرصدة / المصروفات',
   );
 
+  static const HomeIconItem managerCustodyExpensesIcon = HomeIconItem(
+    id: 'manager_custody_expenses',
+    label: 'العهد/تقارير المصروفات',
+  );
+
+  static const HomeIconItem custodyExpensesViewIcon = HomeIconItem(
+    id: 'custody_expenses_view',
+    label: 'العهده/ المصروفات',
+  );
+
   static const List<HomeIconItem> _projectManagerHomeIcons = [
     HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
     HomeIconItem(
       id: 'work_plan_tracking_report',
       label: 'تقارير متابعة خطط اليوم/الغد',
     ),
-    HomeIconItem(id: 'new_icon', label: 'New icon'),
+    HomeIconItem(id: 'new_icon', label: 'Control'),
     HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
     HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
     HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
@@ -95,7 +105,7 @@ class IconVisibilityService {
     roleDocumentController: _documentControllerHomeIcons,
     roleSiteEngineerManager: [
       ..._projectManagerHomeIcons,
-      balancesExpensesIcon,
+      managerCustodyExpensesIcon,
     ],
     roleGeneralSupervisor: [
       HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),
@@ -112,7 +122,7 @@ class IconVisibilityService {
         id: 'postpone_fines_reports',
         label: 'تقارير التأجيل/الغرامات',
       ),
-      HomeIconItem(id: 'new_icon', label: 'New icon'),
+      HomeIconItem(id: 'new_icon', label: 'Control'),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
       HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
       HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
@@ -123,6 +133,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
       HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
       HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
+      custodyExpensesViewIcon,
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -134,7 +145,7 @@ class IconVisibilityService {
         id: 'postpone_fines_reports',
         label: 'تقارير التأجيل/الغرامات',
       ),
-      HomeIconItem(id: 'new_icon', label: 'New icon'),
+      HomeIconItem(id: 'new_icon', label: 'Control'),
       HomeIconItem(id: 'reports', label: 'التقارير'),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
       HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),

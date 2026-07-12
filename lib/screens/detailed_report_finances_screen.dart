@@ -11,17 +11,29 @@ import 'home_screen.dart';
 
 const int _kMaxExpenseItems = 4;
 
-/// العهدة والمصروفات لمهندس الموقع: بنود صرف تُضاف تباعاً (حتى 4) وخصم الرصيد.
+/// العهدة والمصروفات: بنود صرف تُضاف تباعاً (حتى 4).
+/// مهندس الموقع يرسل للاعتماد؛ مدير المشروعات يحفظ معتمداً مباشرة.
 class DetailedReportFinancesScreen extends StatefulWidget {
   final UserModel user;
   final DetailedReportModel report;
   final bool showProjectSelector;
+
+  /// إن true: المشروع اختياري والحفظ معتمد فوراً مع خصم رصيد المُدخل.
+  final bool autoApprove;
+
+  /// إن true: المشروع إجباري عند إظهار منتقي المشروع.
+  final bool projectRequired;
+
+  final String submitButtonLabel;
 
   const DetailedReportFinancesScreen({
     super.key,
     required this.user,
     required this.report,
     this.showProjectSelector = false,
+    this.autoApprove = false,
+    this.projectRequired = true,
+    this.submitButtonLabel = 'ارسال لمدير المشروعات',
   });
 
   /// فتح مباشر من أيقونة «العهدة/المصروفات» بدون خطة عمل.
@@ -31,6 +43,27 @@ class DetailedReportFinancesScreen extends StatefulWidget {
     return DetailedReportFinancesScreen(
       user: user,
       showProjectSelector: true,
+      projectRequired: true,
+      autoApprove: false,
+      submitButtonLabel: 'ارسال لمدير المشروعات',
+      report: DetailedReportModel(
+        userId: user.id,
+        userName: user.name,
+        reportDatetime: today,
+      ),
+    );
+  }
+
+  /// إدخال مباشر من مدير المشروعات — معتمد فوراً وخصم من رصيده.
+  factory DetailedReportFinancesScreen.managerDirectEntry({required UserModel user}) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    return DetailedReportFinancesScreen(
+      user: user,
+      showProjectSelector: true,
+      projectRequired: false,
+      autoApprove: true,
+      submitButtonLabel: 'تأكيد/حفظ',
       report: DetailedReportModel(
         userId: user.id,
         userName: user.name,
@@ -117,7 +150,9 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
   }
 
   Future<void> _save() async {
-    if (widget.showProjectSelector && _selectedProject == null) {
+    if (widget.showProjectSelector &&
+        widget.projectRequired &&
+        _selectedProject == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('اختر المشروع'), backgroundColor: Colors.orange),
       );
@@ -135,35 +170,29 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
     }
     setState(() => _saving = true);
     try {
-      final existingId = widget.report.id;
-      final projectId = widget.showProjectSelector ? _selectedProject!.id : widget.report.projectId;
-      final projectName = widget.showProjectSelector ? _selectedProject!.name : widget.report.projectName;
-      if (existingId != null) {
-        await _db.patchDetailedReportExpenses(
-          reportId: existingId,
-          userId: widget.report.userId,
-          expenses: toSave,
-        );
-      } else {
-        final reportWithExpenses = DetailedReportModel(
-          userId: widget.report.userId,
-          userName: widget.report.userName,
-          reportDatetime: widget.report.reportDatetime,
-          projectId: projectId,
-          projectName: projectName,
-          supervisorId: widget.report.supervisorId,
-          createdAt: widget.report.createdAt,
-          summary: widget.report.summary,
-          lines: widget.report.lines,
-          expenses: toSave,
-          attachments: widget.report.attachments,
-        );
-        await _db.addDetailedReport(reportWithExpenses);
-      }
+      final projectId = widget.showProjectSelector
+          ? _selectedProject?.id
+          : widget.report.projectId;
+      final projectName = widget.showProjectSelector
+          ? _selectedProject?.name
+          : widget.report.projectName;
+
+      await _db.createExpenseStatements(
+        userId: widget.user.id,
+        projectId: projectId,
+        projectName: projectName,
+        expenses: toSave,
+        autoApprove: widget.autoApprove,
+      );
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('تم الحفظ'),
+        SnackBar(
+          content: Text(
+            widget.autoApprove
+                ? 'تم حفظ بيان الصرف وخصم الرصيد'
+                : 'تم إرسال بيان الصرف لمدير المشروعات',
+          ),
           backgroundColor: Colors.green,
         ),
       );
@@ -195,9 +224,10 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
 
   @override
   Widget build(BuildContext context) {
+    final projectLabel = widget.projectRequired ? 'اسم المشروع *' : 'اسم المشروع (اختياري)';
     return Scaffold(
       appBar: AppBar(
-        title: const Text('العهدة و المصروفات'),
+        title: Text(widget.autoApprove ? 'ادخال بيان صرف' : 'العهدة و المصروفات'),
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
       ),
@@ -221,23 +251,32 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
             else if (_projects.isEmpty)
               const Text('لا توجد مشاريع متاحة', style: TextStyle(color: Colors.red))
             else
-              DropdownButtonFormField<ProjectModel>(
+              DropdownButtonFormField<ProjectModel?>(
                 value: _selectedProject,
                 isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'اسم المشروع *',
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  labelText: projectLabel,
+                  border: const OutlineInputBorder(),
                 ),
-                items: _projects
-                    .map((p) => DropdownMenuItem(value: p, child: Text(p.name)))
-                    .toList(),
+                items: [
+                  if (!widget.projectRequired)
+                    const DropdownMenuItem<ProjectModel?>(
+                      value: null,
+                      child: Text('— بدون مشروع —'),
+                    ),
+                  ..._projects.map(
+                    (p) => DropdownMenuItem<ProjectModel?>(value: p, child: Text(p.name)),
+                  ),
+                ],
                 onChanged: (v) => setState(() => _selectedProject = v),
               ),
             const SizedBox(height: 16),
           ],
-          const Text(
-            'أدخل بند الصرف ثم أضف المزيد عند الحاجة (حتى $_kMaxExpenseItems بنود). بيان المبلغ وإرفاق صورة اختياري لكل بند.',
-            style: TextStyle(fontWeight: FontWeight.bold),
+          Text(
+            widget.autoApprove
+                ? 'أدخل بند الصرف ثم أضف المزيد عند الحاجة (حتى $_kMaxExpenseItems بنود). يُحفظ معتمداً ويُخصم من رصيدك مباشرة.'
+                : 'أدخل بند الصرف ثم أضف المزيد عند الحاجة (حتى $_kMaxExpenseItems بنود). لن يُخصم من رصيدك إلا بعد اعتماد مدير المشروعات.',
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
           ...List.generate(_expenses.length, (i) {
@@ -266,7 +305,7 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
             ),
             child: _saving
                 ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Text('تأكيد/حفظ'),
+                : Text(widget.submitButtonLabel),
           ),
         ],
       ),

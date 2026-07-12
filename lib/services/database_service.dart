@@ -27,6 +27,7 @@ import '../models/ms_sd_record_model.dart';
 import '../models/mos_itp_record_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../models/reports_sys_model.dart';
+import '../models/expense_statement_model.dart';
 import '../data/default_materials.dart';
 import '../data/materials_display.dart';
 import 'home_icon_order_service.dart';
@@ -54,7 +55,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 37,
+      version: 38,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -108,6 +109,7 @@ class DatabaseService {
     await _createFinanceTables(db);
     await _createSystemSettingsTable(db);
     await _createUserHomeIconOrderTable(db);
+    await _createExpenseStatementsTable(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -427,6 +429,35 @@ class DatabaseService {
         );
       } catch (_) {}
     }
+    if (oldVersion < 38) {
+      await _createExpenseStatementsTable(db);
+    }
+  }
+
+  Future<void> _createExpenseStatementsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS expense_statements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        submitter_user_id INTEGER NOT NULL,
+        submitter_user_name TEXT NOT NULL,
+        submitter_role TEXT NOT NULL DEFAULT '',
+        balance_user_id INTEGER NOT NULL,
+        project_id INTEGER,
+        project_name TEXT,
+        description TEXT NOT NULL DEFAULT '',
+        amount REAL NOT NULL DEFAULT 0,
+        image_path TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        rejection_reason TEXT,
+        responded_by_user_id INTEGER,
+        responded_by_user_name TEXT,
+        responded_at TEXT,
+        created_at TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'engineer',
+        FOREIGN KEY (submitter_user_id) REFERENCES users (id),
+        FOREIGN KEY (balance_user_id) REFERENCES users (id)
+      )
+    ''');
   }
 
   Future<void> _trimMaterialsCatalog(Database db) async {
@@ -4038,4 +4069,224 @@ class DatabaseService {
     required String reportName,
   }) async =>
       throw UnsupportedError('Reports-SYS requires API mode');
+
+  Future<List<int>> createExpenseStatements({
+    required int userId,
+    int? projectId,
+    String? projectName,
+    required List<ExpenseItem> expenses,
+    bool autoApprove = false,
+  }) async {
+    final db = await database;
+    final users = await db.query('users', where: 'id = ?', whereArgs: [userId]);
+    if (users.isEmpty) throw Exception('user not found');
+    final user = users.first;
+    final items = expenses.where((e) {
+      final a = double.tryParse(e.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+      return e.description.trim().isNotEmpty ||
+          a != 0 ||
+          (e.imagePath != null && e.imagePath!.trim().isNotEmpty);
+    }).toList();
+    if (items.isEmpty) {
+      throw Exception('أضف بند صرف واحداً على الأقل');
+    }
+    if (!autoApprove && projectId == null) {
+      throw Exception('اختر المشروع');
+    }
+    final now = DateTime.now().toIso8601String();
+    final status = autoApprove
+        ? ExpenseStatementModel.statusApproved
+        : ExpenseStatementModel.statusPending;
+    final source = autoApprove ? 'manager_direct' : 'engineer';
+    final ids = <int>[];
+    for (final item in items) {
+      final amount =
+          double.tryParse(item.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+      final id = await db.insert('expense_statements', {
+        'submitter_user_id': userId,
+        'submitter_user_name': user['name'],
+        'submitter_role': user['role'] ?? '',
+        'balance_user_id': userId,
+        'project_id': projectId,
+        'project_name': projectName,
+        'description': item.description.trim(),
+        'amount': amount,
+        'image_path': item.imagePath,
+        'status': status,
+        'responded_by_user_id': autoApprove ? userId : null,
+        'responded_by_user_name': autoApprove ? user['name'] : null,
+        'responded_at': autoApprove ? now : null,
+        'created_at': now,
+        'source': source,
+      });
+      ids.add(id);
+      if (autoApprove && amount > 0) {
+        final current = await getEngineerBalance(userId);
+        await setEngineerBalance(userId, current - amount);
+      }
+    }
+    if (!autoApprove) {
+      final approvers = await db.query(
+        'users',
+        where: 'LOWER(TRIM(email)) = ?',
+        whereArgs: [ExpenseStatementModel.approverEmail],
+      );
+      if (approvers.isNotEmpty) {
+        final a = approvers.first;
+        await db.insert('notifications', {
+          'recipient_user_id': a['id'],
+          'recipient_role': a['role'],
+          'title': 'بيان صرف جديد بانتظار الاعتماد',
+          'body':
+              'قام "${user['name']}" بإرسال ${ids.length} بند صرف${projectName != null && projectName.isNotEmpty ? ' — مشروع "$projectName"' : ''} بانتظار اعتمادكم.',
+          'event_type': 'expense_statement_submitted',
+          'actor_user_id': userId,
+          'actor_user_name': user['name'],
+          'project_name': projectName,
+          'created_at': now,
+          'is_read': 0,
+        });
+      }
+    }
+    return ids;
+  }
+
+  Future<List<ExpenseStatementModel>> getExpenseStatements({
+    List<String>? statuses,
+  }) async {
+    final db = await database;
+    List<Map<String, Object?>> rows;
+    if (statuses != null && statuses.isNotEmpty) {
+      final placeholders = List.filled(statuses.length, '?').join(',');
+      rows = await db.rawQuery(
+        'SELECT * FROM expense_statements WHERE status IN ($placeholders) ORDER BY created_at DESC, id DESC',
+        statuses,
+      );
+    } else {
+      rows = await db.query(
+        'expense_statements',
+        orderBy: 'created_at DESC, id DESC',
+      );
+    }
+    return rows
+        .map((e) => ExpenseStatementModel.fromMap(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<void> respondExpenseStatement({
+    required int statementId,
+    required int actorUserId,
+    required bool approve,
+    String? reason,
+  }) async {
+    final db = await database;
+    final actors = await db.query('users', where: 'id = ?', whereArgs: [actorUserId]);
+    if (actors.isEmpty) throw Exception('user not found');
+    final actor = actors.first;
+    final email = (actor['email'] ?? '').toString().trim().toLowerCase();
+    if (email != ExpenseStatementModel.approverEmail) {
+      throw Exception('غير مصرح بالاعتماد أو الرفض');
+    }
+    final rows = await db.query(
+      'expense_statements',
+      where: 'id = ?',
+      whereArgs: [statementId],
+    );
+    if (rows.isEmpty) throw Exception('البيان غير موجود');
+    final row = rows.first;
+    if ((row['status'] ?? '') != ExpenseStatementModel.statusPending) {
+      throw Exception('تم البت في هذا البيان مسبقاً');
+    }
+    if (!approve && (reason == null || reason.trim().isEmpty)) {
+      throw Exception('سبب الرفض مطلوب');
+    }
+    final now = DateTime.now().toIso8601String();
+    final amount = (row['amount'] as num?)?.toDouble() ?? 0;
+    final submitterId = row['submitter_user_id'] as int;
+    final balanceUserId = row['balance_user_id'] as int;
+    final projectName = row['project_name'] as String?;
+    final description = (row['description'] ?? '').toString();
+
+    if (approve) {
+      await db.update(
+        'expense_statements',
+        {
+          'status': ExpenseStatementModel.statusApproved,
+          'responded_by_user_id': actorUserId,
+          'responded_by_user_name': actor['name'],
+          'responded_at': now,
+          'rejection_reason': null,
+        },
+        where: 'id = ?',
+        whereArgs: [statementId],
+      );
+      if (amount > 0) {
+        final current = await getEngineerBalance(balanceUserId);
+        await setEngineerBalance(balanceUserId, current - amount);
+      }
+      await _wrNotifyUser(
+        db,
+        submitterId,
+        title: 'تم اعتماد بيان الصرف',
+        body:
+            'تم اعتماد بيان الصرف الخاص بكم من مدير المشروعات${description.isNotEmpty ? '\nالبيان: $description' : ''}\nالمبلغ: ${amount.toFixed(2)}${projectName != null && projectName.isNotEmpty ? '\nالمشروع: $projectName' : ''}',
+        eventType: 'expense_statement_approved',
+        actorUserId: actorUserId,
+        actorUserName: actor['name'] as String?,
+        projectName: projectName,
+      );
+    } else {
+      await db.update(
+        'expense_statements',
+        {
+          'status': ExpenseStatementModel.statusRejected,
+          'rejection_reason': reason!.trim(),
+          'responded_by_user_id': actorUserId,
+          'responded_by_user_name': actor['name'],
+          'responded_at': now,
+        },
+        where: 'id = ?',
+        whereArgs: [statementId],
+      );
+      await _wrNotifyUser(
+        db,
+        submitterId,
+        title: 'تم رفض بيان الصرف',
+        body:
+            'تم رفض بيان الصرف الخاص بكم من مدير المشروعات ويجب إعادة إدخاله مرة أخرى.\nسبب الرفض: ${reason.trim()}${description.isNotEmpty ? '\nالبيان: $description' : ''}\nالمبلغ: ${amount.toFixed(2)}',
+        eventType: 'expense_statement_rejected',
+        actorUserId: actorUserId,
+        actorUserName: actor['name'] as String?,
+        projectName: projectName,
+      );
+    }
+  }
+
+  Future<void> deleteExpenseStatement({
+    required int statementId,
+    required int actorUserId,
+  }) async {
+    final db = await database;
+    final actors = await db.query('users', where: 'id = ?', whereArgs: [actorUserId]);
+    if (actors.isEmpty) throw Exception('غير مصرح بالحذف');
+    final email = (actors.first['email'] ?? '').toString().trim().toLowerCase();
+    if (email != UserModel.primaryAppAdminEmail.toLowerCase()) {
+      throw Exception('غير مصرح بالحذف');
+    }
+    final rows = await db.query(
+      'expense_statements',
+      where: 'id = ?',
+      whereArgs: [statementId],
+    );
+    if (rows.isEmpty) throw Exception('البيان غير موجود');
+    final row = rows.first;
+    if ((row['status'] ?? '') == ExpenseStatementModel.statusApproved) {
+      final amount = (row['amount'] as num?)?.toDouble() ?? 0;
+      if (amount > 0) {
+        final current = await getEngineerBalance(row['balance_user_id'] as int);
+        await setEngineerBalance(row['balance_user_id'] as int, current + amount);
+      }
+    }
+    await db.delete('expense_statements', where: 'id = ?', whereArgs: [statementId]);
+  }
 }

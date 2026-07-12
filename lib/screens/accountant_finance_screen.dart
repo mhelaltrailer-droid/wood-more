@@ -26,6 +26,20 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
   Map<int, double> _balances = {};
   bool _loading = true;
 
+  /// مستخدمون لا يظهرون في قائمة أرصدة المستخدمين (بالبريد).
+  static const _hiddenFromBalancesEmails = {
+    'shalaby', // Eng/ M.shalaby
+    'dc', // DC
+    'mahatowab@gmail.com', // Eng/Maha
+    'shams', // Operation Manager
+    'mouhamedhelal.cor@gmail.com', // Manager-Tester
+  };
+
+  bool _isHiddenFromBalances(UserModel u) {
+    if (u.role == 'app_admin') return true;
+    return _hiddenFromBalancesEmails.contains(u.email.trim().toLowerCase());
+  }
+
   @override
   void initState() {
     super.initState();
@@ -36,11 +50,11 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
     setState(() => _loading = true);
     try {
       final list = await _db.getUsers();
-      // عرض كل المستخدمين ما عدا مسؤول التطبيق فقط (بما فيهم المحاسب لمعرفة الرصيد والمبالغ المتبقية)
-      final excluded = list.where((u) => u.role != 'app_admin').toList().cast<UserModel>();
-      excluded.sort((UserModel a, UserModel b) => a.name.compareTo(b.name));
+      // عرض المستخدمين ما عدا مسؤول التطبيق والمستثنَين من قائمة الأرصدة
+      final visible = list.where((u) => !_isHiddenFromBalances(u)).toList().cast<UserModel>();
+      visible.sort((UserModel a, UserModel b) => a.name.compareTo(b.name));
       final balances = <int, double>{};
-      for (final u in excluded) {
+      for (final u in visible) {
         try {
           balances[u.id] = await _db.getEngineerBalance(u.id);
         } catch (_) {
@@ -49,7 +63,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       }
       if (!mounted) return;
       setState(() {
-        _users = excluded;
+        _users = visible;
         _balances = balances;
         _loading = false;
       });

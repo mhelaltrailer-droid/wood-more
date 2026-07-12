@@ -135,12 +135,12 @@ void main() {
       expect(ids, isNot(contains('mos_itp')));
     });
 
-    test('مدير المشروعات: الأرصدة / المصروفات في آخر القائمة', () {
+    test('مدير المشروعات: العهد/تقارير المصروفات في آخر القائمة', () {
       final ids = IconVisibilityService.roleIcons['site_engineer_manager']!
           .map((e) => e.id)
           .toList();
-      expect(ids, contains('accountant_finance'));
-      expect(ids.last, 'accountant_finance');
+      expect(ids, contains('manager_custody_expenses'));
+      expect(ids.last, 'manager_custody_expenses');
     });
 
     test('المشرف العام بلا الأرصدة / المصروفات', () {
@@ -148,6 +148,7 @@ void main() {
           .map((e) => e.id)
           .toList();
       expect(ids, isNot(contains('accountant_finance')));
+      expect(ids, isNot(contains('manager_custody_expenses')));
     });
 
     test('Top Managment: Shop-Drawing & PO فقط', () {

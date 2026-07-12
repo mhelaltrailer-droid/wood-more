@@ -26,6 +26,8 @@ import '../screens/reports_sys_hub_screen.dart';
 import '../core/shop_drawing_constants.dart';
 import '../screens/shop_drawing_type_gate_screen.dart';
 import '../screens/detailed_report_finances_screen.dart';
+import '../screens/manager_custody_expenses_hub_screen.dart';
+import '../screens/expense_statements_screen.dart';
 import '../screens/today_work_plan_screen.dart';
 import '../screens/tomorrow_work_plan_screen.dart';
 import '../screens/warehouses_view_screen.dart';
@@ -201,6 +203,37 @@ class HomeIconBuilder {
             AccountantFinanceScreen(currentUser: user),
           ),
         );
+      case 'manager_custody_expenses':
+        return _lightCard(
+          icon: Icons.account_balance_wallet,
+          title: 'العهد/تقارير المصروفات',
+          subtitle: 'العهد، تقارير المصروفات، وإدخال بيان صرف',
+          onTap: () => pushAndSaveRoute(
+            context,
+            'manager-custody-expenses',
+            ManagerCustodyExpensesHubScreen(currentUser: user),
+          ),
+        );
+      case 'custody_expenses_view':
+        return _lightCard(
+          icon: Icons.receipt_long_outlined,
+          title: 'العهده/ المصروفات',
+          subtitle: 'الاطلاع على بيانات الصرف المعتمدة والمرفوضة',
+          onTap: () => pushAndSaveRoute(
+            context,
+            'custody-expenses-view',
+            ExpenseStatementsScreen(
+              currentUser: user,
+              appBarTitle: 'العهده/ المصروفات',
+              statuses: const [
+                'approved',
+                'rejected',
+              ],
+              allowRespond: false,
+              allowDelete: user.canDeleteExpenseStatements,
+            ),
+          ),
+        );
       case 'attendance_reports':
         return _lightCard(
           icon: Icons.assignment_outlined,
@@ -244,7 +277,7 @@ class HomeIconBuilder {
       case 'new_icon':
         return _lightCard(
           icon: Icons.auto_graph,
-          title: 'New icon',
+          title: 'Control',
           subtitle:
               'ملخص خطة اليوم + جاهزية خطة الغد ل${UserModel.siteEngineerManagerRoleLabel}',
           onTap: () => pushAndSaveRoute(

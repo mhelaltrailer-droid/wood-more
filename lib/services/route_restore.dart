@@ -18,6 +18,8 @@ import '../screens/manager_custody_screen.dart';
 import '../screens/accountant_custody_screen.dart';
 import '../screens/site_engineer_expenses_report_screen.dart';
 import '../screens/accountant_finance_screen.dart';
+import '../screens/manager_custody_expenses_hub_screen.dart';
+import '../screens/expense_statements_screen.dart';
 import '../screens/activity_logs_screen.dart';
 import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
@@ -70,6 +72,27 @@ Widget? getScreenForRoute(String name, UserModel user) {
       );
     case 'accountant-finance':
       return AccountantFinanceScreen(currentUser: user);
+    case 'manager-custody-expenses':
+      return ManagerCustodyExpensesHubScreen(currentUser: user);
+    case 'manager-custody-hub-balances':
+      return AccountantFinanceScreen(currentUser: user);
+    case 'manager-custody-hub-reports':
+      return ExpenseStatementsScreen(
+        currentUser: user,
+        appBarTitle: 'تقارير المصروفات',
+        allowRespond: true,
+        allowDelete: false,
+      );
+    case 'manager-custody-hub-entry':
+      return DetailedReportFinancesScreen.managerDirectEntry(user: user);
+    case 'custody-expenses-view':
+      return ExpenseStatementsScreen(
+        currentUser: user,
+        appBarTitle: 'العهده/ المصروفات',
+        statuses: const ['approved', 'rejected'],
+        allowRespond: false,
+        allowDelete: user.canDeleteExpenseStatements,
+      );
     case 'attendance-reports':
       return AttendanceReportsScreen(currentUser: user);
     case 'reports':

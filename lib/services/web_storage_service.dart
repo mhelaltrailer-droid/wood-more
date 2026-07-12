@@ -15,6 +15,7 @@ import '../models/building_material_model.dart';
 import '../models/building_cutlist_model.dart';
 import '../models/work_phase_model.dart';
 import '../models/detailed_report_model.dart';
+import '../models/expense_statement_model.dart';
 import '../models/project_location_model.dart';
 import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
@@ -2960,4 +2961,32 @@ class WebStorageService {
     required String reportName,
   }) async =>
       throw UnsupportedError('Reports-SYS requires API mode');
+
+  Future<List<int>> createExpenseStatements({
+    required int userId,
+    int? projectId,
+    String? projectName,
+    required List<ExpenseItem> expenses,
+    bool autoApprove = false,
+  }) async =>
+      throw UnsupportedError('بيانات الصرف تتطلب وضع API');
+
+  Future<List<ExpenseStatementModel>> getExpenseStatements({
+    List<String>? statuses,
+  }) async =>
+      throw UnsupportedError('بيانات الصرف تتطلب وضع API');
+
+  Future<void> respondExpenseStatement({
+    required int statementId,
+    required int actorUserId,
+    required bool approve,
+    String? reason,
+  }) async =>
+      throw UnsupportedError('بيانات الصرف تتطلب وضع API');
+
+  Future<void> deleteExpenseStatement({
+    required int statementId,
+    required int actorUserId,
+  }) async =>
+      throw UnsupportedError('بيانات الصرف تتطلب وضع API');
 }

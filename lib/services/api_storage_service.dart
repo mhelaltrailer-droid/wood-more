@@ -35,6 +35,7 @@ import '../models/shop_drawing_model.dart';
 import '../models/app_release_info_model.dart';
 import '../models/projects_dashboard_note_model.dart';
 import '../models/projects_dashboard_sheet_model.dart';
+import '../models/expense_statement_model.dart';
 import 'home_icon_order_service.dart';
 import 'icon_visibility_service.dart';
 import 'withdrawal_stock_validation.dart';
@@ -2772,5 +2773,81 @@ class ApiStorageService {
     if (r.statusCode == 403) throw Exception('غير مصرح بحذف الملاحظة');
     if (r.statusCode == 404) throw Exception('الملاحظة غير موجودة');
     if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  /// إنشاء بيانات صرف (بنود منفردة). [autoApprove]=true لمدير المشروعات (خصم فوري).
+  Future<List<int>> createExpenseStatements({
+    required int userId,
+    int? projectId,
+    String? projectName,
+    required List<ExpenseItem> expenses,
+    bool autoApprove = false,
+  }) async {
+    final uri = Uri.parse(_path('expense-statements'));
+    final r = await http.post(
+      uri,
+      body: jsonEncode({
+        'userId': userId,
+        if (projectId != null) 'projectId': projectId,
+        if (projectName != null && projectName.trim().isNotEmpty)
+          'projectName': projectName.trim(),
+        'expenses': expenses.map((e) => e.toJson()).toList(),
+        'autoApprove': autoApprove,
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'expense-statements');
+    final data = r.body.isEmpty
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+    final ids = data['ids'];
+    if (ids is List) {
+      return ids
+          .map((e) => e is int ? e : int.tryParse(e.toString()) ?? 0)
+          .where((e) => e > 0)
+          .toList();
+    }
+    return const [];
+  }
+
+  Future<List<ExpenseStatementModel>> getExpenseStatements({
+    List<String>? statuses,
+  }) async {
+    final qp = <String, String>{};
+    if (statuses != null && statuses.isNotEmpty) {
+      qp['status'] = statuses.join(',');
+    }
+    final uri = Uri.parse(_path('expense-statements')).replace(queryParameters: qp.isEmpty ? null : qp);
+    final r = await _httpGet(uri);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'expense-statements');
+    final decoded = jsonDecode(r.body);
+    if (decoded is! List) return const [];
+    return decoded
+        .map((e) => ExpenseStatementModel.fromMap(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
+  Future<void> respondExpenseStatement({
+    required int statementId,
+    required int actorUserId,
+    required bool approve,
+    String? reason,
+  }) async {
+    await _put('expense-statements/$statementId/respond', {
+      'userId': actorUserId,
+      'decision': approve ? 'approve' : 'reject',
+      if (reason != null) 'reason': reason,
+    });
+  }
+
+  Future<void> deleteExpenseStatement({
+    required int statementId,
+    required int actorUserId,
+  }) async {
+    final uri = Uri.parse(_path('expense-statements/$statementId')).replace(
+      queryParameters: {'userId': actorUserId.toString()},
+    );
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'expense-statements/$statementId');
   }
 }

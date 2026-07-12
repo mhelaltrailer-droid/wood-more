@@ -134,7 +134,7 @@ class _NewIconScreenState extends State<NewIconScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('تعذر تحميل بيانات New icon: $e'),
+          content: Text('تعذر تحميل بيانات Control: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -207,7 +207,7 @@ class _NewIconScreenState extends State<NewIconScreen> {
     final fmt = DateFormat('yyyy-MM-dd');
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New icon'),
+        title: const Text('Control'),
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
       ),

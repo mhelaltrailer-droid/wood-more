@@ -1,4 +1,5 @@
 import '../core/shop_drawing_constants.dart';
+import 'expense_statement_model.dart';
 
 /// نموذج المستخدم - مهندس موقع أو مدير المشروعات
 class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير المشروعات';
@@ -116,6 +117,17 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   /// تقرير بنود صرف العهدة/المصروفات + حذف البنود — مسؤول التطبيق بهذا البريد فقط.
   bool get canManageSiteEngineerExpensesReport =>
       isAdmin && email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+
+  /// اعتماد/رفض بيانات صرف مهندسي المواقع — البريد المحدد فقط.
+  bool get canApproveExpenseStatements =>
+      email.trim().toLowerCase() == ExpenseStatementModel.approverEmail;
+
+  /// الاطلاع على بيانات الصرف المعتمدة/المرفوضة (مدير العمليات + المسؤول الأساسي).
+  bool get canViewCustodyExpensesArchive =>
+      isOperationManager || isPrimaryAppAdmin;
+
+  /// حذف أي بيان صرف — المسؤول الأساسي فقط.
+  bool get canDeleteExpenseStatements => isPrimaryAppAdmin;
 
   /// أيقونة Reports-SYS في الواجهة الرئيسية — كل المشاركين (ما عدا المحاسب).
   bool get canAccessReportsSysHomeIcon => canParticipateInReportsSys;

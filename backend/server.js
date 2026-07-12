@@ -11,6 +11,10 @@ const {
   ensureProjectsDashboardTables,
   registerProjectsDashboardRoutes,
 } = require('./projects_dashboard');
+const {
+  ensureExpenseStatementsTable,
+  registerExpenseStatementsRoutes,
+} = require('./expense_statements');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -1224,7 +1228,7 @@ async function ensureHomeIconsVisibilitySetting() {
         warehouses_view: true,
         ms_sd: true,
         mos_itp: true,
-        accountant_finance: true,
+        manager_custody_expenses: true,
       },
       general_supervisor: {
         attendance: true,
@@ -1251,6 +1255,7 @@ async function ensureHomeIconsVisibilitySetting() {
         mos_itp: true,
         projects_dashboard: true,
         projects_dashboard_plus1: true,
+        custody_expenses_view: true,
       },
       app_admin: {
         attendance_reports: true,
@@ -6353,6 +6358,7 @@ app.post('/app-release/upload-finalize', async (req, res) => {
 const PORT = parseInt(process.env.PORT || '3000', 10);
 registerShopDrawingRoutes(app, pool, { runNotificationSafely });
 registerProjectsDashboardRoutes(app, pool);
+registerExpenseStatementsRoutes(app, pool, { runNotificationSafely });
 ensurePasswordColumn()
   .then(() => ensureSystemLockTable())
   .then(() => ensureHomeIconsVisibilitySetting())
@@ -6368,6 +6374,7 @@ ensurePasswordColumn()
   .then(() => ensureAppReleaseTables())
   .then(() => ensureShopDrawingTables(pool))
   .then(() => ensureProjectsDashboardTables(pool))
+  .then(() => ensureExpenseStatementsTable(pool))
   .then(() => ensureIrMirUploadsTable())
   .then(() => ensureMsSdTables())
   .then(() => ensureMosItpTables())
