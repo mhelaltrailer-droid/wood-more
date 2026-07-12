@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/expense_statement_model.dart';
 import '../models/user_model.dart';
 import '../services/storage_service.dart';
+import '../utils/full_screen_image.dart';
 
 /// عرض بيانات الصرف مع الحالة؛ اعتماد/رفض لمدير المشروعات المحدد، وحذف للمسؤول الأساسي.
 class ExpenseStatementsScreen extends StatefulWidget {
@@ -211,14 +212,17 @@ class _ExpenseStatementsScreenState extends State<ExpenseStatementsScreen> {
     if (path == null || path.trim().isEmpty) {
       return const Text('لا توجد صورة', style: TextStyle(color: Colors.grey));
     }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.network(
-        path,
-        width: 96,
-        height: 96,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => const Icon(Icons.broken_image, size: 48),
+    return InkWell(
+      onTap: () => showFullScreenImage(context, path),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          path,
+          width: 96,
+          height: 96,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => const Icon(Icons.broken_image, size: 48),
+        ),
       ),
     );
   }

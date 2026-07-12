@@ -7,6 +7,7 @@ import '../models/daily_report_model.dart';
 import '../models/project_model.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
+import '../utils/full_screen_image.dart';
 import 'home_screen.dart';
 
 const int _kMaxExpenseItems = 4;
@@ -422,14 +423,17 @@ class _ExpenseRow extends StatelessWidget {
               Row(
                 children: [
                   if (item.imagePath!.startsWith('data:') || item.imagePath!.startsWith('http'))
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        item.imagePath!,
-                        width: 64,
-                        height: 64,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => const Icon(Icons.image, size: 64),
+                    GestureDetector(
+                      onTap: () => showFullScreenImage(context, item.imagePath!),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          item.imagePath!,
+                          width: 64,
+                          height: 64,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const Icon(Icons.image, size: 64),
+                        ),
                       ),
                     ),
                   const SizedBox(width: 8),

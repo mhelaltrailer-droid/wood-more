@@ -629,8 +629,10 @@ class WebStorageService {
     int userId,
     double amount,
     String note,
-    String movementType,
-  ) async {
+    String movementType, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_engineerCustodyKey)!) as List;

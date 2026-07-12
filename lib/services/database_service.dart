@@ -1493,16 +1493,40 @@ class DatabaseService {
     int userId,
     double amount,
     String note,
-    String movementType,
-  ) async {
+    String movementType, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     final db = await database;
+    final now = DateTime.now().toIso8601String();
     await db.insert('engineer_custody', {
       'user_id': userId,
       'amount': amount,
-      'created_at': DateTime.now().toIso8601String(),
+      'created_at': now,
       'note': note,
       'document_path': null,
       'movement_type': movementType,
+    });
+    final users = await db.query('users', where: 'id = ?', whereArgs: [userId]);
+    if (users.isEmpty) return;
+    if ((users.first['role'] ?? '').toString() != 'site_engineer') return;
+    final isAdd = movementType == 'add_balance';
+    final by = (actorUserName != null && actorUserName.trim().isNotEmpty)
+        ? ' من طرف ${actorUserName.trim()}'
+        : '';
+    await db.insert('notifications', {
+      'recipient_user_id': userId,
+      'recipient_role': 'site_engineer',
+      'title': isAdd ? 'إضافة رصيد' : 'سحب رصيد',
+      'body': isAdd
+          ? 'تم إضافة مبلغ ${amount.toStringAsFixed(2)} إلى رصيدك$by.'
+          : 'تم سحب مبلغ ${amount.toStringAsFixed(2)} من رصيدك$by.',
+      'event_type': isAdd ? 'balance_added' : 'balance_withdrawn',
+      'actor_user_id': actorUserId,
+      'actor_user_name': actorUserName,
+      'project_name': null,
+      'created_at': now,
+      'is_read': 0,
     });
   }
 

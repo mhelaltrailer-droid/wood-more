@@ -82,6 +82,18 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
   Future<void> _addBalance(UserModel user) async {
     final isSelf = user.id == widget.currentUser.id;
     if (isSelf && !widget.currentUser.isAccountant) return;
+    // مدير المشروعات لا يضيف رصيداً لحساب المحاسب (السحب مسموح).
+    if (!widget.currentUser.isAccountant &&
+        user.isAccountant &&
+        widget.currentUser.role == 'site_engineer_manager') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('لا يمكن لمدير المشروعات إضافة رصيد لحساب المحاسب'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
     final amountC = TextEditingController();
     final ok = await showDialog<bool>(
@@ -114,7 +126,14 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
         // إضافة رصيد ذاتي للمحاسب فقط (بدون خصم من أي أحد)
         final current = await _db.getEngineerBalance(user.id);
         await _db.setEngineerBalance(user.id, current + amount);
-        await _db.addBalanceMovement(user.id, amount, 'إضافة رصيد ذاتي', 'add_balance');
+        await _db.addBalanceMovement(
+          user.id,
+          amount,
+          'إضافة رصيد ذاتي',
+          'add_balance',
+          actorUserId: widget.currentUser.id,
+          actorUserName: widget.currentUser.name,
+        );
       } else {
         final actorBalance = await _db.getEngineerBalance(widget.currentUser.id);
         if (actorBalance < amount) {
@@ -128,7 +147,14 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
         final currentUser = await _db.getEngineerBalance(user.id);
         await _db.setEngineerBalance(user.id, currentUser + amount);
         await _db.setEngineerBalance(widget.currentUser.id, actorBalance - amount);
-        await _db.addBalanceMovement(user.id, amount, 'إضافة رصيد', 'add_balance');
+        await _db.addBalanceMovement(
+          user.id,
+          amount,
+          'إضافة رصيد',
+          'add_balance',
+          actorUserId: widget.currentUser.id,
+          actorUserName: widget.currentUser.name,
+        );
       }
       _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت إضافة الرصيد'), backgroundColor: Colors.green));
@@ -178,7 +204,14 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       final actorBalance = await _db.getEngineerBalance(widget.currentUser.id);
       await _db.setEngineerBalance(user.id, currentUser - amount);
       await _db.setEngineerBalance(widget.currentUser.id, actorBalance + amount);
-      await _db.addBalanceMovement(user.id, amount, 'سحب رصيد', 'withdraw_balance');
+      await _db.addBalanceMovement(
+        user.id,
+        amount,
+        'سحب رصيد',
+        'withdraw_balance',
+        actorUserId: widget.currentUser.id,
+        actorUserName: widget.currentUser.name,
+      );
       _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم سحب الرصيد'), backgroundColor: Colors.green));
     } catch (e) {
@@ -340,7 +373,9 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                   final balance = _balances[u.id] ?? 0;
                   final isSelf = u.id == widget.currentUser.id;
                   final selfBadge = _selfBadgeLabel(u);
-                  final showAdd = !isSelf || widget.currentUser.isAccountant;
+                  final showAdd = (!isSelf || widget.currentUser.isAccountant) &&
+                      !(widget.currentUser.role == 'site_engineer_manager' &&
+                          u.isAccountant);
                   final showWithdraw = !isSelf;
                   return Card(
                     margin: const EdgeInsets.only(bottom: 12),

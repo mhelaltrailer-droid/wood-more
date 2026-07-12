@@ -3127,16 +3127,55 @@ app.post('/custody', async (req, res) => {
   }
 });
 
-// حركة إضافة رصيد أو سحب رصيد (من واجهة المحاسب) — تسجيل فقط في engineer_custody؛ تعديل الأرصدة يتم من التطبيق
 app.post('/balance-movement', async (req, res) => {
   try {
-    const { userId, amount, note, movementType } = req.body;
+    const b = req.body || {};
+    const userId = parseInt(b.userId, 10);
+    const amount = parseFloat(b.amount);
+    const note = b.note || '';
+    const movementType = b.movementType || b.movement_type;
+    const actorUserId = b.actorUserId != null ? parseInt(b.actorUserId, 10) : null;
+    const actorUserName = (b.actorUserName || b.actor_user_name || '').toString().trim() || null;
     const now = new Date().toISOString();
     const type = movementType === 'add_balance' || movementType === 'withdraw_balance' ? movementType : 'add_balance';
+    if (Number.isNaN(userId)) {
+      return res.status(400).json({ error: 'userId required' });
+    }
     await pool.query(
       'INSERT INTO engineer_custody (user_id, amount, created_at, note, movement_type) VALUES ($1, $2, $3, $4, $5)',
-      [userId, amount, now, note || '', type]
+      [userId, Number.isFinite(amount) ? amount : 0, now, note, type]
     );
+
+    // إشعار مهندس الموقع فقط عند إضافة/سحب رصيد
+    try {
+      const u = await pool.query('SELECT id, name, role FROM users WHERE id = $1', [userId]);
+      if (u.rows.length && String(u.rows[0].role || '') === 'site_engineer') {
+        const isAdd = type === 'add_balance';
+        const amt = Number.isFinite(amount) ? amount : 0;
+        const by = actorUserName ? ` من طرف ${actorUserName}` : '';
+        await pool.query(
+          `INSERT INTO notifications (
+            recipient_user_id, recipient_role, title, body, event_type,
+            actor_user_id, actor_user_name, project_name, created_at, is_read
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, FALSE)`,
+          [
+            userId,
+            'site_engineer',
+            isAdd ? 'إضافة رصيد' : 'سحب رصيد',
+            isAdd
+              ? `تم إضافة مبلغ ${amt.toFixed(2)} إلى رصيدك${by}.`
+              : `تم سحب مبلغ ${amt.toFixed(2)} من رصيدك${by}.`,
+            isAdd ? 'balance_added' : 'balance_withdrawn',
+            Number.isNaN(actorUserId) ? null : actorUserId,
+            actorUserName,
+            now,
+          ]
+        );
+      }
+    } catch (notifyErr) {
+      console.warn('balance-movement notify:', notifyErr.message);
+    }
+
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });

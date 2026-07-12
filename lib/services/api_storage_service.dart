@@ -769,14 +769,19 @@ class ApiStorageService {
     int userId,
     double amount,
     String note,
-    String movementType,
-  ) async {
+    String movementType, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     try {
       await _postVoid('balance-movement', {
         'userId': userId,
         'amount': amount,
         'note': note,
         'movementType': movementType,
+        if (actorUserId != null) 'actorUserId': actorUserId,
+        if (actorUserName != null && actorUserName.trim().isNotEmpty)
+          'actorUserName': actorUserName.trim(),
       });
     } catch (_) {}
   }

@@ -12,6 +12,7 @@ import '../models/detailed_report_model.dart';
 import '../models/user_model.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
+import '../utils/full_screen_image.dart';
 import 'home_screen.dart';
 
 const Set<String> _expenseReportRoles = {
@@ -239,33 +240,7 @@ class _SiteEngineerExpensesReportScreenState
   }
 
   void _openFullImage(String imagePath) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => Dialog(
-        child: Stack(
-          children: [
-            InteractiveViewer(
-              child: Image.network(
-                imagePath,
-                fit: BoxFit.contain,
-                errorBuilder: (_, _, _) => const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('تعذر عرض الصورة'),
-                ),
-              ),
-            ),
-            Positioned(
-              top: 4,
-              left: 4,
-              child: IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(ctx),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    showFullScreenImage(context, imagePath);
   }
 
   Widget _attachmentCell(_ExpenseRowData row) {
