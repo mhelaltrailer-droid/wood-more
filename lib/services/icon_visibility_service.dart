@@ -101,6 +101,7 @@ class IconVisibilityService {
     roleAccountant: [
       HomeIconItem(id: 'accountant_custody', label: 'العهدة'),
       balancesExpensesIcon,
+      HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
     ],
     roleDocumentController: _documentControllerHomeIcons,
     roleSiteEngineerManager: [

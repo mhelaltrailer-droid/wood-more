@@ -82,7 +82,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final items = <_Item>[
-      if (widget.currentUser.canManageAppVersions)
+      if (widget.currentUser.canViewAppVersionsIcon)
         _Item(
           'Versions',
           'رفع نسخة APK محدثة وإدارة تحديثات التطبيق لجميع المستخدمين',

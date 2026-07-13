@@ -89,6 +89,9 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   bool get canManageAppVersions =>
       email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
 
+  /// عرض أيقونة Versions — مؤقتاً لدور app_admin فقط (مخفية عن باقي الأدوار).
+  bool get canViewAppVersionsIcon => isAdmin;
+
   /// إدارة إلغاء سحب الخامات من المخزن (لوحة التحكم): مسؤول التطبيق بهذا البريد فقط.
   bool get canManageWarehouseWithdrawalReset =>
       isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
@@ -129,11 +132,11 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   /// حذف أي بيان صرف — المسؤول الأساسي فقط.
   bool get canDeleteExpenseStatements => isPrimaryAppAdmin;
 
-  /// أيقونة Reports-SYS في الواجهة الرئيسية — كل المشاركين (ما عدا المحاسب).
+  /// أيقونة Reports-SYS في الواجهة الرئيسية.
   bool get canAccessReportsSysHomeIcon => canParticipateInReportsSys;
 
   /// المشاركة في تداول Reports-SYS (استلام وتوجيه عبر الإشعارات).
-  bool get canParticipateInReportsSys => !isAccountant;
+  bool get canParticipateInReportsSys => true;
 
   /// عرض النظام كاملاً: أرشيف + كل المرفوضة + تبويب «الكل».
   bool get canViewReportsSysFullAccess =>

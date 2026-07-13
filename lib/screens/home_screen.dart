@@ -240,6 +240,10 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadAppReleaseUpdateBadge() async {
+    if (!widget.currentUser.canViewAppVersionsIcon) {
+      if (mounted) setState(() => _hasAppReleaseUpdate = false);
+      return;
+    }
     final storage = getStorage();
     if (storage is! ApiStorageService) {
       if (mounted) setState(() => _hasAppReleaseUpdate = false);
@@ -432,7 +436,8 @@ class _HomeScreenState extends State<HomeScreen>
                 ],
               ),
             ),
-          if (getStorage() is ApiStorageService)
+          if (getStorage() is ApiStorageService &&
+              currentUser.canViewAppVersionsIcon)
             IconButton(
               tooltip: 'Versions',
               onPressed: () async {

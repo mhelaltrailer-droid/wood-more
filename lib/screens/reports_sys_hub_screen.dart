@@ -191,8 +191,12 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
           ? FloatingActionButton.extended(
               onPressed: _openCreate,
               backgroundColor: const Color(0xFF1B5E20),
-              icon: const Icon(Icons.add),
-              label: const Text('تقرير جديد'),
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text(
+                'انشاء تقرير جديد',
+                style: TextStyle(color: Colors.white),
+              ),
             )
           : null,
       body: Column(

@@ -1218,6 +1218,7 @@ async function ensureHomeIconsVisibilitySetting() {
       accountant: {
         accountant_custody: true,
         accountant_finance: true,
+        reports_sys: true,
       },
       site_engineer_manager: {
         attendance_reports: true,
