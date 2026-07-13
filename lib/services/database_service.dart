@@ -4158,9 +4158,14 @@ class DatabaseService {
     if (items.isEmpty) {
       throw Exception('أضف بند صرف واحداً على الأقل');
     }
-    if (!autoApprove && projectId == null) {
+    if (!autoApprove &&
+        projectId == null &&
+        (projectName == null || projectName.trim().isEmpty)) {
       throw Exception('اختر المشروع');
     }
+    final resolvedProjectId =
+        (projectId != null && projectId > 0) ? projectId : null;
+    final resolvedProjectName = projectName?.trim();
     final now = DateTime.now().toIso8601String();
     final status = autoApprove
         ? ExpenseStatementModel.statusApproved
@@ -4175,8 +4180,11 @@ class DatabaseService {
         'submitter_user_name': user['name'],
         'submitter_role': user['role'] ?? '',
         'balance_user_id': userId,
-        'project_id': projectId,
-        'project_name': projectName,
+        'project_id': resolvedProjectId,
+        'project_name':
+            (resolvedProjectName != null && resolvedProjectName.isNotEmpty)
+                ? resolvedProjectName
+                : null,
         'description': item.description.trim(),
         'amount': amount,
         'image_path': item.imagePath,

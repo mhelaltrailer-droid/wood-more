@@ -215,14 +215,19 @@ function registerExpenseStatementsRoutes(app, pool, { runNotificationSafely } = 
 
       const autoApprove = b.autoApprove === true || b.auto_approve === true;
       const projectIdRaw = b.projectId ?? b.project_id;
-      const projectId =
+      let projectId =
         projectIdRaw != null && String(projectIdRaw).trim() !== ''
           ? parseInt(projectIdRaw, 10)
           : null;
       const projectName =
         (b.projectName || b.project_name || '').toString().trim() || null;
 
-      if (!autoApprove && (projectId == null || Number.isNaN(projectId))) {
+      // مشروع اخر: اسم يدوي فقط — لا يُحفظ معرّف وهمي بسبب FK على projects
+      if (projectId != null && (Number.isNaN(projectId) || projectId < 0)) {
+        projectId = null;
+      }
+
+      if (!autoApprove && projectId == null && !projectName) {
         return res.status(400).json({ error: 'اختر المشروع' });
       }
 
@@ -246,7 +251,7 @@ function registerExpenseStatementsRoutes(app, pool, { runNotificationSafely } = 
             user.name,
             user.role || '',
             userId,
-            Number.isNaN(projectId) ? null : projectId,
+            Number.isNaN(projectId) || projectId == null ? null : projectId,
             projectName,
             item.description,
             item.amount,

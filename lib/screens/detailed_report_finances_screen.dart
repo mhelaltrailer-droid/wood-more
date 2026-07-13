@@ -5,12 +5,18 @@ import '../models/user_model.dart';
 import '../models/detailed_report_model.dart';
 import '../models/daily_report_model.dart';
 import '../models/project_model.dart';
+import '../models/reports_sys_model.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import '../utils/full_screen_image.dart';
 import 'home_screen.dart';
 
 const int _kMaxExpenseItems = 4;
+
+const ProjectModel _otherProject = ProjectModel(
+  id: ReportsSysModel.otherProjectId,
+  name: ReportsSysModel.otherProjectLabel,
+);
 
 /// العهدة والمصروفات: بنود صرف تُضاف تباعاً (حتى 4).
 /// مهندس الموقع يرسل للاعتماد؛ مدير المشروعات يحفظ معتمداً مباشرة.
@@ -85,7 +91,10 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
   late List<ExpenseItem> _expenses;
   List<ProjectModel> _projects = [];
   ProjectModel? _selectedProject;
+  final _otherProjectController = TextEditingController();
   double _balance = 0;
+
+  bool get _isOtherProject => _selectedProject?.id == _otherProject.id;
 
   static bool _expenseHasContent(ExpenseItem e) {
     final a = double.tryParse(e.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
@@ -107,6 +116,12 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
     if (widget.showProjectSelector) {
       _loadProjects();
     }
+  }
+
+  @override
+  void dispose() {
+    _otherProjectController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadBalance() async {
@@ -159,6 +174,17 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
       );
       return;
     }
+    if (widget.showProjectSelector &&
+        _isOtherProject &&
+        _otherProjectController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('اكتب اسم المشروع'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
     final toSave = _collectForSave();
     if (toSave.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -171,12 +197,20 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
     }
     setState(() => _saving = true);
     try {
-      final projectId = widget.showProjectSelector
-          ? _selectedProject?.id
-          : widget.report.projectId;
-      final projectName = widget.showProjectSelector
-          ? _selectedProject?.name
-          : widget.report.projectName;
+      final int? projectId;
+      final String? projectName;
+      if (widget.showProjectSelector) {
+        if (_isOtherProject) {
+          projectId = null;
+          projectName = _otherProjectController.text.trim();
+        } else {
+          projectId = _selectedProject?.id;
+          projectName = _selectedProject?.name;
+        }
+      } else {
+        projectId = widget.report.projectId;
+        projectName = widget.report.projectName;
+      }
 
       await _db.createExpenseStatements(
         userId: widget.user.id,
@@ -249,9 +283,7 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
           if (widget.showProjectSelector) ...[
             if (_loadingProjects)
               const Center(child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator()))
-            else if (_projects.isEmpty)
-              const Text('لا توجد مشاريع متاحة', style: TextStyle(color: Colors.red))
-            else
+            else ...[
               DropdownButtonFormField<ProjectModel?>(
                 value: _selectedProject,
                 isExpanded: true,
@@ -268,9 +300,24 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
                   ..._projects.map(
                     (p) => DropdownMenuItem<ProjectModel?>(value: p, child: Text(p.name)),
                   ),
+                  const DropdownMenuItem<ProjectModel?>(
+                    value: _otherProject,
+                    child: Text(ReportsSysModel.otherProjectLabel),
+                  ),
                 ],
                 onChanged: (v) => setState(() => _selectedProject = v),
               ),
+              if (_isOtherProject) ...[
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _otherProjectController,
+                  decoration: const InputDecoration(
+                    labelText: 'اسم المشروع *',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ],
             const SizedBox(height: 16),
           ],
           Text(
