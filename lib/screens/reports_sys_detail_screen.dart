@@ -68,7 +68,15 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
       if (!mounted) return;
       setState(() {
         _report = report;
-        _users = users.where((u) => u.id != widget.currentUser.id).toList();
+        _users = users
+            .where((u) => u.id != widget.currentUser.id)
+            .where(
+              (u) => !ReportsSysModel.isHiddenFromAssigneeList(
+                email: u.email,
+                name: u.name,
+              ),
+            )
+            .toList();
         _loading = false;
       });
     } catch (e) {

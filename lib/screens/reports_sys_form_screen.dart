@@ -121,7 +121,15 @@ class _ReportsSysFormScreenState extends State<ReportsSysFormScreen> {
       ) as List<UserModel>;
       if (!mounted) return;
       setState(() {
-        _users = users.where((u) => u.id != widget.currentUser.id).toList();
+        _users = users
+            .where((u) => u.id != widget.currentUser.id)
+            .where(
+              (u) => !ReportsSysModel.isHiddenFromAssigneeList(
+                email: u.email,
+                name: u.name,
+              ),
+            )
+            .toList();
       });
     } catch (_) {}
   }

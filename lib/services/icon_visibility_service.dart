@@ -22,11 +22,50 @@ class IconVisibilityService {
     HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
   ];
 
-  static const List<HomeIconItem> _documentControllerHomeIcons = [
+  static const HomeIconItem documentControlIcon = HomeIconItem(
+    id: 'document_control',
+    label: 'Document Control',
+  );
+
+  /// الأيقونات داخل محور Document Control (بترتيب العرض).
+  static const List<HomeIconItem> documentControlChildIcons = [
     HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
     HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
     HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
     HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
+  ];
+
+  static const List<String> _docControlChildrenDefault = [
+    'ir_mir',
+    'ms_sd',
+    'qs_invs',
+    'mos_itp',
+  ];
+
+  static const List<String> _docControlChildrenWithoutQs = [
+    'ir_mir',
+    'ms_sd',
+    'mos_itp',
+  ];
+
+  /// الأيقونات الفرعية الظاهرة داخل Document Control حسب الدور.
+  static List<String> documentControlChildrenForRole(String role) {
+    switch (role) {
+      case roleSiteEngineer:
+      case roleSiteEngineerManager:
+      case roleGeneralSupervisor:
+        return _docControlChildrenWithoutQs;
+      case roleDocumentController:
+      case roleOperationManager:
+      case roleAppAdmin:
+        return _docControlChildrenDefault;
+      default:
+        return const [];
+    }
+  }
+
+  static const List<HomeIconItem> _documentControllerHomeIcons = [
+    documentControlIcon,
     HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
     HomeIconItem(id: 'admin_dashboard', label: 'لوح التحكم'),
     HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
@@ -55,10 +94,8 @@ class IconVisibilityService {
     ),
     HomeIconItem(id: 'new_icon', label: 'Control'),
     HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
-    HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
+    documentControlIcon,
     HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
-    HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
-    HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
     HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
   ];
 
@@ -93,9 +130,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'operation_reports', label: 'تقارير التشغيل'),
       HomeIconItem(id: 'detailed_report', label: 'التقرير اليومي'),
       HomeIconItem(id: 'engineer_projects', label: 'المشروعات'),
-      HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
-      HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
-      HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
+      documentControlIcon,
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
     ],
     roleAccountant: [
@@ -125,11 +160,8 @@ class IconVisibilityService {
       ),
       HomeIconItem(id: 'new_icon', label: 'Control'),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
-      HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
+      documentControlIcon,
       HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
-      HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
-      HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
-      HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
       HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
@@ -149,14 +181,11 @@ class IconVisibilityService {
       HomeIconItem(id: 'new_icon', label: 'Control'),
       HomeIconItem(id: 'reports', label: 'التقارير'),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
-      HomeIconItem(id: 'ir_mir', label: 'IR-MIR'),
+      documentControlIcon,
       HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
       HomeIconItem(id: 'admin_project_structure', label: 'هيكلة المشروعات'),
       HomeIconItem(id: 'admin_dashboard', label: 'لوح التحكم'),
       HomeIconItem(id: 'activity_logs', label: 'سجل الحركة'),
-      HomeIconItem(id: 'ms_sd', label: 'MS-SD'),
-      HomeIconItem(id: 'qs_invs', label: 'QS-INV(s)'),
-      HomeIconItem(id: 'mos_itp', label: 'MoS-ITP'),
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
       HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),

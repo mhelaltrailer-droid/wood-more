@@ -144,6 +144,43 @@ class ReportsSysModel {
   static const String otherProjectLabel = 'مشروع اخر';
   static const int maxAttachmentBytes = 5 * 1024 * 1024;
 
+  /// مستخدمون لا يظهرون في قائمة «المسند إليه».
+  static const Set<String> hiddenAssigneeEmails = {
+    'cipherpath@proton.me', // cipherpath
+    'shalaby', // Eng/M.shalaby
+    'mahatowab@gmail.com', // Eng/Maha
+    'mouhamedhelal.cor@gmail.com', // Manager Tester
+  };
+
+  static String _normalizeAssigneeKey(String value) => value
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[\s/_-]+'), '');
+
+  /// هل يُستبعد المستخدم من قائمة المسند إليه (بالبريد أو الاسم الظاهر).
+  static bool isHiddenFromAssigneeList({
+    required String email,
+    required String name,
+  }) {
+    final e = email.trim().toLowerCase();
+    if (hiddenAssigneeEmails.contains(e)) return true;
+    if (e.contains('cipherpath')) return true;
+
+    final compact = _normalizeAssigneeKey(name);
+    const nameNeedles = [
+      'cipherpath',
+      'engmshalaby',
+      'mshalaby',
+      'engmaha',
+      'managertester',
+      'testsitengineer',
+    ];
+    for (final needle in nameNeedles) {
+      if (compact.contains(needle)) return true;
+    }
+    return false;
+  }
+
   final int id;
   final String reportName;
   final String reportType;

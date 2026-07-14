@@ -26,6 +26,7 @@ import '../screens/operation_reports_screen.dart';
 import '../screens/postpone_fines_report_screen.dart';
 import '../screens/work_plan_tracking_report_screen.dart';
 import '../screens/icons_control_screen.dart';
+import '../screens/document_control_hub_screen.dart';
 import '../screens/ir_mir_screen.dart';
 import '../screens/ms_sd_screen.dart';
 import '../screens/mos_itp_screen.dart';
@@ -115,6 +116,8 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return PostponeFinesReportScreen(currentUser: user);
     case 'icons-control':
       return IconsControlScreen(currentUser: user);
+    case 'document-control':
+      return DocumentControlHubScreen(currentUser: user);
     case 'ir-mir':
       return IrMirScreen(currentUser: user);
     case 'warehouses-view':

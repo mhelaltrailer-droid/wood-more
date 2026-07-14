@@ -14,10 +14,7 @@ import '../screens/detailed_report_screen.dart';
 import '../screens/engineer_projects_screen.dart';
 import '../screens/engineer_withdraw_materials_screen.dart';
 import '../screens/icons_control_screen.dart';
-import '../screens/ir_mir_screen.dart';
-import '../screens/ms_sd_screen.dart';
-import '../screens/mos_itp_screen.dart';
-import '../screens/module_placeholder_screen.dart';
+import '../screens/document_control_hub_screen.dart';
 import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
 import '../screens/postpone_fines_report_screen.dart';
@@ -319,27 +316,18 @@ class HomeIconBuilder {
             ContractorReportScreen(admin: user),
           ),
         );
-      case 'ir_mir':
+      case 'document_control':
         return _lightCard(
-          icon: user.isSiteEngineer ? Icons.folder_special : Icons.folder_shared,
-          iconSize: user.isSiteEngineer ? 56 : 64,
-          title: 'IR-MIR',
-          subtitle: user.isSiteEngineer
-              ? 'رفع مستندات MIR أو IR حسب هيكلة المشروع'
-              : 'عرض مرفقات MIR و IR من مهندسي المواقع',
-          padding: user.isSiteEngineer ? 28 : 32,
-          onTap: () => user.isSiteEngineer
-              ? _openAfterAttendanceCheck(
-                  context: context,
-                  user: user,
-                  routeName: 'ir-mir',
-                  screen: IrMirScreen(currentUser: user),
-                )
-              : pushAndSaveRoute(
-                  context,
-                  'ir-mir',
-                  IrMirScreen(currentUser: user),
-                ),
+          icon: Icons.folder_shared_outlined,
+          iconSize: 56,
+          title: 'Document Control',
+          subtitle: 'IR-MIR · MS-SD · QS-INV(s) · MoS-ITP',
+          padding: 28,
+          onTap: () => pushAndSaveRoute(
+            context,
+            'document-control',
+            DocumentControlHubScreen(currentUser: user),
+          ),
         );
       case 'warehouses_view':
         return _lightCard(
@@ -386,71 +374,6 @@ class HomeIconBuilder {
             'activity-logs',
             ActivityLogsScreen(currentUser: user),
           ),
-        );
-      case 'ms_sd':
-        final msSdScreen = MsSdScreen(currentUser: user);
-        final msSdSubtitle = user.canUploadMsSd
-            ? 'تقديم الخامات والرسومات التنفيذية — إضافة MS و SD'
-            : 'عرض سجلات MS-SD المرفوعة من Document Controller';
-        if (user.isSiteEngineer && !user.canUploadMsSd) {
-          return _lightCard(
-            icon: Icons.architecture_outlined,
-            title: 'MS-SD',
-            subtitle: msSdSubtitle,
-            onTap: () => _openAfterAttendanceCheck(
-              context: context,
-              user: user,
-              routeName: 'ms-sd',
-              screen: msSdScreen,
-            ),
-          );
-        }
-        return _lightCard(
-          icon: Icons.architecture_outlined,
-          title: 'MS-SD',
-          subtitle: msSdSubtitle,
-          onTap: () => pushAndSaveRoute(context, 'ms-sd', msSdScreen),
-        );
-      case 'qs_invs':
-        return _lightCard(
-          icon: Icons.receipt_long_outlined,
-          title: 'QS-INV(s)',
-          subtitle:
-              'Quantity Survey — Invoices — حصر الكميات والفواتير',
-          onTap: () => pushAndSaveRoute(
-            context,
-            'qs-invs',
-            const ModulePlaceholderScreen(
-              title: 'QS-INV(s)',
-              description:
-                  'Quantity Survey — Invoices\nحصر الكميات والفواتير',
-              icon: Icons.receipt_long_outlined,
-            ),
-          ),
-        );
-      case 'mos_itp':
-        final mosItpScreen = MosItpScreen(currentUser: user);
-        final mosItpSubtitle = user.canUploadMosItp
-            ? 'منهجية التنفيذ وخطة الفحص — إضافة MoS و ITP'
-            : 'عرض سجلات MoS-ITP المرفوعة من Document Controller';
-        if (user.isSiteEngineer && !user.canUploadMosItp) {
-          return _lightCard(
-            icon: Icons.checklist_rtl_outlined,
-            title: 'MoS-ITP',
-            subtitle: mosItpSubtitle,
-            onTap: () => _openAfterAttendanceCheck(
-              context: context,
-              user: user,
-              routeName: 'mos-itp',
-              screen: mosItpScreen,
-            ),
-          );
-        }
-        return _lightCard(
-          icon: Icons.checklist_rtl_outlined,
-          title: 'MoS-ITP',
-          subtitle: mosItpSubtitle,
-          onTap: () => pushAndSaveRoute(context, 'mos-itp', mosItpScreen),
         );
       case 'projects_dashboard':
         if (!user.canAccessProjectsDashboard) {

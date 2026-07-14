@@ -98,9 +98,20 @@ List<String> resolveHomeIconOrder({
   final eligible = eligibleHomeIconIds(user: user, iconConfig: iconConfig);
   if (savedOrder == null || savedOrder.isEmpty) return eligible;
 
+  const legacyDocControlIds = {'ir_mir', 'ms_sd', 'qs_invs', 'mos_itp'};
   final eligibleSet = eligible.toSet();
   final ordered = <String>[];
+  var insertedDocControl = false;
   for (final iconId in savedOrder) {
+    if (legacyDocControlIds.contains(iconId)) {
+      if (!insertedDocControl &&
+          eligibleSet.contains('document_control') &&
+          !ordered.contains('document_control')) {
+        ordered.add('document_control');
+        insertedDocControl = true;
+      }
+      continue;
+    }
     if (eligibleSet.contains(iconId) && !ordered.contains(iconId)) {
       ordered.add(iconId);
     }
