@@ -145,6 +145,8 @@ class IconVisibilityService {
     ],
     roleGeneralSupervisor: [
       HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),
+      HomeIconItem(id: 'today_work_plan', label: 'خطة عمل اليوم'),
+      HomeIconItem(id: 'tomorrow_work_plan', label: 'خطة عمل الغد'),
       HomeIconItem(id: 'engineer_finances', label: 'العهدة/المصروفات'),
       ..._projectManagerHomeIcons,
     ],
