@@ -1,16 +1,16 @@
 # Wood & More — API + Web app
 #
-# Database: put DATABASE_URL in backend/.env (e.g. Neon: ...?sslmode=require). The API uses it
-# when set; see backend/server.js. Do not commit real credentials.
+# `docker compose up --build` runs everything locally, including PostgreSQL seeded from
+# backend/init-db.sql.
 #
-# Optional local PostgreSQL (no Neon): comment out DATABASE_URL in backend/.env and run:
-#   docker compose --profile local-db up --build
+# To use a cloud database instead (e.g. Neon), put DATABASE_URL in backend/.env
+# (...?sslmode=require) — it takes precedence over the PG* settings below — and skip the local
+# database with: docker compose up --build api app
+# Do not commit real credentials.
 
 services:
   postgres:
     image: postgres:16-alpine
-    profiles:
-      - local-db
     ports:
       - "5432:5432"
     environment:
@@ -29,18 +29,23 @@ services:
   api:
     build: ./backend
     env_file:
-      - ./backend/.env
+      - path: ./backend/.env
+        required: false
     environment:
-      # Explicit fallbacks only when DATABASE_URL is not in backend/.env (local-db profile).
+      # Used only when DATABASE_URL is not set in backend/.env.
       PGHOST: ${PGHOST:-postgres}
       PGPORT: ${PGPORT:-5432}
       PGDATABASE: ${PGDATABASE:-wood_more}
       PGUSER: ${PGUSER:-wood_more}
       PGPASSWORD: ${PGPASSWORD:-wood_more}
       PORT: "3000"
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+        required: false
 
   app:
     build: .
