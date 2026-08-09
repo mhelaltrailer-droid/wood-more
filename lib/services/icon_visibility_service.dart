@@ -86,6 +86,11 @@ class IconVisibilityService {
     label: 'العهده/ المصروفات',
   );
 
+  static const HomeIconItem withdrawalFilesReportsIcon = HomeIconItem(
+    id: 'withdrawal_files_reports',
+    label: 'تقارير السحب والمرفقات',
+  );
+
   static const List<HomeIconItem> _projectManagerHomeIcons = [
     HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
     HomeIconItem(
@@ -183,6 +188,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'new_icon', label: 'Control'),
       HomeIconItem(id: 'reports', label: 'التقارير'),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
+      withdrawalFilesReportsIcon,
       documentControlIcon,
       HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
       HomeIconItem(id: 'admin_project_structure', label: 'هيكلة المشروعات'),

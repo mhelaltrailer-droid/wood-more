@@ -15,6 +15,10 @@ const {
   ensureExpenseStatementsTable,
   registerExpenseStatementsRoutes,
 } = require('./expense_statements');
+const { registerAttachmentRoutes } = require('./attachments');
+const {
+  registerWithdrawalFilesReportRoutes,
+} = require('./withdrawal_files_reports');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -146,13 +150,19 @@ async function ensureNotificationsTable() {
         is_read BOOLEAN NOT NULL DEFAULT FALSE,
         read_at TEXT,
         withdrawal_request_id INTEGER,
-        action_taken_at TEXT
+        action_taken_at TEXT,
+        attachment_source TEXT,
+        attachment_record_id INTEGER,
+        attachment_count INTEGER
       )
     `);
     await pool.query('CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created ON notifications(recipient_user_id, created_at DESC)').catch(() => {});
     await pool.query('CREATE INDEX IF NOT EXISTS idx_notifications_recipient_unread ON notifications(recipient_user_id, is_read)').catch(() => {});
     await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS withdrawal_request_id INTEGER').catch(() => {});
     await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS action_taken_at TEXT').catch(() => {});
+    await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS attachment_source TEXT').catch(() => {});
+    await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS attachment_record_id INTEGER').catch(() => {});
+    await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS attachment_count INTEGER').catch(() => {});
     console.log('ensureNotificationsTable: ok');
   } catch (e) {
     console.warn('ensureNotificationsTable:', e.message);
@@ -161,6 +171,25 @@ async function ensureNotificationsTable() {
 
 const APP_RELEASE_MAX_BYTES = 100 * 1024 * 1024;
 const APP_RELEASE_CHUNK_BYTES = 4 * 1024 * 1024;
+
+async function notifyAppReleaseUpload(pool, { releaseId, versionLabel, fileName, sizeBytes, requesterEmail }) {
+  const uploader = await pool.query(
+    'SELECT id, name FROM users WHERE LOWER(TRIM(email)) = $1',
+    [requesterEmail],
+  );
+  const uploaderId = uploader.rows.length ? parseInt(uploader.rows[0].id, 10) : null;
+  const uploaderName = uploader.rows.length ? uploader.rows[0].name : requesterEmail;
+  await notifyFileUpload(pool, uploaderId, uploaderName, {
+    title: 'رفع نسخة تطبيق جديدة',
+    body:
+      `قام "${uploaderName}" برفع نسخة "${versionLabel}" (${fileName})\n` +
+      `الحجم: ${Math.round(sizeBytes / (1024 * 1024))} ميجا — التنزيل من شاشة إصدارات التطبيق`,
+    eventType: 'app_release_upload',
+    attachmentSource: 'app_release',
+    attachmentRecordId: releaseId,
+    attachmentCount: 1,
+  });
+}
 
 async function fetchLatestAppReleaseMeta() {
   const r = await pool.query(
@@ -585,6 +614,36 @@ function wrBuildOmRequestBody(engName, projectName, pathLabel, requestId, create
   );
 }
 
+const WITHDRAWAL_PERMIT_MIN_IMAGES = 1;
+const WITHDRAWAL_PERMIT_MAX_IMAGES = 2;
+
+/// يتحقق من أذن صرف/تسليم مرفق مع سحب الخامات ويعيد مصفوفة الصور، أو null إن كان غير صالح.
+/// الواجهة تفرض هذا الشرط منذ البداية، وهذا يمنع تجاوزه بطلب مباشر إلى الخادم.
+function withdrawalParsePermitImages(raw) {
+  let list = raw;
+  if (typeof list === 'string') {
+    const s = list.trim();
+    if (!s) return null;
+    try {
+      list = JSON.parse(s);
+    } catch (_) {
+      return null;
+    }
+  }
+  if (!Array.isArray(list)) return null;
+  const images = list
+    .map((v) => String(v ?? '').trim())
+    .filter((v) => v.startsWith('data:'));
+  if (
+    images.length < WITHDRAWAL_PERMIT_MIN_IMAGES ||
+    images.length > WITHDRAWAL_PERMIT_MAX_IMAGES ||
+    images.length !== list.length
+  ) {
+    return null;
+  }
+  return images;
+}
+
 async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
   const title = fields.title;
   const body = fields.body;
@@ -594,17 +653,26 @@ async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
   const projectName = fields.projectName ?? fields.project_name ?? null;
   const withdrawalRequestId = fields.withdrawalRequestId ?? fields.withdrawal_request_id ?? null;
   const actionTakenAt = fields.actionTakenAt ?? fields.action_taken_at ?? null;
+  const attachmentSource = fields.attachmentSource ?? fields.attachment_source ?? null;
+  const attachmentRecordId = fields.attachmentRecordId ?? fields.attachment_record_id ?? null;
+  const attachmentCount = fields.attachmentCount ?? fields.attachment_count ?? null;
   const now = new Date().toISOString();
   await pool.query(
     `INSERT INTO notifications (
       recipient_user_id, recipient_role, title, body, event_type,
       actor_user_id, actor_user_name, project_name, created_at, is_read,
-      withdrawal_request_id, action_taken_at
+      withdrawal_request_id, action_taken_at,
+      attachment_source, attachment_record_id, attachment_count
     )
-    SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE, $8, $9
+    SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE, $8, $9, $10, $11, $12
     FROM users
-    WHERE role = ANY($10::text[])`,
-    [title, body, eventType, actorUserId, actorUserName, projectName, now, withdrawalRequestId, actionTakenAt, roles]
+    WHERE role = ANY($13::text[])`,
+    [
+      title, body, eventType, actorUserId, actorUserName, projectName, now,
+      withdrawalRequestId, actionTakenAt,
+      attachmentSource, attachmentRecordId, attachmentCount,
+      roles,
+    ]
   );
 }
 
@@ -712,14 +780,48 @@ async function runNotificationSafely(label, fn) {
   }
 }
 
-async function notifyAppAdminsOnDocumentUpload(pool, userId, userName, details) {
-  await notifyAppAdmins(pool, {
-    title: details.title || 'رفع مستند',
-    body: details.body,
-    eventType: details.eventType ?? details.event_type,
-    actorUserId: userId,
-    actorUserName: userName,
-    projectName: details.projectName ?? details.project_name ?? null,
+/// مستقبلو إشعارات رفع الملفات: مسؤول التطبيق ومدير العمليات ومدير المشروعات.
+const FILE_UPLOAD_NOTIFY_ROLES = ['app_admin', 'operation_manager', 'site_engineer_manager'];
+
+/// إشعار موحّد لأي رفع ملف في التطبيق. `attachmentSource` + `attachmentRecordId`
+/// هما ما يسمح للواجهة بفتح المرفقات مباشرة من الإشعار عبر /attachments.
+async function notifyFileUpload(pool, userId, userName, details) {
+  await runNotificationSafely('notifyFileUpload', async () => {
+    await withdrawalInsertNotificationsForRoles(pool, FILE_UPLOAD_NOTIFY_ROLES, {
+      title: details.title || 'رفع ملف',
+      body: details.body,
+      eventType: details.eventType ?? details.event_type,
+      actorUserId: userId ?? null,
+      actorUserName: userName ?? null,
+      projectName: details.projectName ?? details.project_name ?? null,
+      attachmentSource: details.attachmentSource ?? null,
+      attachmentRecordId: details.attachmentRecordId ?? null,
+      attachmentCount: details.attachmentCount ?? null,
+    });
+  });
+}
+
+/// إشعار رفع صورة مرجعية من شاشات الإدارة (وحدات / خامات مباني / Cutlists).
+/// هذه الشاشات لم تكن ترسل هوية الرافع، فيُستخرج الاسم من userId عند غيابه.
+async function notifyAssetImageUpload(pool, body, { source, recordId, label, itemName }) {
+  const rawUserId = body?.userId ?? body?.user_id;
+  const userId = rawUserId != null ? parseInt(String(rawUserId), 10) : null;
+  let userName = String(body?.userName ?? body?.user_name ?? '').trim();
+  if (!userName && Number.isInteger(userId)) {
+    const r = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+    userName = r.rows.length ? String(r.rows[0].name || '') : '';
+  }
+  const actor = userName || 'أحد المستخدمين';
+  const target = String(itemName || '').trim();
+  await notifyFileUpload(pool, Number.isInteger(userId) ? userId : null, userName || null, {
+    title: `رفع ${label}`,
+    body:
+      `قام "${actor}" برفع ${label}${target ? ` لـ "${target}"` : ''}\n` +
+      `رقم السجل: ${recordId}`,
+    eventType: 'asset_image_upload',
+    attachmentSource: source,
+    attachmentRecordId: recordId,
+    attachmentCount: 1,
   });
 }
 
@@ -729,6 +831,29 @@ async function notifyAppAdminsIfSiteEngineer(pool, userId, fields) {
   await notifyAppAdmins(pool, fields);
 }
 
+/// أسماء مرفقات داخلية يستخدمها التقرير المفصل لحفظ نصوص، لا تُحسب كملفات مرفوعة.
+const DETAILED_REPORT_METADATA_ATTACHMENT_NAMES = new Set([
+  '__executed_today_summary__',
+  '__manual_work_locations__',
+]);
+
+/// يحصي الملفات الحقيقية المرفقة بتقرير مفصل: مرفقات التقرير + صور بنود الصرف.
+function countDetailedReportFiles(body) {
+  const attachments = Array.isArray(body.attachments) ? body.attachments : [];
+  const realAttachments = attachments.filter(
+    (a) =>
+      a &&
+      typeof a === 'object' &&
+      a.data &&
+      !DETAILED_REPORT_METADATA_ATTACHMENT_NAMES.has(String(a.name ?? '')),
+  ).length;
+  const expenses = Array.isArray(body.expenses) ? body.expenses : [];
+  const expenseImages = expenses.filter(
+    (e) => e && typeof e === 'object' && e.image_path,
+  ).length;
+  return realAttachments + expenseImages;
+}
+
 async function notifyAppAdminsWorkPlanSaved(pool, {
   userId,
   userName,
@@ -736,6 +861,8 @@ async function notifyAppAdminsWorkPlanSaved(pool, {
   reportDatetime,
   isUpdate = false,
   hasAttachments = false,
+  reportId = null,
+  attachmentCount = null,
 }) {
   const role = await fetchUserRole(pool, userId);
   if (role !== 'site_engineer') return;
@@ -765,12 +892,15 @@ async function notifyAppAdminsWorkPlanSaved(pool, {
     projectName: projectName || null,
   });
   if (hasAttachments) {
-    await notifyAppAdminsOnDocumentUpload(pool, userId, userName, {
+    await notifyFileUpload(pool, userId, userName, {
       title: 'رفع مرفقات مع خطة العمل',
       body:
         `قام "${userName}" بإرفاق مستند/صورة مع ${planLabel} — مشروع "${proj}"`,
       eventType: 'work_plan_attachment',
       projectName: projectName || null,
+      attachmentSource: reportId != null ? 'detailed_report' : null,
+      attachmentRecordId: reportId,
+      attachmentCount,
     });
   }
 }
@@ -2149,11 +2279,16 @@ app.get('/notifications', async (req, res) => {
     if (!Number.isInteger(userId)) {
       return res.status(400).json({ error: 'userId is required' });
     }
+    const rawLimit = parseInt(String(req.query.limit || ''), 10);
+    const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : 50;
+    const rawOffset = parseInt(String(req.query.offset || ''), 10);
+    const offset = Number.isInteger(rawOffset) && rawOffset > 0 ? rawOffset : 0;
     const r = await pool.query(
       `SELECT * FROM notifications
        WHERE recipient_user_id = $1
-       ORDER BY created_at DESC`,
-      [userId]
+       ORDER BY created_at DESC, id DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit, offset]
     );
     res.json(
       r.rows.map((row) => ({
@@ -2172,6 +2307,11 @@ app.get('/notifications', async (req, res) => {
         withdrawal_request_id:
           row.withdrawal_request_id != null ? parseInt(row.withdrawal_request_id, 10) : null,
         action_taken_at: row.action_taken_at,
+        attachment_source: row.attachment_source ?? null,
+        attachment_record_id:
+          row.attachment_record_id != null ? parseInt(row.attachment_record_id, 10) : null,
+        attachment_count:
+          row.attachment_count != null ? parseInt(row.attachment_count, 10) : null,
       }))
     );
   } catch (e) {
@@ -2397,13 +2537,16 @@ app.post('/ir-mir/uploads', async (req, res) => {
         : kind === 'ir' && phase
           ? ` — مرحلة: ${phase}`
           : '';
-    await notifyAppAdminsOnDocumentUpload(pool, userId, userName, {
+    await notifyFileUpload(pool, userId, userName, {
       title: `رفع مستند ${kindLabel}`,
       body:
         `قام "${userName}" برفع ملف "${fileName}" (${kindLabel}) — مشروع "${projName || 'غير محدد'}"${extra}\n` +
         `رقم المرفق: ${uploadId}`,
       eventType: kind === 'mir' ? 'mir_upload' : 'ir_upload',
       projectName: projName,
+      attachmentSource: 'ir_mir',
+      attachmentRecordId: uploadId,
+      attachmentCount: 1,
     });
     res.json(uploadId);
   } catch (e) {
@@ -2560,13 +2703,16 @@ app.post('/ms-sd/records', async (req, res) => {
     const projRes = await pool.query('SELECT name FROM projects WHERE id = $1', [projectId]);
     const projName = projRes.rows.length ? projRes.rows[0].name : null;
     const kindLabel = kind === 'sd' ? 'SD' : 'MS';
-    await notifyAppAdminsOnDocumentUpload(pool, userId, userName, {
+    await notifyFileUpload(pool, userId, userName, {
       title: `رفع ${kindLabel} جديد`,
       body:
         `قام "${userName}" بإضافة "${recordName}" (${kindLabel}) — مشروع "${projName || 'غير محدد'}"\n` +
         `رقم السجل: ${recordId}`,
       eventType: kind === 'sd' ? 'sd_upload' : 'ms_upload',
       projectName: projName,
+      attachmentSource: 'ms_sd',
+      attachmentRecordId: recordId,
+      attachmentCount: attachments.length,
     });
 
     res.json(recordId);
@@ -2823,13 +2969,16 @@ app.post('/mos-itp/records', async (req, res) => {
     const projRes = await pool.query('SELECT name FROM projects WHERE id = $1', [projectId]);
     const projName = projRes.rows.length ? projRes.rows[0].name : null;
     const kindLabel = kind === 'itp' ? 'ITP' : 'MoS';
-    await notifyAppAdminsOnDocumentUpload(pool, userId, userName, {
+    await notifyFileUpload(pool, userId, userName, {
       title: `رفع ${kindLabel} جديد`,
       body:
         `قام "${userName}" بإضافة "${recordName}" (${kindLabel}) — مشروع "${projName || 'غير محدد'}"\n` +
         `رقم السجل: ${recordId}`,
       eventType: kind === 'itp' ? 'itp_upload' : 'mos_upload',
       projectName: projName,
+      attachmentSource: 'mos_itp',
+      attachmentRecordId: recordId,
+      attachmentCount: attachments.length,
     });
 
     res.json(recordId);
@@ -3083,6 +3232,33 @@ app.post('/daily-reports', async (req, res) => {
         );
       }
     }
+    // التقرير حُفظ بالفعل، فلا يجوز أن يُفشل حساب عدد المرفقات الطلب.
+    let dailyImages = [];
+    try {
+      dailyImages = Array.isArray(b.imagePaths)
+        ? b.imagePaths
+        : (typeof b.imagePaths === 'string' ? JSON.parse(b.imagePaths || '[]') : []);
+      if (!Array.isArray(dailyImages)) dailyImages = [];
+    } catch (_) {
+      dailyImages = [];
+    }
+    const dailyFileCount =
+      (b.documentPath ? 1 : 0) +
+      dailyImages.length +
+      expenses.filter((e) => e && e.image_path).length;
+    if (dailyFileCount > 0) {
+      await notifyFileUpload(pool, b.userId, b.userName, {
+        title: 'مرفقات التقرير اليومي',
+        body:
+          `قام "${b.userName}" بإرفاق ${dailyFileCount} ملف مع التقرير اليومي — مشروع "${b.projectName || 'غير محدد'}"\n` +
+          `رقم التقرير: ${id}`,
+        eventType: 'daily_report_attachment',
+        projectName: b.projectName || null,
+        attachmentSource: 'daily_report',
+        attachmentRecordId: id,
+        attachmentCount: dailyFileCount,
+      });
+    }
     res.json(id);
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -3118,6 +3294,21 @@ app.delete('/daily-reports/:id', async (req, res) => {
 });
 
 // ——— Engineer balance & custody ———
+async function ensureEngineerCustodyActorColumns() {
+  await pool.query(
+    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_user_id INTEGER`,
+  );
+  await pool.query(
+    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_user_name TEXT`,
+  );
+  await pool.query(
+    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_role TEXT`,
+  );
+  await pool.query(
+    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS document_path TEXT`,
+  );
+}
+
 app.get('/engineer-balance/:userId', async (req, res) => {
   try {
     const r = await pool.query('SELECT balance FROM engineer_balance WHERE user_id = $1', [req.params.userId]);
@@ -3140,15 +3331,31 @@ app.post('/engineer-balance', async (req, res) => {
 app.post('/custody', async (req, res) => {
   try {
     const { userId, amount, note } = req.body;
+    const documentPath = req.body?.documentPath ?? req.body?.document_path ?? null;
     const now = new Date().toISOString();
-    await pool.query(
-      'INSERT INTO engineer_custody (user_id, amount, created_at, note, movement_type) VALUES ($1, $2, $3, $4, $5)',
-      [userId, amount, now, note || '', 'custody']
+    const ins = await pool.query(
+      'INSERT INTO engineer_custody (user_id, amount, created_at, note, movement_type, document_path) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [userId, amount, now, note || '', 'custody', documentPath || null]
     );
+    const custodyId = parseInt(ins.rows[0].id, 10);
     const r = await pool.query('SELECT balance FROM engineer_balance WHERE user_id = $1', [userId]);
     const current = r.rows.length ? parseFloat(r.rows[0].balance) : 0;
     // Custody = company gives cash to engineer → balance (what we owe) decreases
     await pool.query('INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2', [userId, current - parseFloat(amount)]);
+    if (documentPath) {
+      const owner = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+      const ownerName = owner.rows.length ? owner.rows[0].name : '';
+      await notifyFileUpload(pool, userId, ownerName, {
+        title: 'مستند عهدة',
+        body:
+          `تم إرفاق مستند مع عهدة "${ownerName}" بمبلغ ${amount}\n` +
+          `رقم الحركة: ${custodyId}`,
+        eventType: 'custody_document_upload',
+        attachmentSource: 'custody',
+        attachmentRecordId: custodyId,
+        attachmentCount: 1,
+      });
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -3162,16 +3369,24 @@ app.post('/balance-movement', async (req, res) => {
     const amount = parseFloat(b.amount);
     const note = b.note || '';
     const movementType = b.movementType || b.movement_type;
-    const actorUserId = b.actorUserId != null ? parseInt(b.actorUserId, 10) : null;
+    const rawActorId = b.actorUserId != null ? parseInt(b.actorUserId, 10) : null;
+    const actorUserId = Number.isNaN(rawActorId) ? null : rawActorId;
     const actorUserName = (b.actorUserName || b.actor_user_name || '').toString().trim() || null;
+    let actorRole = (b.actorRole || b.actor_role || '').toString().trim() || null;
     const now = new Date().toISOString();
     const type = movementType === 'add_balance' || movementType === 'withdraw_balance' ? movementType : 'add_balance';
     if (Number.isNaN(userId)) {
       return res.status(400).json({ error: 'userId required' });
     }
+    if (!actorRole && actorUserId != null) {
+      const a = await pool.query('SELECT role FROM users WHERE id = $1', [actorUserId]);
+      if (a.rows.length) actorRole = a.rows[0].role || null;
+    }
     await pool.query(
-      'INSERT INTO engineer_custody (user_id, amount, created_at, note, movement_type) VALUES ($1, $2, $3, $4, $5)',
-      [userId, Number.isFinite(amount) ? amount : 0, now, note, type]
+      `INSERT INTO engineer_custody
+         (user_id, amount, created_at, note, movement_type, actor_user_id, actor_user_name, actor_role)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [userId, Number.isFinite(amount) ? amount : 0, now, note, type, actorUserId, actorUserName, actorRole]
     );
 
     // إشعار مهندس الموقع فقط عند إضافة/سحب رصيد
@@ -3220,6 +3435,9 @@ app.get('/custody', async (req, res) => {
       const out = { id: parseInt(row.id), user_id: parseInt(row.user_id), amount: parseFloat(row.amount), created_at: row.created_at, note: row.note || '' };
       if (row.movement_type != null) out.movement_type = row.movement_type;
       if (row.document_path != null) out.document_path = row.document_path;
+      if (row.actor_user_id != null) out.actor_user_id = parseInt(row.actor_user_id);
+      if (row.actor_user_name != null) out.actor_user_name = row.actor_user_name;
+      if (row.actor_role != null) out.actor_role = row.actor_role;
       return out;
     };
     res.json(r.rows.map(mapRow));
@@ -3393,6 +3611,8 @@ app.post('/detailed-reports', async (req, res) => {
       reportDatetime: b.reportDatetime || now,
       isUpdate: false,
       hasAttachments,
+      reportId,
+      attachmentCount: countDetailedReportFiles(b),
     });
     res.json(reportId);
   } catch (e) {
@@ -3630,6 +3850,8 @@ app.put('/detailed-reports/:id', async (req, res) => {
         reportDatetime: b.reportDatetime || new Date().toISOString(),
         isUpdate: true,
         hasAttachments,
+        reportId: id,
+        attachmentCount: countDetailedReportFiles(b),
       });
       res.json({ ok: true });
     } catch (err) {
@@ -3936,6 +4158,14 @@ app.post('/location-withdrawal', async (req, res) => {
     const { locationId, userId, userName, disbursementPermitImagesJson, deliveryPermitImagesJson } = req.body;
     const phase = String(req.body?.phase || 'first_fix').trim().toLowerCase();
     const now = new Date().toISOString();
+    const disbursementImages = withdrawalParsePermitImages(disbursementPermitImagesJson);
+    const deliveryImages = withdrawalParsePermitImages(deliveryPermitImagesJson);
+    if (disbursementImages == null || deliveryImages == null) {
+      return res.status(400).json({
+        error: 'permit_images_required',
+        message: 'يجب إرفاق أذن الصرف وأذن التسليم (صورة أو صورتين لكل منهما)',
+      });
+    }
     const existing = await pool.query('SELECT id FROM location_withdrawal WHERE location_id = $1 AND phase = $2', [locationId, phase]);
     if (existing.rows.length > 0) {
       return res.status(400).json({ error: 'already_withdrawn', message: 'تم سحب الخامات من هذا المكان مسبقاً' });
@@ -3962,10 +4192,11 @@ app.post('/location-withdrawal', async (req, res) => {
         });
       }
     }
-    await pool.query(
-      'INSERT INTO location_withdrawal (location_id, phase, user_id, user_name, created_at, disbursement_permit_images_json, delivery_permit_images_json) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [locationId, phase, userId, userName, now, disbursementPermitImagesJson || null, deliveryPermitImagesJson || null]
+    const withdrawalIns = await pool.query(
+      'INSERT INTO location_withdrawal (location_id, phase, user_id, user_name, created_at, disbursement_permit_images_json, delivery_permit_images_json) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+      [locationId, phase, userId, userName, now, JSON.stringify(disbursementImages), JSON.stringify(deliveryImages)]
     );
+    const withdrawalId = parseInt(withdrawalIns.rows[0].id, 10);
     for (const m of materials.rows) {
       const qtyNum = parseFloat(String(m.quantity).replace(/[^\d.]/g, '')) || 0;
       if (qtyNum <= 0) continue;
@@ -3998,22 +4229,16 @@ app.post('/location-withdrawal', async (req, res) => {
       actorUserName: userName,
       projectName,
     });
-    const hasPermitDocs =
-      (disbursementPermitImagesJson != null &&
-        String(disbursementPermitImagesJson).trim() !== '' &&
-        String(disbursementPermitImagesJson).trim() !== '[]') ||
-      (deliveryPermitImagesJson != null &&
-        String(deliveryPermitImagesJson).trim() !== '' &&
-        String(deliveryPermitImagesJson).trim() !== '[]');
-    if (hasPermitDocs) {
-      await notifyAppAdminsOnDocumentUpload(pool, userId, userName, {
-        title: 'مرفقات سحب خامات',
-        body:
-          `قام "${userName}" بإرفاق أذون صرف/تسليم مع سحب الخامات — مشروع "${projectName || 'غير محدد'}"`,
-        eventType: 'withdrawal_permit_upload',
-        projectName,
-      });
-    }
+    await notifyFileUpload(pool, userId, userName, {
+      title: 'مرفقات سحب خامات',
+      body:
+        `قام "${userName}" بإرفاق أذن الصرف وأذن التسليم مع سحب الخامات — مشروع "${projectName || 'غير محدد'}" — مرحلة: ${phase}`,
+      eventType: 'withdrawal_permit_upload',
+      projectName,
+      attachmentSource: 'location_withdrawal',
+      attachmentRecordId: withdrawalId,
+      attachmentCount: disbursementImages.length + deliveryImages.length,
+    });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -4855,6 +5080,7 @@ app.put('/reports-sys/:id', async (req, res) => {
     const actor = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
     const actorName = actor.rows.length ? actor.rows[0].name : '';
 
+    let savedAttachmentsCount = 0;
     if (Array.isArray(b.attachments)) {
       await pool.query('DELETE FROM reports_sys_attachments WHERE report_id = $1', [id]);
       for (const att of b.attachments) {
@@ -4871,6 +5097,7 @@ app.put('/reports-sys/:id', async (req, res) => {
            VALUES ($1,$2,$3,$4,$5,$6)`,
           [id, fileName, mimeType, dataBase64, sizeBytes, now],
         );
+        savedAttachmentsCount += 1;
       }
     }
 
@@ -4882,6 +5109,20 @@ app.put('/reports-sys/:id', async (req, res) => {
       actorUserName: actorName,
       reportName,
     });
+
+    if (savedAttachmentsCount > 0) {
+      await notifyFileUpload(pool, userId, actorName, {
+        title: 'مرفقات Reports-SYS',
+        body:
+          `قام "${actorName}" بإرفاق ${savedAttachmentsCount} ملف مع التقرير «${reportName}»\n` +
+          `رقم التقرير: ${id}`,
+        eventType: 'reports_sys_attachment',
+        projectName: project.project_name || null,
+        attachmentSource: 'reports_sys',
+        attachmentRecordId: id,
+        attachmentCount: savedAttachmentsCount,
+      });
+    }
 
     const detail = await reportsSysLoadDetail(pool, id);
     res.json(detail);
@@ -5228,6 +5469,89 @@ app.post('/reports-sys/:id/relaunch', async (req, res) => {
   }
 });
 
+async function ensureOperationReportsTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS operation_reports (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_name TEXT NOT NULL,
+        project_id INTEGER REFERENCES projects(id),
+        project_name TEXT,
+        report_type TEXT NOT NULL,
+        details TEXT NOT NULL DEFAULT '',
+        images_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(
+      'CREATE INDEX IF NOT EXISTS idx_operation_reports_user_created ON operation_reports(user_id, created_at DESC)',
+    ).catch(() => {});
+    console.log('ensureOperationReportsTable: ok');
+  } catch (e) {
+    console.warn('ensureOperationReportsTable:', e.message);
+  }
+}
+
+const OPERATION_REPORT_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+app.post('/operation-reports', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+    const userName = String(b.userName ?? b.user_name ?? '').trim();
+    const reportType = String(b.reportType ?? b.report_type ?? '').trim();
+    const details = String(b.details ?? '').trim();
+    const projectId = b.projectId != null ? parseInt(String(b.projectId), 10) : null;
+    const projectName = b.projectName != null ? String(b.projectName).trim() : null;
+    const images = Array.isArray(b.images) ? b.images.map((v) => String(v ?? '').trim()) : [];
+
+    if (!Number.isInteger(userId) || !userName || !reportType || !details) {
+      return res.status(400).json({ error: 'missing required fields' });
+    }
+    if (images.length === 0 || images.some((v) => !v.startsWith('data:'))) {
+      return res.status(400).json({ error: 'images_required' });
+    }
+    for (const img of images) {
+      if (_estimateBase64PayloadBytes(img) > OPERATION_REPORT_MAX_IMAGE_BYTES) {
+        return res.status(400).json({ error: 'image_too_large' });
+      }
+    }
+
+    const now = new Date().toISOString();
+    const ins = await pool.query(
+      `INSERT INTO operation_reports (
+        user_id, user_name, project_id, project_name, report_type, details, images_json, created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [
+        userId,
+        userName,
+        Number.isInteger(projectId) && projectId > 0 ? projectId : null,
+        projectName || null,
+        reportType,
+        details,
+        JSON.stringify(images),
+        now,
+      ],
+    );
+    const reportId = parseInt(ins.rows[0].id, 10);
+    await notifyFileUpload(pool, userId, userName, {
+      title: 'مرفقات تقرير عمليات',
+      body:
+        `قام "${userName}" بإرسال ${reportType} مع ${images.length} صورة — مشروع "${projectName || 'غير محدد'}"\n` +
+        `رقم التقرير: ${reportId}`,
+      eventType: 'operation_report_attachment',
+      projectName: projectName || null,
+      attachmentSource: 'operation_report',
+      attachmentRecordId: reportId,
+      attachmentCount: images.length,
+    });
+    res.json(reportId);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
 app.get('/units', async (req, res) => {
   try {
     const r = await pool.query('SELECT id, building_id, name, model, image_path FROM units WHERE building_id = $1 ORDER BY name', [req.query.buildingId]);
@@ -5240,7 +5564,16 @@ app.post('/units', async (req, res) => {
   try {
     const b = req.body;
     const r = await pool.query('INSERT INTO units (building_id, name, model, image_path) VALUES ($1, $2, $3, $4) RETURNING id', [b.buildingId, b.name, b.model || b.name, b.imagePath || null]);
-    res.json(parseInt(r.rows[0].id));
+    const unitId = parseInt(r.rows[0].id);
+    if (b.imagePath) {
+      await notifyAssetImageUpload(pool, b, {
+        source: 'unit',
+        recordId: unitId,
+        label: 'صورة وحدة',
+        itemName: b.name,
+      });
+    }
+    res.json(unitId);
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -5248,7 +5581,18 @@ app.post('/units', async (req, res) => {
 app.put('/units/:id', async (req, res) => {
   try {
     const b = req.body;
+    const unitId = parseInt(req.params.id, 10);
+    const before = await pool.query('SELECT image_path FROM units WHERE id = $1', [unitId]);
+    const previousImage = before.rows.length ? before.rows[0].image_path : null;
     await pool.query('UPDATE units SET name = $1, model = $2, image_path = $3 WHERE id = $4', [b.name, b.model, b.imagePath || null, req.params.id]);
+    if (b.imagePath && b.imagePath !== previousImage) {
+      await notifyAssetImageUpload(pool, b, {
+        source: 'unit',
+        recordId: unitId,
+        label: 'صورة وحدة',
+        itemName: b.name,
+      });
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -5280,7 +5624,16 @@ app.post('/building-materials', async (req, res) => {
       'INSERT INTO building_materials (building_id, material_name, quantity, unit, length, pieces_count, total_length, total_area, image_path) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
       [b.buildingId, b.materialName, b.quantity || '', b.unit || '', b.length || '', b.piecesCount || '', b.totalLength || '', b.totalArea || '', b.imagePath || null]
     );
-    res.json(parseInt(r.rows[0].id));
+    const materialId = parseInt(r.rows[0].id);
+    if (b.imagePath) {
+      await notifyAssetImageUpload(pool, b, {
+        source: 'building_material',
+        recordId: materialId,
+        label: 'صورة خامة مبنى',
+        itemName: b.materialName,
+      });
+    }
+    res.json(materialId);
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -5288,7 +5641,18 @@ app.post('/building-materials', async (req, res) => {
 app.put('/building-materials/:id', async (req, res) => {
   try {
     const b = req.body;
+    const materialId = parseInt(req.params.id, 10);
+    const before = await pool.query('SELECT image_path FROM building_materials WHERE id = $1', [materialId]);
+    const previousImage = before.rows.length ? before.rows[0].image_path : null;
     await pool.query('UPDATE building_materials SET material_name = $1, length = $2, pieces_count = $3, total_length = $4, total_area = $5, image_path = $6 WHERE id = $7', [b.materialName, b.length || '', b.piecesCount || '', b.totalLength || '', b.totalArea || '', b.imagePath || null, req.params.id]);
+    if (b.imagePath && b.imagePath !== previousImage) {
+      await notifyAssetImageUpload(pool, b, {
+        source: 'building_material',
+        recordId: materialId,
+        label: 'صورة خامة مبنى',
+        itemName: b.materialName,
+      });
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -5315,7 +5679,15 @@ app.post('/building-cutlists', async (req, res) => {
   try {
     const b = req.body;
     const r = await pool.query('INSERT INTO building_cutlist_images (building_id, image_path) VALUES ($1, $2) RETURNING id', [b.buildingId, b.imagePath]);
-    res.json(parseInt(r.rows[0].id));
+    const cutlistId = parseInt(r.rows[0].id);
+    if (b.imagePath) {
+      await notifyAssetImageUpload(pool, b, {
+        source: 'building_cutlist',
+        recordId: cutlistId,
+        label: 'صورة Cutlist',
+      });
+    }
+    res.json(cutlistId);
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -6336,9 +6708,17 @@ app.post('/app-release/upload', async (req, res) => {
        RETURNING id`,
       [versionLabel, versionCode, fileName, fileData, sizeBytes, requesterEmail, now],
     );
+    const releaseId = parseInt(ins.rows[0].id, 10);
+    await notifyAppReleaseUpload(pool, {
+      releaseId,
+      versionLabel,
+      fileName,
+      sizeBytes,
+      requesterEmail,
+    });
     res.json({
       ok: true,
-      releaseId: parseInt(ins.rows[0].id, 10),
+      releaseId,
       versionLabel,
       versionCode,
       sizeBytes,
@@ -6475,10 +6855,18 @@ app.post('/app-release/upload-finalize', async (req, res) => {
       [versionLabel, versionCode, fileName, fileData, sizeBytes, requesterEmail, now],
     );
     await pool.query('DELETE FROM app_release_upload_chunks WHERE upload_id = $1', [uploadId]);
+    const releaseId = parseInt(ins.rows[0].id, 10);
+    await notifyAppReleaseUpload(pool, {
+      releaseId,
+      versionLabel,
+      fileName,
+      sizeBytes,
+      requesterEmail,
+    });
 
     res.json({
       ok: true,
-      releaseId: parseInt(ins.rows[0].id, 10),
+      releaseId,
       versionLabel,
       versionCode,
       sizeBytes,
@@ -6490,8 +6878,10 @@ app.post('/app-release/upload-finalize', async (req, res) => {
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 registerShopDrawingRoutes(app, pool, { runNotificationSafely });
-registerProjectsDashboardRoutes(app, pool);
-registerExpenseStatementsRoutes(app, pool, { runNotificationSafely });
+registerProjectsDashboardRoutes(app, pool, { notifyFileUpload });
+registerExpenseStatementsRoutes(app, pool, { runNotificationSafely, notifyFileUpload });
+registerAttachmentRoutes(app, pool);
+registerWithdrawalFilesReportRoutes(app, pool);
 ensurePasswordColumn()
   .then(() => ensureSystemLockTable())
   .then(() => ensureHomeIconsVisibilitySetting())
@@ -6508,11 +6898,13 @@ ensurePasswordColumn()
   .then(() => ensureShopDrawingTables(pool))
   .then(() => ensureProjectsDashboardTables(pool))
   .then(() => ensureExpenseStatementsTable(pool))
+  .then(() => ensureEngineerCustodyActorColumns())
   .then(() => ensureIrMirUploadsTable())
   .then(() => ensureMsSdTables())
   .then(() => ensureMosItpTables())
   .then(() => ensureWithdrawalRequestsTable())
   .then(() => ensureReportsSysTables())
+  .then(() => ensureOperationReportsTable())
   .then(() => ensureZ1EmaarFProjectLocationsSeeded())
   .then(() => {
     app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));

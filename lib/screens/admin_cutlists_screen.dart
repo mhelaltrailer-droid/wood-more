@@ -115,7 +115,11 @@ class _AdminCutlistsScreenState extends State<AdminCutlistsScreen> {
                 if (path.isEmpty) return;
                 Navigator.pop(ctx);
                 try {
-                  await _db.addBuildingCutlist(BuildingCutlistModel(id: 0, buildingId: _selectedBuilding!.id, imagePath: path));
+                  await _db.addBuildingCutlist(
+                    BuildingCutlistModel(id: 0, buildingId: _selectedBuilding!.id, imagePath: path),
+                    actorUserId: widget.admin.id,
+                    actorUserName: widget.admin.name,
+                  );
                   _loadList();
                   if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحفظ'), backgroundColor: Colors.green));
                 } catch (e) {

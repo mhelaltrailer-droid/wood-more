@@ -75,14 +75,37 @@ CREATE TABLE IF NOT EXISTS notifications (
   is_read BOOLEAN NOT NULL DEFAULT FALSE,
   read_at TEXT,
   withdrawal_request_id INTEGER,
-  action_taken_at TEXT
+  action_taken_at TEXT,
+  attachment_source TEXT,
+  attachment_record_id INTEGER,
+  attachment_count INTEGER
 );
+
+-- لقواعد البيانات القديمة التي أُنشئ فيها الجدول قبل إشعارات المرفقات
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS attachment_source TEXT;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS attachment_record_id INTEGER;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS attachment_count INTEGER;
 
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created
   ON notifications(recipient_user_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_unread
   ON notifications(recipient_user_id, is_read);
+
+CREATE TABLE IF NOT EXISTS operation_reports (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_name TEXT NOT NULL,
+  project_id INTEGER REFERENCES projects(id),
+  project_name TEXT,
+  report_type TEXT NOT NULL,
+  details TEXT NOT NULL DEFAULT '',
+  images_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_operation_reports_user_created
+  ON operation_reports(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS shop_darwing_notifications (
   id SERIAL PRIMARY KEY,
@@ -277,6 +300,15 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'engineer_custody' AND column_name = 'document_path') THEN
     ALTER TABLE engineer_custody ADD COLUMN document_path TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'engineer_custody' AND column_name = 'actor_user_id') THEN
+    ALTER TABLE engineer_custody ADD COLUMN actor_user_id INTEGER;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'engineer_custody' AND column_name = 'actor_user_name') THEN
+    ALTER TABLE engineer_custody ADD COLUMN actor_user_name TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'engineer_custody' AND column_name = 'actor_role') THEN
+    ALTER TABLE engineer_custody ADD COLUMN actor_role TEXT;
   END IF;
 END $$;
 

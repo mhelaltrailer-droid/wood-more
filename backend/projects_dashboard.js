@@ -315,7 +315,27 @@ async function ensureProjectsDashboardTables(pool) {
   `);
 }
 
-function registerProjectsDashboardRoutes(app, pool) {
+function registerProjectsDashboardRoutes(app, pool, deps = {}) {
+  const notifyFileUpload = deps.notifyFileUpload || (async () => {});
+
+  async function pdNotifySheetUpload(variant, userId, userName) {
+    const r = await pool.query(
+      'SELECT id, file_name FROM projects_dashboard_sheet WHERE variant = $1',
+      [variant],
+    );
+    if (r.rows.length === 0) return;
+    const row = r.rows[0];
+    await notifyFileUpload(pool, userId, userName, {
+      title: 'رفع شيت Projects Dashboard',
+      body:
+        `قام "${userName}" برفع/تحديث شيت "${row.file_name}" — نسخة: ${variant}`,
+      eventType: 'projects_dashboard_upload',
+      attachmentSource: 'projects_dashboard',
+      attachmentRecordId: parseInt(row.id, 10),
+      attachmentCount: 1,
+    });
+  }
+
   app.get('/projects-dashboard/sheet', async (req, res) => {
     try {
       const userId = parseInt(req.query.userId, 10);
@@ -482,7 +502,7 @@ function registerProjectsDashboardRoutes(app, pool) {
 
       if (req.method === 'PUT') {
         const lock = pdWebdavLocks.get(lockKey);
-        const lockToken = String(req.headers['if'] || req.headers.lock-token || '');
+        const lockToken = String(req.headers['if'] || req.headers['lock-token'] || '');
         if (lock && lock.until > Date.now() && !lockToken.includes(lock.token)) {
           return res.status(423).send('locked');
         }
@@ -526,6 +546,8 @@ function registerProjectsDashboardRoutes(app, pool) {
           WHERE variant = $6`,
           [outFileData, rowsPayload, auth.userId, displayName, now, variant],
         );
+
+        await pdNotifySheetUpload(variant, auth.userId, displayName);
 
         pdWebdavLocks.delete(lockKey);
         res.setHeader('Last-Modified', pdWebdavDateHeader(now));
@@ -655,6 +677,8 @@ function registerProjectsDashboardRoutes(app, pool) {
           [outFileName, outMime, outFileData, rowsPayload, uid, displayName, now, variant],
         );
       }
+
+      await pdNotifySheetUpload(variant, uid, displayName);
 
       res.json({
         ok: true,

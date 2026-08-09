@@ -55,7 +55,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 38,
+      version: 39,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -432,6 +432,17 @@ class DatabaseService {
     if (oldVersion < 38) {
       await _createExpenseStatementsTable(db);
     }
+    if (oldVersion < 39) {
+      for (final column in const [
+        'actor_user_id INTEGER',
+        'actor_user_name TEXT',
+        'actor_role TEXT',
+      ]) {
+        try {
+          await db.execute('ALTER TABLE engineer_custody ADD COLUMN $column');
+        } catch (_) {}
+      }
+    }
   }
 
   Future<void> _createExpenseStatementsTable(Database db) async {
@@ -498,6 +509,9 @@ class DatabaseService {
         note TEXT,
         document_path TEXT,
         movement_type TEXT DEFAULT 'custody',
+        actor_user_id INTEGER,
+        actor_user_name TEXT,
+        actor_role TEXT,
         FOREIGN KEY (user_id) REFERENCES users (id)
       )
     ''');
@@ -1469,6 +1483,37 @@ class DatabaseService {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  /// عارض مرفقات الإشعارات يعمل على الخادم فقط.
+  Future<Never> getNotificationAttachments({
+    required int userId,
+    required String source,
+    required int recordId,
+  }) async {
+    throw Exception('عرض المرفقات يتطلب الاتصال بالخادم');
+  }
+
+  Future<Never> getNotificationAttachmentFile({
+    required int userId,
+    required String source,
+    required int recordId,
+    required String attachmentId,
+  }) async {
+    throw Exception('عرض المرفقات يتطلب الاتصال بالخادم');
+  }
+
+  /// تقارير العمليات تُحفظ على الخادم فقط (تحتاج صوراً وإشعارات).
+  Future<int> createOperationReport({
+    required int userId,
+    required String userName,
+    int? projectId,
+    String? projectName,
+    required String reportType,
+    required String details,
+    required List<String> images,
+  }) async {
+    throw Exception('إرسال تقارير العمليات يتطلب الاتصال بالخادم');
+  }
+
   Future<void> addCustody(
     int userId,
     double amount,
@@ -1496,6 +1541,7 @@ class DatabaseService {
     String movementType, {
     int? actorUserId,
     String? actorUserName,
+    String? actorRole,
   }) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
@@ -1506,6 +1552,9 @@ class DatabaseService {
       'note': note,
       'document_path': null,
       'movement_type': movementType,
+      'actor_user_id': actorUserId,
+      'actor_user_name': actorUserName?.trim(),
+      'actor_role': actorRole?.trim(),
     });
     final users = await db.query('users', where: 'id = ?', whereArgs: [userId]);
     if (users.isEmpty) return;
@@ -1550,6 +1599,9 @@ class DatabaseService {
             'note': r['note'],
             'document_path': r['document_path'],
             'movement_type': r['movement_type'] as String? ?? 'custody',
+            'actor_user_id': r['actor_user_id'],
+            'actor_user_name': r['actor_user_name'],
+            'actor_role': r['actor_role'],
           },
         )
         .toList();
@@ -2330,7 +2382,12 @@ class DatabaseService {
     return maps.map((m) => UnitModel.fromMap(m)).toList();
   }
 
-  Future<int> addUnit(UnitModel u) async {
+  /// `actorUserId` / `actorUserName` تُستخدمان فقط في وضع الـAPI (إشعار رفع الصورة).
+  Future<int> addUnit(
+    UnitModel u, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     final db = await database;
     return db.insert('units', {
       'building_id': u.buildingId,
@@ -2340,7 +2397,11 @@ class DatabaseService {
     });
   }
 
-  Future<void> updateUnit(UnitModel u) async {
+  Future<void> updateUnit(
+    UnitModel u, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     final db = await database;
     await db.update(
       'units',
@@ -2369,7 +2430,11 @@ class DatabaseService {
     return maps.map((m) => BuildingMaterialModel.fromMap(m)).toList();
   }
 
-  Future<int> addBuildingMaterial(BuildingMaterialModel m) async {
+  Future<int> addBuildingMaterial(
+    BuildingMaterialModel m, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     final db = await database;
     return db.insert('building_materials', {
       'building_id': m.buildingId,
@@ -2384,7 +2449,11 @@ class DatabaseService {
     });
   }
 
-  Future<void> updateBuildingMaterial(BuildingMaterialModel m) async {
+  Future<void> updateBuildingMaterial(
+    BuildingMaterialModel m, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     final db = await database;
     await db.update(
       'building_materials',
@@ -2417,7 +2486,11 @@ class DatabaseService {
     return maps.map((m) => BuildingCutlistModel.fromMap(m)).toList();
   }
 
-  Future<int> addBuildingCutlist(BuildingCutlistModel c) async {
+  Future<int> addBuildingCutlist(
+    BuildingCutlistModel c, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     final db = await database;
     return db.insert('building_cutlist_images', {
       'building_id': c.buildingId,

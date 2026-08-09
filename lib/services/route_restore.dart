@@ -19,6 +19,7 @@ import '../screens/accountant_custody_screen.dart';
 import '../screens/site_engineer_expenses_report_screen.dart';
 import '../screens/accountant_finance_screen.dart';
 import '../screens/manager_custody_expenses_hub_screen.dart';
+import '../screens/custody_expenses_view_screen.dart';
 import '../screens/expense_statements_screen.dart';
 import '../screens/activity_logs_screen.dart';
 import '../screens/new_icon_screen.dart';
@@ -32,6 +33,9 @@ import '../screens/ms_sd_screen.dart';
 import '../screens/mos_itp_screen.dart';
 import '../screens/module_placeholder_screen.dart';
 import '../screens/warehouses_view_screen.dart';
+import '../screens/withdrawal_files_reports_hub_screen.dart';
+import '../screens/material_withdrawals_report_screen.dart';
+import '../screens/uploaded_files_report_screen.dart';
 import '../screens/reports_sys_hub_screen.dart';
 import '../screens/projects_dashboard_screen.dart';
 import '../screens/projects_dashboard_plus1_screen.dart';
@@ -87,12 +91,9 @@ Widget? getScreenForRoute(String name, UserModel user) {
     case 'manager-custody-hub-entry':
       return DetailedReportFinancesScreen.managerDirectEntry(user: user);
     case 'custody-expenses-view':
-      return ExpenseStatementsScreen(
+      return CustodyExpensesViewScreen(
         currentUser: user,
         appBarTitle: 'العهده/ المصروفات',
-        statuses: const ['approved', 'rejected'],
-        allowRespond: false,
-        allowDelete: user.canDeleteExpenseStatements,
       );
     case 'attendance-reports':
       return AttendanceReportsScreen(currentUser: user);
@@ -122,6 +123,12 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return IrMirScreen(currentUser: user);
     case 'warehouses-view':
       return WarehousesViewScreen(currentUser: user);
+    case 'withdrawal-files-reports':
+      return WithdrawalFilesReportsHubScreen(currentUser: user);
+    case 'material-withdrawals-report':
+      return MaterialWithdrawalsReportScreen(currentUser: user);
+    case 'uploaded-files-report':
+      return UploadedFilesReportScreen(currentUser: user);
     case 'ms-sd':
       return MsSdScreen(currentUser: user);
     case 'qs-invs':

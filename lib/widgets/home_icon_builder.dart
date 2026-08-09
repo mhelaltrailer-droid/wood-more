@@ -24,10 +24,11 @@ import '../core/shop_drawing_constants.dart';
 import '../screens/shop_drawing_type_gate_screen.dart';
 import '../screens/detailed_report_finances_screen.dart';
 import '../screens/manager_custody_expenses_hub_screen.dart';
-import '../screens/expense_statements_screen.dart';
+import '../screens/custody_expenses_view_screen.dart';
 import '../screens/today_work_plan_screen.dart';
 import '../screens/tomorrow_work_plan_screen.dart';
 import '../screens/warehouses_view_screen.dart';
+import '../screens/withdrawal_files_reports_hub_screen.dart';
 import '../screens/work_plan_tracking_report_screen.dart';
 import '../screens/projects_dashboard_screen.dart';
 import '../screens/projects_dashboard_plus1_screen.dart';
@@ -219,15 +220,9 @@ class HomeIconBuilder {
           onTap: () => pushAndSaveRoute(
             context,
             'custody-expenses-view',
-            ExpenseStatementsScreen(
+            CustodyExpensesViewScreen(
               currentUser: user,
               appBarTitle: 'العهده/ المصروفات',
-              statuses: const [
-                'approved',
-                'rejected',
-              ],
-              allowRespond: false,
-              allowDelete: user.canDeleteExpenseStatements,
             ),
           ),
         );
@@ -314,6 +309,20 @@ class HomeIconBuilder {
             context,
             'contractor-report',
             ContractorReportScreen(admin: user),
+          ),
+        );
+      case 'withdrawal_files_reports':
+        return _lightCard(
+          icon: Icons.inventory_2_outlined,
+          iconSize: 56,
+          title: 'تقارير السحب والمرفقات',
+          subtitle:
+              'سحب الخامات حسب المشروع وموقع العمل · الملفات المرفوعة (IR / MIR / ...)',
+          padding: 28,
+          onTap: () => pushAndSaveRoute(
+            context,
+            'withdrawal-files-reports',
+            WithdrawalFilesReportsHubScreen(currentUser: user),
           ),
         );
       case 'document_control':

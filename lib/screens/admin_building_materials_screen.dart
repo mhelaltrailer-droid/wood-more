@@ -149,27 +149,35 @@ class _AdminBuildingMaterialsScreenState extends State<AdminBuildingMaterialsScr
                 Navigator.pop(ctx);
                 try {
                   if (item == null) {
-                    await _db.addBuildingMaterial(BuildingMaterialModel(
-                      id: 0,
-                      buildingId: _selectedBuilding!.id,
-                      materialName: name,
-                      length: lengthC.text.trim(),
-                      piecesCount: piecesC.text.trim(),
-                      totalLength: totalLengthC.text.trim(),
-                      totalArea: totalAreaC.text.trim(),
-                      imagePath: imagePath,
-                    ));
+                    await _db.addBuildingMaterial(
+                      BuildingMaterialModel(
+                        id: 0,
+                        buildingId: _selectedBuilding!.id,
+                        materialName: name,
+                        length: lengthC.text.trim(),
+                        piecesCount: piecesC.text.trim(),
+                        totalLength: totalLengthC.text.trim(),
+                        totalArea: totalAreaC.text.trim(),
+                        imagePath: imagePath,
+                      ),
+                      actorUserId: widget.admin.id,
+                      actorUserName: widget.admin.name,
+                    );
                   } else {
-                    await _db.updateBuildingMaterial(BuildingMaterialModel(
-                      id: item.id,
-                      buildingId: item.buildingId,
-                      materialName: name,
-                      length: lengthC.text.trim(),
-                      piecesCount: piecesC.text.trim(),
-                      totalLength: totalLengthC.text.trim(),
-                      totalArea: totalAreaC.text.trim(),
-                      imagePath: imagePath,
-                    ));
+                    await _db.updateBuildingMaterial(
+                      BuildingMaterialModel(
+                        id: item.id,
+                        buildingId: item.buildingId,
+                        materialName: name,
+                        length: lengthC.text.trim(),
+                        piecesCount: piecesC.text.trim(),
+                        totalLength: totalLengthC.text.trim(),
+                        totalArea: totalAreaC.text.trim(),
+                        imagePath: imagePath,
+                      ),
+                      actorUserId: widget.admin.id,
+                      actorUserName: widget.admin.name,
+                    );
                   }
                   _loadList();
                   if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحفظ'), backgroundColor: Colors.green));

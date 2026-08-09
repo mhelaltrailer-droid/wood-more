@@ -22,6 +22,7 @@ import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
 import '../models/location_withdrawal_for_period_model.dart';
 import '../models/activity_log_model.dart';
+import '../models/notification_attachment_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/shop_darwing_notification_model.dart';
 import '../models/ir_mir_upload_model.dart';
@@ -30,6 +31,8 @@ import '../models/mos_itp_record_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../models/pending_postpone_fine_action_model.dart';
 import '../models/postpone_fine_report_row_model.dart';
+import '../models/material_withdrawal_report_row_model.dart';
+import '../models/uploaded_file_report_row_model.dart';
 import '../models/reports_sys_model.dart';
 import '../models/shop_drawing_model.dart';
 import '../models/app_release_info_model.dart';
@@ -51,6 +54,9 @@ class ApiStorageService {
   String _path(String segment) =>
       baseUrl.endsWith('/') ? '$baseUrl$segment' : '$baseUrl/$segment';
 
+  static String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
   Exception _apiHttpException(http.Response r, {String? path}) {
     final body = r.body.trim();
     final htmlRouteMissing = body.contains('<pre>Cannot GET') ||
@@ -66,6 +72,12 @@ class ApiStorageService {
         return Exception(
           'الخادم على Render لا يتضمن مسارات MS-SD / MoS-ITP بعد (404).\n'
           'يجب نشر آخر نسخة من backend/server.js على خدمة wood-more-api ثم إعادة المحاولة.',
+        );
+      }
+      if (p.startsWith('reports/')) {
+        return Exception(
+          'الخادم لا يتضمن مسارات تقارير السحب والمرفقات بعد (404).\n'
+          'يجب نشر آخر نسخة من backend على الخادم ثم إعادة المحاولة.',
         );
       }
       if (p.contains('shop-drawing')) {
@@ -570,8 +582,14 @@ class ApiStorageService {
     await _delete('attendance/$id');
   }
 
-  Future<List<NotificationItemModel>> getNotificationsForUser(int userId) async {
-    final list = await _getList('notifications?userId=$userId');
+  Future<List<NotificationItemModel>> getNotificationsForUser(
+    int userId, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final list = await _getList(
+      'notifications?userId=$userId&limit=$limit&offset=$offset',
+    );
     return list
         .map(
           (e) => NotificationItemModel.fromMap(
@@ -579,6 +597,32 @@ class ApiStorageService {
           ),
         )
         .toList();
+  }
+
+  /// سرد مرفقات سجل مرتبط بإشعار (بيانات وصفية فقط، بدون بايتات).
+  Future<NotificationAttachmentList> getNotificationAttachments({
+    required int userId,
+    required String source,
+    required int recordId,
+  }) async {
+    final data = await _get(
+      'attachments?userId=$userId&source=$source&recordId=$recordId',
+    );
+    return NotificationAttachmentList.fromMap(data);
+  }
+
+  /// جلب بايتات مرفق واحد عند فتحه فعلياً.
+  Future<NotificationAttachmentFile> getNotificationAttachmentFile({
+    required int userId,
+    required String source,
+    required int recordId,
+    required String attachmentId,
+  }) async {
+    final data = await _get(
+      'attachments/file?userId=$userId&source=$source&recordId=$recordId'
+      '&attachmentId=${Uri.encodeQueryComponent(attachmentId)}',
+    );
+    return NotificationAttachmentFile.fromMap(data);
   }
 
   Future<int> getUnreadNotificationsCount(int userId) async {
@@ -756,11 +800,40 @@ class ApiStorageService {
     await _postVoid('engineer-balance', {'userId': userId, 'balance': balance});
   }
 
-  Future<void> addCustody(int userId, double amount, String note) async {
+  Future<void> addCustody(
+    int userId,
+    double amount,
+    String note, [
+    String? documentPath,
+  ]) async {
     await _postVoid('custody', {
       'userId': userId,
       'amount': amount,
       'note': note,
+      if (documentPath != null && documentPath.trim().isNotEmpty)
+        'documentPath': documentPath.trim(),
+    });
+  }
+
+  /// إرسال تقرير عمليات مع صوره (الصور إلزامية).
+  Future<int> createOperationReport({
+    required int userId,
+    required String userName,
+    int? projectId,
+    String? projectName,
+    required String reportType,
+    required String details,
+    required List<String> images,
+  }) async {
+    return _post('operation-reports', {
+      'userId': userId,
+      'userName': userName,
+      if (projectId != null && projectId > 0) 'projectId': projectId,
+      if (projectName != null && projectName.trim().isNotEmpty)
+        'projectName': projectName.trim(),
+      'reportType': reportType,
+      'details': details,
+      'images': images,
     });
   }
 
@@ -772,6 +845,7 @@ class ApiStorageService {
     String movementType, {
     int? actorUserId,
     String? actorUserName,
+    String? actorRole,
   }) async {
     try {
       await _postVoid('balance-movement', {
@@ -782,6 +856,8 @@ class ApiStorageService {
         if (actorUserId != null) 'actorUserId': actorUserId,
         if (actorUserName != null && actorUserName.trim().isNotEmpty)
           'actorUserName': actorUserName.trim(),
+        if (actorRole != null && actorRole.trim().isNotEmpty)
+          'actorRole': actorRole.trim(),
       });
     } catch (_) {}
   }
@@ -925,20 +1001,37 @@ class ApiStorageService {
         .toList();
   }
 
-  Future<int> addUnit(UnitModel u) async {
+  /// هوية الرافع تُرسل مع صور الوحدات/الخامات/الـCutlists لتظهر في إشعار الرفع.
+  Map<String, dynamic> _actorFields(int? actorUserId, String? actorUserName) => {
+        if (actorUserId != null) 'userId': actorUserId,
+        if (actorUserName != null && actorUserName.trim().isNotEmpty)
+          'userName': actorUserName.trim(),
+      };
+
+  Future<int> addUnit(
+    UnitModel u, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     return _post('units', {
       'buildingId': u.buildingId,
       'name': u.name,
       'model': u.model,
       'imagePath': u.imagePath,
+      ..._actorFields(actorUserId, actorUserName),
     });
   }
 
-  Future<void> updateUnit(UnitModel u) async {
+  Future<void> updateUnit(
+    UnitModel u, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     await _put('units/${u.id}', {
       'name': u.name,
       'model': u.model,
       'imagePath': u.imagePath,
+      ..._actorFields(actorUserId, actorUserName),
     });
   }
 
@@ -959,7 +1052,11 @@ class ApiStorageService {
         .toList();
   }
 
-  Future<int> addBuildingMaterial(BuildingMaterialModel m) async {
+  Future<int> addBuildingMaterial(
+    BuildingMaterialModel m, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     return _post('building-materials', {
       'buildingId': m.buildingId,
       'materialName': m.materialName,
@@ -970,10 +1067,15 @@ class ApiStorageService {
       'totalLength': m.totalLength,
       'totalArea': m.totalArea,
       'imagePath': m.imagePath,
+      ..._actorFields(actorUserId, actorUserName),
     });
   }
 
-  Future<void> updateBuildingMaterial(BuildingMaterialModel m) async {
+  Future<void> updateBuildingMaterial(
+    BuildingMaterialModel m, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     await _put('building-materials/${m.id}', {
       'materialName': m.materialName,
       'length': m.length,
@@ -981,6 +1083,7 @@ class ApiStorageService {
       'totalLength': m.totalLength,
       'totalArea': m.totalArea,
       'imagePath': m.imagePath,
+      ..._actorFields(actorUserId, actorUserName),
     });
   }
 
@@ -998,10 +1101,15 @@ class ApiStorageService {
         .toList();
   }
 
-  Future<int> addBuildingCutlist(BuildingCutlistModel c) async {
+  Future<int> addBuildingCutlist(
+    BuildingCutlistModel c, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     return _post('building-cutlists', {
       'buildingId': c.buildingId,
       'imagePath': c.imagePath,
+      ..._actorFields(actorUserId, actorUserName),
     });
   }
 
@@ -1280,6 +1388,66 @@ class ApiStorageService {
     return decoded
         .map(
           (e) => PostponeFineReportRowModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  /// تقرير سحب الخامات: المشاريع ومواقع العمل مع حالة الطلب/الإتمام والمرفقات.
+  Future<List<MaterialWithdrawalReportRowModel>> getMaterialWithdrawalsReport({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    int? projectId,
+    int? engineerUserId,
+    String? status,
+  }) async {
+    final qp = <String, String>{
+      'dateFrom': _ymd(dateFrom),
+      'dateTo': _ymd(dateTo),
+    };
+    if (projectId != null) qp['projectId'] = projectId.toString();
+    if (engineerUserId != null) {
+      qp['engineerUserId'] = engineerUserId.toString();
+    }
+    if (status != null && status.trim().isNotEmpty) qp['status'] = status.trim();
+    const path = 'reports/material-withdrawals';
+    final uri = Uri.parse(_path(path)).replace(queryParameters: qp);
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    final decoded = jsonDecode(r.body);
+    if (decoded == null || decoded is! List) return [];
+    return decoded
+        .map(
+          (e) => MaterialWithdrawalReportRowModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  /// تقرير الملفات المرفوعة حالياً (IR / MIR / MS / SD / MoS / ITP / أذون السحب...).
+  Future<List<UploadedFileReportRowModel>> getUploadedFilesReport({
+    required DateTime dateFrom,
+    required DateTime dateTo,
+    int? projectId,
+    String? kind,
+  }) async {
+    final qp = <String, String>{
+      'dateFrom': _ymd(dateFrom),
+      'dateTo': _ymd(dateTo),
+    };
+    if (projectId != null) qp['projectId'] = projectId.toString();
+    if (kind != null && kind.trim().isNotEmpty) qp['kind'] = kind.trim();
+    const path = 'reports/uploaded-files';
+    final uri = Uri.parse(_path(path)).replace(queryParameters: qp);
+    final r = await http.get(uri);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    final decoded = jsonDecode(r.body);
+    if (decoded == null || decoded is! List) return [];
+    return decoded
+        .map(
+          (e) => UploadedFileReportRowModel.fromMap(
             Map<String, dynamic>.from(e as Map),
           ),
         )

@@ -20,6 +20,9 @@ class ExpenseStatementsScreen extends StatefulWidget {
   /// إظهار حذف (للمسؤول الأساسي فقط يُفعَّل فعلياً).
   final bool allowDelete;
 
+  /// عرض المحتوى بدون Scaffold أو AppBar (عند الاستخدام داخل تبويب).
+  final bool embedded;
+
   const ExpenseStatementsScreen({
     super.key,
     required this.currentUser,
@@ -27,6 +30,7 @@ class ExpenseStatementsScreen extends StatefulWidget {
     this.statuses,
     this.allowRespond = false,
     this.allowDelete = false,
+    this.embedded = false,
   });
 
   @override
@@ -229,7 +233,7 @@ class _ExpenseStatementsScreenState extends State<ExpenseStatementsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final dateFmt = DateFormat('yyyy/MM/dd HH:mm', 'ar');
+    if (widget.embedded) return _buildBody();
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.appBarTitle),
@@ -239,7 +243,13 @@ class _ExpenseStatementsScreenState extends State<ExpenseStatementsScreen> {
           IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
         ],
       ),
-      body: _loading
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    final dateFmt = DateFormat('yyyy/MM/dd HH:mm', 'ar');
+    return _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
               ? Center(
@@ -372,7 +382,6 @@ class _ExpenseStatementsScreenState extends State<ExpenseStatementsScreen> {
                           );
                         },
                       ),
-                    ),
-    );
+                    );
   }
 }

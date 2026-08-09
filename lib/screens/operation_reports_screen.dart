@@ -152,13 +152,21 @@ class _OperationReportsScreenState extends State<OperationReportsScreen> {
 
     setState(() => _submitting = true);
     try {
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      if (!mounted) return;
-
       final selectedProject = _projects.firstWhere(
         (p) => p.id == _selectedProjectId,
         orElse: () => ProjectModel(id: -1, name: 'غير محدد'),
       );
+
+      await _storage.createOperationReport(
+        userId: widget.user.id,
+        userName: widget.user.name,
+        projectId: selectedProject.id > 0 ? selectedProject.id : null,
+        projectName: selectedProject.name,
+        reportType: _selectedReportType!,
+        details: _detailsController.text.trim(),
+        images: List<String>.from(_imageDataUris),
+      );
+      if (!mounted) return;
 
       await OperationReportsStore.addSubmittedReport(
         reportType: _selectedReportType!,

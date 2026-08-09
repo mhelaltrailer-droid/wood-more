@@ -8,6 +8,7 @@ import '../services/api_storage_service.dart';
 import '../utils/notification_delete_ui.dart';
 import '../utils/notification_time_display.dart';
 import 'engineer_withdraw_materials_screen.dart';
+import 'notification_attachments_screen.dart';
 import 'reports_sys_detail_screen.dart';
 import 'reports_sys_hub_screen.dart';
 
@@ -21,14 +22,24 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
+  /// حجم الصفحة الواحدة — القائمة تنمو بالتمرير بدل تحميل كل الإشعارات دفعة واحدة.
+  static const int _pageSize = 30;
+
+  /// أقصى عدد يعيده الخادم في طلب واحد، يحدّ سقف التحديث الصامت.
+  static const int _maxRefreshLimit = 200;
+
   List<NotificationItemModel> _items = const [];
   bool _isLoading = true;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
   String? _error;
   Timer? _pollTimer;
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _loadNotifications();
     _pollTimer = Timer.periodic(
       const Duration(seconds: 8),
@@ -39,7 +50,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 200) {
+      _loadMore();
+    }
+  }
+
+  Future<List<NotificationItemModel>> _fetchPage({
+    required int limit,
+    required int offset,
+  }) async {
+    final storage = getStorage();
+    if (storage is ApiStorageService) {
+      return storage.getNotificationsForUser(
+        widget.currentUser.id,
+        limit: limit,
+        offset: offset,
+      );
+    }
+    final items = await storage.getNotificationsForUser(widget.currentUser.id);
+    return List<NotificationItemModel>.from(items as List);
   }
 
   Future<void> _loadNotifications() async {
@@ -48,13 +85,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       _error = null;
     });
     try {
-      final storage = getStorage();
-      final items = storage is ApiStorageService
-          ? await storage.getNotificationsForUser(widget.currentUser.id)
-          : await storage.getNotificationsForUser(widget.currentUser.id);
+      final items = await _fetchPage(limit: _pageSize, offset: 0);
       if (!mounted) return;
       setState(() {
         _items = items;
+        _hasMore = items.length >= _pageSize;
         _isLoading = false;
       });
     } catch (e) {
@@ -66,15 +101,36 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
+  Future<void> _loadMore() async {
+    if (_isLoadingMore || !_hasMore || _isLoading) return;
+    setState(() => _isLoadingMore = true);
+    try {
+      final more = await _fetchPage(limit: _pageSize, offset: _items.length);
+      if (!mounted) return;
+      final existingIds = _items.map((e) => e.id).toSet();
+      final fresh = more.where((e) => !existingIds.contains(e.id)).toList();
+      setState(() {
+        _items = [..._items, ...fresh];
+        _hasMore = more.length >= _pageSize && fresh.isNotEmpty;
+        _isLoadingMore = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingMore = false);
+    }
+  }
+
   Future<void> _refreshSilently() async {
     try {
-      final storage = getStorage();
-      final items = storage is ApiStorageService
-          ? await storage.getNotificationsForUser(widget.currentUser.id)
-          : await storage.getNotificationsForUser(widget.currentUser.id);
+      // يُعاد تحميل ما هو ظاهر فقط حتى لا يقفز المستخدم لأعلى القائمة.
+      final limit = _items.length < _pageSize
+          ? _pageSize
+          : (_items.length > _maxRefreshLimit ? _maxRefreshLimit : _items.length);
+      final items = await _fetchPage(limit: limit, offset: 0);
       if (!mounted) return;
       setState(() {
         _items = items;
+        _hasMore = items.length >= limit;
         _error = null;
       });
     } catch (_) {}
@@ -114,10 +170,29 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             readAt: DateTime.now(),
             withdrawalRequestId: n.withdrawalRequestId,
             actionTakenAt: n.actionTakenAt,
+            attachmentSource: n.attachmentSource,
+            attachmentRecordId: n.attachmentRecordId,
+            attachmentCount: n.attachmentCount,
           );
         }).toList();
       });
     } catch (_) {}
+  }
+
+  /// فتح مرفقات الإشعار مباشرة في عارض المرفقات.
+  Future<void> _openAttachments(NotificationItemModel item) async {
+    await _markAsRead(item);
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NotificationAttachmentsScreen(
+          currentUser: widget.currentUser,
+          source: item.attachmentSource!,
+          recordId: item.attachmentRecordId!,
+          fallbackTitle: item.title,
+        ),
+      ),
+    );
   }
 
   Future<void> _onNotificationTap(NotificationItemModel item) async {
@@ -249,11 +324,24 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       );
     }
     return ListView.separated(
+      controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
-      itemCount: _items.length,
+      itemCount: _items.length + (_hasMore ? 1 : 0),
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
+        if (index >= _items.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          );
+        }
         final item = _items[index];
         return Dismissible(
           key: ValueKey('notification_${item.id}'),
@@ -277,7 +365,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               notificationDismissDeleteBackground(Alignment.centerRight),
           child: InkWell(
           onTap: () {
-            if (item.eventType.startsWith('reports_sys_')) {
+            if (item.hasAttachments) {
+              _openAttachments(item);
+            } else if (item.eventType.startsWith('reports_sys_')) {
               _onNotificationTap(item);
             } else if (item.eventType == 'withdrawal_request_approved' &&
                 item.withdrawalRequestId != null) {
@@ -336,6 +426,29 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(item.body),
+                if (item.hasAttachments) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.attach_file,
+                        size: 16,
+                        color: Color(0xFF1B5E20),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        item.attachmentCount != null && item.attachmentCount! > 0
+                            ? 'اضغط لعرض ${item.attachmentCount} مرفق'
+                            : 'اضغط لعرض المرفقات',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF1B5E20),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 6),
                 Text(
                   formatNotificationDateTime(item.createdAt),

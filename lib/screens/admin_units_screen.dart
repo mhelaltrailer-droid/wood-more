@@ -150,9 +150,17 @@ class _AdminUnitsScreenState extends State<AdminUnitsScreen> {
               Navigator.pop(ctx);
               try {
                 if (item == null) {
-                  await _db.addUnit(UnitModel(id: 0, buildingId: _selectedBuilding!.id, name: name, model: model.isNotEmpty ? model : name, imagePath: imageC.text.trim().isEmpty ? null : imageC.text.trim()));
+                  await _db.addUnit(
+                    UnitModel(id: 0, buildingId: _selectedBuilding!.id, name: name, model: model.isNotEmpty ? model : name, imagePath: imageC.text.trim().isEmpty ? null : imageC.text.trim()),
+                    actorUserId: widget.admin.id,
+                    actorUserName: widget.admin.name,
+                  );
                 } else {
-                  await _db.updateUnit(UnitModel(id: item.id, buildingId: item.buildingId, name: name, model: model.isNotEmpty ? model : name, imagePath: imageC.text.trim().isEmpty ? null : imageC.text.trim()));
+                  await _db.updateUnit(
+                    UnitModel(id: item.id, buildingId: item.buildingId, name: name, model: model.isNotEmpty ? model : name, imagePath: imageC.text.trim().isEmpty ? null : imageC.text.trim()),
+                    actorUserId: widget.admin.id,
+                    actorUserName: widget.admin.name,
+                  );
                 }
                 _loadUnits();
                 if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحفظ'), backgroundColor: Colors.green));

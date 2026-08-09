@@ -133,6 +133,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
           'add_balance',
           actorUserId: widget.currentUser.id,
           actorUserName: widget.currentUser.name,
+          actorRole: widget.currentUser.role,
         );
       } else {
         final actorBalance = await _db.getEngineerBalance(widget.currentUser.id);
@@ -154,6 +155,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
           'add_balance',
           actorUserId: widget.currentUser.id,
           actorUserName: widget.currentUser.name,
+          actorRole: widget.currentUser.role,
         );
       }
       _load();
@@ -211,6 +213,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
         'withdraw_balance',
         actorUserId: widget.currentUser.id,
         actorUserName: widget.currentUser.name,
+        actorRole: widget.currentUser.role,
       );
       _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم سحب الرصيد'), backgroundColor: Colors.green));

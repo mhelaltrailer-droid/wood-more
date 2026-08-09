@@ -595,6 +595,37 @@ class WebStorageService {
     await prefs.setString(_engineerBalanceKey, jsonEncode(newList));
   }
 
+  /// عارض مرفقات الإشعارات يعمل على الخادم فقط.
+  Future<Never> getNotificationAttachments({
+    required int userId,
+    required String source,
+    required int recordId,
+  }) async {
+    throw Exception('عرض المرفقات يتطلب الاتصال بالخادم');
+  }
+
+  Future<Never> getNotificationAttachmentFile({
+    required int userId,
+    required String source,
+    required int recordId,
+    required String attachmentId,
+  }) async {
+    throw Exception('عرض المرفقات يتطلب الاتصال بالخادم');
+  }
+
+  /// تقارير العمليات تُحفظ على الخادم فقط (تحتاج صوراً وإشعارات).
+  Future<int> createOperationReport({
+    required int userId,
+    required String userName,
+    int? projectId,
+    String? projectName,
+    required String reportType,
+    required String details,
+    required List<String> images,
+  }) async {
+    throw Exception('إرسال تقارير العمليات يتطلب الاتصال بالخادم');
+  }
+
   Future<void> addCustody(
     int userId,
     double amount,
@@ -632,6 +663,7 @@ class WebStorageService {
     String movementType, {
     int? actorUserId,
     String? actorUserName,
+    String? actorRole,
   }) async {
     await _initData();
     final prefs = await _prefs;
@@ -650,6 +682,9 @@ class WebStorageService {
       'note': note,
       'document_path': null,
       'movement_type': movementType,
+      'actor_user_id': actorUserId,
+      'actor_user_name': actorUserName?.trim(),
+      'actor_role': actorRole?.trim(),
     });
     await prefs.setString(_engineerCustodyKey, jsonEncode(list));
   }
@@ -675,6 +710,9 @@ class WebStorageService {
             'note': e['note'],
             'document_path': e['document_path'],
             'movement_type': e['movement_type'] as String? ?? 'custody',
+            'actor_user_id': e['actor_user_id'],
+            'actor_user_name': e['actor_user_name'],
+            'actor_role': e['actor_role'],
           },
         )
         .toList();
@@ -1945,7 +1983,12 @@ class WebStorageService {
       ..sort((a, b) => a.name.compareTo(b.name));
   }
 
-  Future<int> addUnit(UnitModel u) async {
+  /// `actorUserId` / `actorUserName` تُستخدمان فقط في وضع الـAPI (إشعار رفع الصورة).
+  Future<int> addUnit(
+    UnitModel u, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_unitsKey)!) as List;
@@ -1966,7 +2009,11 @@ class WebStorageService {
     return nextId;
   }
 
-  Future<void> updateUnit(UnitModel u) async {
+  Future<void> updateUnit(
+    UnitModel u, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_unitsKey)!) as List;
@@ -2012,7 +2059,11 @@ class WebStorageService {
       ..sort((a, b) => a.materialName.compareTo(b.materialName));
   }
 
-  Future<int> addBuildingMaterial(BuildingMaterialModel m) async {
+  Future<int> addBuildingMaterial(
+    BuildingMaterialModel m, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_buildingMaterialsKey)!) as List;
@@ -2027,7 +2078,11 @@ class WebStorageService {
     return nextId;
   }
 
-  Future<void> updateBuildingMaterial(BuildingMaterialModel m) async {
+  Future<void> updateBuildingMaterial(
+    BuildingMaterialModel m, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_buildingMaterialsKey)!) as List;
@@ -2063,7 +2118,11 @@ class WebStorageService {
         .toList();
   }
 
-  Future<int> addBuildingCutlist(BuildingCutlistModel c) async {
+  Future<int> addBuildingCutlist(
+    BuildingCutlistModel c, {
+    int? actorUserId,
+    String? actorUserName,
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_buildingCutlistKey)!) as List;

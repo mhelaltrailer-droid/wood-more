@@ -168,7 +168,11 @@ async function ensureExpenseStatementsTable(pool) {
   }
 }
 
-function registerExpenseStatementsRoutes(app, pool, { runNotificationSafely } = {}) {
+function registerExpenseStatementsRoutes(
+  app,
+  pool,
+  { runNotificationSafely, notifyFileUpload } = {},
+) {
   const safeNotify = async (label, fn) => {
     if (typeof runNotificationSafely === 'function') {
       await runNotificationSafely(label, fn);
@@ -284,6 +288,24 @@ function registerExpenseStatementsRoutes(app, pool, { runNotificationSafely } = 
             actor_user_name: user.name,
             project_name: projectName,
           });
+        });
+      }
+
+      // بنود البيان الواحد تُحفظ كصفوف منفصلة، فيُرسل إشعار واحد يفتح كل إيصالاته.
+      const receiptsCount = items.filter(
+        (e) => e.image_path && String(e.image_path).trim(),
+      ).length;
+      if (receiptsCount > 0 && typeof notifyFileUpload === 'function') {
+        await notifyFileUpload(pool, userId, user.name, {
+          title: 'إيصالات بيان صرف',
+          body:
+            `قام "${user.name}" بإرفاق ${receiptsCount} إيصال مع بيان صرف` +
+            (projectName ? ` — مشروع "${projectName}"` : ''),
+          eventType: 'expense_statement_attachment',
+          projectName,
+          attachmentSource: 'expense_statement',
+          attachmentRecordId: ids[0],
+          attachmentCount: receiptsCount,
         });
       }
 

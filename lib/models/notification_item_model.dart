@@ -15,6 +15,12 @@ class NotificationItemModel {
   final int? withdrawalRequestId;
   final DateTime? actionTakenAt;
 
+  /// موديول المرفقات المرتبط بالإشعار (ir_mir, ms_sd, daily_report ...).
+  /// وجوده يعني أن الضغط على الإشعار يفتح المرفقات مباشرة.
+  final String? attachmentSource;
+  final int? attachmentRecordId;
+  final int? attachmentCount;
+
   const NotificationItemModel({
     required this.id,
     required this.recipientUserId,
@@ -30,11 +36,19 @@ class NotificationItemModel {
     this.readAt,
     this.withdrawalRequestId,
     this.actionTakenAt,
+    this.attachmentSource,
+    this.attachmentRecordId,
+    this.attachmentCount,
   });
 
   /// إشعار طلب سحب بانتظار موافقة/رفض من المستلم.
   bool get isWithdrawalPendingAction =>
       withdrawalRequestId != null && actionTakenAt == null;
+
+  /// الإشعار يحمل مرفقات يمكن فتحها من شاشة عارض المرفقات.
+  bool get hasAttachments =>
+      (attachmentSource != null && attachmentSource!.trim().isNotEmpty) &&
+      attachmentRecordId != null;
 
   factory NotificationItemModel.fromMap(Map<String, dynamic> map) {
     DateTime parseDate(dynamic v) {
@@ -66,6 +80,14 @@ class NotificationItemModel {
       actionTakenAt: parseDateOrNull(
         map['action_taken_at'] ?? map['actionTakenAt'],
       ),
+      attachmentSource:
+          (map['attachment_source'] ?? map['attachmentSource'])?.toString(),
+      attachmentRecordId: int.tryParse(
+        (map['attachment_record_id'] ?? map['attachmentRecordId'])?.toString() ?? '',
+      ),
+      attachmentCount: int.tryParse(
+        (map['attachment_count'] ?? map['attachmentCount'])?.toString() ?? '',
+      ),
     );
   }
 
@@ -85,6 +107,9 @@ class NotificationItemModel {
       'read_at': readAt?.toIso8601String(),
       'withdrawal_request_id': withdrawalRequestId,
       'action_taken_at': actionTakenAt?.toIso8601String(),
+      'attachment_source': attachmentSource,
+      'attachment_record_id': attachmentRecordId,
+      'attachment_count': attachmentCount,
     };
   }
 }
