@@ -644,11 +644,14 @@ async function withdrawalNotifyEngineer(pool, engineerUserId, fields) {
   const actorUserId = fields.actorUserId ?? fields.actor_user_id ?? null;
   const actorUserName = fields.actorUserName ?? fields.actor_user_name ?? null;
   const projectName = fields.projectName ?? fields.project_name ?? null;
+  const withdrawalRequestId = fields.withdrawalRequestId ?? fields.withdrawal_request_id ?? null;
+  const now = new Date().toISOString();
   await pool.query(
     `INSERT INTO notifications (
       recipient_user_id, recipient_role, title, body, event_type,
-      actor_user_id, actor_user_name, project_name, created_at, is_read
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE)`,
+      actor_user_id, actor_user_name, project_name, created_at, is_read,
+      withdrawal_request_id, action_taken_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10, $11)`,
     [
       engineerUserId,
       role,
@@ -658,7 +661,10 @@ async function withdrawalNotifyEngineer(pool, engineerUserId, fields) {
       actorUserId,
       actorUserName,
       projectName,
-      new Date().toISOString(),
+      now,
+      withdrawalRequestId,
+      // إشعار المهندس ليس بانتظار قرار منه، فيُختم فوراً ليبقى قابلاً للحذف.
+      withdrawalRequestId != null ? now : null,
     ]
   );
 }
@@ -1031,9 +1037,30 @@ async function _enrichActivityLogRow(row) {
   };
 }
 
+// Clients poll these badge/config endpoints every few seconds, so logging them added ~30k
+// rows/day with no audit value. Only GET is skipped: PUT /system-lock stays audited.
+const ACTIVITY_LOG_SKIPPED_GET_PATHS = new Set([
+  '/',
+  '/system-lock',
+  '/home-icons-visibility',
+  '/notifications/unread-count',
+  '/reports-sys/pending-count',
+  '/shop-drawing/pending-count',
+  '/shop-drawing/module-notifications/unread-count',
+  '/shop-darwing-notification/unread-count',
+  '/withdrawal-requests/action-count',
+  '/app-release/latest',
+]);
+
+function _shouldSkipActivityLog(req) {
+  if (req.path === '/activity-logs') return true;
+  if (String(req.method || '').toUpperCase() !== 'GET') return false;
+  return ACTIVITY_LOG_SKIPPED_GET_PATHS.has(req.path);
+}
+
 async function _insertActivityLog({ req, statusCode, details }) {
   try {
-    if (req.path === '/activity-logs') return;
+    if (_shouldSkipActivityLog(req)) return;
     const ctx = await _resolveActivityUserContext(req);
     const action = _resolveActivityAction(req.method, req.path, req.body || {});
     await pool.query(
@@ -4269,16 +4296,18 @@ app.get('/withdrawal-requests/pending-actions', async (req, res) => {
       r = await pool.query(
         `SELECT wr.*, p.name AS project_name FROM withdrawal_requests wr
          INNER JOIN projects p ON p.id = wr.project_id
-         WHERE wr.overall_status = 'pending' AND wr.sem_status = 'pending' AND wr.fulfilled_at IS NULL
-         ORDER BY wr.id DESC`
+         WHERE wr.sem_responded_at IS NOT NULL
+            OR (wr.overall_status = 'pending' AND wr.sem_status = 'pending' AND wr.fulfilled_at IS NULL)
+         ORDER BY COALESCE(wr.sem_responded_at, wr.created_at) DESC, wr.id DESC`
       );
     } else if (role === 'operation_manager') {
       r = await pool.query(
         `SELECT wr.*, p.name AS project_name FROM withdrawal_requests wr
          INNER JOIN projects p ON p.id = wr.project_id
-         WHERE wr.overall_status = 'pending' AND wr.om_status = 'pending'
-           AND wr.sem_status = 'approved' AND wr.fulfilled_at IS NULL
-         ORDER BY wr.id DESC`
+         WHERE wr.om_responded_at IS NOT NULL
+            OR (wr.overall_status = 'pending' AND wr.om_status = 'pending'
+                AND wr.sem_status = 'approved' AND wr.fulfilled_at IS NULL)
+         ORDER BY COALESCE(wr.om_responded_at, wr.created_at) DESC, wr.id DESC`
       );
     } else {
       return res.json([]);
@@ -4289,6 +4318,26 @@ app.get('/withdrawal-requests/pending-actions', async (req, res) => {
         project_name: row.project_name,
       }))
     );
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/withdrawal-requests/:id', async (req, res) => {
+  try {
+    const id = parseInt(String(req.params.id || ''), 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'invalid id' });
+    const r = await pool.query(
+      `SELECT wr.*, p.name AS project_name FROM withdrawal_requests wr
+       LEFT JOIN projects p ON p.id = wr.project_id
+       WHERE wr.id = $1`,
+      [id]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    res.json({
+      ...withdrawalRequestRowToJson(r.rows[0]),
+      project_name: r.rows[0].project_name,
+    });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -4350,6 +4399,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
           actor_user_id: userId,
           actor_user_name: actor.rows[0].name,
           project_name: projectName,
+          withdrawal_request_id: id,
         });
         return res.json({ ok: true });
       }
@@ -4412,6 +4462,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
           actor_user_id: userId,
           actor_user_name: actor.rows[0].name,
           project_name: projectName,
+          withdrawal_request_id: id,
         });
         return res.json({ ok: true });
       }
@@ -4435,11 +4486,15 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
       });
       await withdrawalNotifyEngineer(pool, engId, {
         title: 'تمت الموافقة على طلب سحب الخامات',
-        body: `يمكنك الآن إكمال سحب الخامات من الموقع: ${pathLabel} — مشروع "${projectName}"`,
+        body:
+          `تمت الموافقة على طلب السحب — يمكنك إكمال عملية السحب وإرفاق الملفات المطلوبة ` +
+          `(إذن الصرف وإذن التسليم).\n` +
+          `الموقع: ${pathLabel || '—'} — مشروع "${projectName}"`,
         event_type: 'withdrawal_request_approved',
         actor_user_id: userId,
         actor_user_name: actor.rows[0].name,
         project_name: projectName,
+        withdrawal_request_id: id,
       });
       return res.json({ ok: true });
     }

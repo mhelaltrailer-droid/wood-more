@@ -2820,6 +2820,10 @@ class WebStorageService {
     _withdrawalRequestsUnsupported();
   }
 
+  Future<WithdrawalRequestModel?> getWithdrawalRequestById(int id) async {
+    return null;
+  }
+
   Future<List<WithdrawalRequestModel>> getWithdrawalRequestsForEngineerProject({
     required int projectId,
     required int engineerUserId,

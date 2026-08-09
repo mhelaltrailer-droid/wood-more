@@ -3602,6 +3602,7 @@ class DatabaseService {
     int? actorUserId,
     String? actorUserName,
     String? projectName,
+    int? withdrawalRequestId,
   }) async {
     final u = await db.query('users', where: 'id = ?', whereArgs: [recipientUserId]);
     if (u.isEmpty) return;
@@ -3617,6 +3618,9 @@ class DatabaseService {
       'project_name': projectName,
       'created_at': now,
       'is_read': 0,
+      'withdrawal_request_id': withdrawalRequestId,
+      // إشعار المهندس ليس بانتظار قرار منه، فيُختم فوراً ليبقى قابلاً للحذف.
+      'action_taken_at': withdrawalRequestId == null ? null : now,
     });
   }
 
@@ -3635,6 +3639,17 @@ class DatabaseService {
         '${local.day.toString().padLeft(2, '0')} '
         '${h12.toString().padLeft(2, '0')}:'
         '${local.minute.toString().padLeft(2, '0')} $amPm';
+  }
+
+  Future<WithdrawalRequestModel?> getWithdrawalRequestById(int id) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      'SELECT wr.*, p.name AS project_name FROM withdrawal_requests wr '
+      'LEFT JOIN projects p ON p.id = wr.project_id WHERE wr.id = ?',
+      [id],
+    );
+    if (rows.isEmpty) return null;
+    return _wrFromRow(Map<String, dynamic>.from(rows.first));
   }
 
   Future<List<WithdrawalRequestModel>> getWithdrawalRequestsForEngineerProject({
@@ -3812,14 +3827,21 @@ class DatabaseService {
     final u = await db.query('users', where: 'id = ?', whereArgs: [userId]);
     if (u.isEmpty || u.first['role'] != role) return [];
     final where = role == 'site_engineer_manager'
-        ? "wr.overall_status = 'pending' AND wr.sem_status = 'pending' AND wr.fulfilled_at IS NULL"
+        ? "wr.sem_responded_at IS NOT NULL OR (wr.overall_status = 'pending' "
+              "AND wr.sem_status = 'pending' AND wr.fulfilled_at IS NULL)"
         : role == 'operation_manager'
-        ? "wr.overall_status = 'pending' AND wr.om_status = 'pending' AND wr.sem_status = 'approved' AND wr.fulfilled_at IS NULL"
+        ? "wr.om_responded_at IS NOT NULL OR (wr.overall_status = 'pending' "
+              "AND wr.om_status = 'pending' AND wr.sem_status = 'approved' "
+              "AND wr.fulfilled_at IS NULL)"
         : null;
     if (where == null) return [];
+    final respondedAt = role == 'site_engineer_manager'
+        ? 'wr.sem_responded_at'
+        : 'wr.om_responded_at';
     final rows = await db.rawQuery(
       'SELECT wr.*, p.name AS project_name FROM withdrawal_requests wr '
-      'INNER JOIN projects p ON p.id = wr.project_id WHERE $where ORDER BY wr.id DESC',
+      'INNER JOIN projects p ON p.id = wr.project_id WHERE $where '
+      'ORDER BY COALESCE($respondedAt, wr.created_at) DESC, wr.id DESC',
     );
     return rows
         .map((e) => WithdrawalRequestModel.fromMap(Map<String, dynamic>.from(e)))
@@ -3891,7 +3913,8 @@ class DatabaseService {
             eventType: 'withdrawal_request_rejected',
             actorUserId: managerUserId,
             actorUserName: actorName,
-            projectName: projectName.isEmpty ? null : projectName);
+            projectName: projectName.isEmpty ? null : projectName,
+            withdrawalRequestId: requestId);
         return;
       }
       await db.update(
@@ -3972,7 +3995,8 @@ class DatabaseService {
           eventType: 'withdrawal_request_rejected',
           actorUserId: managerUserId,
           actorUserName: actorName,
-          projectName: projectName.isEmpty ? null : projectName);
+          projectName: projectName.isEmpty ? null : projectName,
+          withdrawalRequestId: requestId);
       return;
     }
     await db.update(
@@ -4002,11 +4026,14 @@ class DatabaseService {
     await _wrNotifyUser(db, engId,
         title: 'تمت الموافقة على طلب سحب الخامات',
         body:
-            'يمكنك الآن إكمال سحب الخامات من الموقع: $pathLabel — مشروع "$projectName"',
+            'تمت الموافقة على طلب السحب — يمكنك إكمال عملية السحب وإرفاق '
+            'الملفات المطلوبة (إذن الصرف وإذن التسليم).\n'
+            'الموقع: ${pathLabel.isEmpty ? '—' : pathLabel} — مشروع "$projectName"',
         eventType: 'withdrawal_request_approved',
         actorUserId: managerUserId,
         actorUserName: actorName,
-        projectName: projectName.isEmpty ? null : projectName);
+        projectName: projectName.isEmpty ? null : projectName,
+        withdrawalRequestId: requestId);
   }
 
   Future<void> fulfillWithdrawalRequest({

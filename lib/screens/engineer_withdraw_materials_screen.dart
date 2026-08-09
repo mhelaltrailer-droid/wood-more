@@ -20,7 +20,16 @@ import 'withdrawal_balance_review_screen.dart';
 class EngineerWithdrawMaterialsScreen extends StatefulWidget {
   final UserModel user;
 
-  const EngineerWithdrawMaterialsScreen({super.key, required this.user});
+  /// فتح الشاشة مباشرة على مشروع وموقع فرعي محددين (من إشعار الموافقة).
+  final int? initialProjectId;
+  final int? initialLocationId;
+
+  const EngineerWithdrawMaterialsScreen({
+    super.key,
+    required this.user,
+    this.initialProjectId,
+    this.initialLocationId,
+  });
 
   @override
   State<EngineerWithdrawMaterialsScreen> createState() => _EngineerWithdrawMaterialsScreenState();
@@ -40,6 +49,8 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
   String? _loadError;
   int _loadToken = 0;
   Timer? _pollTimer;
+  final GlobalKey _targetLocationKey = GlobalKey();
+  bool _didScrollToTarget = false;
 
   String _k(int locationId, String phase) =>
       warehouseLocationPhaseKey(locationId, phase);
@@ -114,7 +125,35 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
   Future<void> _loadProjects() async {
     final list = await _db.getProjects();
     if (!mounted) return;
-    setState(() => _projects = list);
+    final target = widget.initialProjectId;
+    ProjectModel? preselected;
+    if (target != null) {
+      for (final p in list) {
+        if (p.id == target) {
+          preselected = p;
+          break;
+        }
+      }
+    }
+    setState(() {
+      _projects = list;
+      if (preselected != null) _selectedProject = preselected;
+    });
+    if (preselected != null) await _loadLocationsAndMaterials();
+  }
+
+  void _scrollToTargetLocationOnce() {
+    if (widget.initialLocationId == null || _didScrollToTarget) return;
+    _didScrollToTarget = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _targetLocationKey.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 400),
+        alignment: 0.1,
+      );
+    });
   }
 
   Future<void> _loadLocationsAndMaterials() async {
@@ -164,6 +203,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
         _warehouseLoading = false;
         _loadError = null;
       });
+      _scrollToTargetLocationOnce();
     } catch (e) {
       if (!mounted || loadToken != _loadToken) return;
       final message = warehouseLoadErrorMessage(e);
@@ -646,8 +686,16 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
               )];
               final firstWr = _requestFor(loc.id, LocationMaterialModel.phaseFirstFix);
               final secondWr = _requestFor(loc.id, LocationMaterialModel.phaseSecondFix);
+              final isTarget = widget.initialLocationId == loc.id;
               return Card(
+                key: isTarget ? _targetLocationKey : null,
                 margin: const EdgeInsets.only(bottom: 16),
+                shape: isTarget
+                    ? RoundedRectangleBorder(
+                        side: const BorderSide(color: Color(0xFF1B5E20), width: 2),
+                        borderRadius: BorderRadius.circular(12),
+                      )
+                    : null,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(

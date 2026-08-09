@@ -9,6 +9,8 @@ import '../models/user_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
+import '../utils/withdrawal_request_action_display.dart';
+import 'withdrawal_request_location_screen.dart';
 
 /// طلبات سحب الخامات — موافقة / رفض (مدير المشروعات أو مدير العمليات).
 class ManagerWithdrawalRequestsScreen extends StatefulWidget {
@@ -376,8 +378,8 @@ class _ManagerWithdrawalRequestsScreenState
           Center(
             child: Text(
               _isSem
-                  ? 'لا توجد طلبات سحب خامات ولا تأجيل خطط تنتظر قراركم حالياً'
-                  : 'لا توجد طلبات تنتظر قرارك حالياً',
+                  ? 'لا توجد طلبات سحب خامات ولا تأجيل خطط حالياً'
+                  : 'لا توجد طلبات سحب خامات حالياً',
             ),
           ),
         ],
@@ -466,69 +468,171 @@ class _ManagerWithdrawalRequestsScreenState
     );
   }
 
+  Color _badgeColor(WithdrawalRequestModel r) {
+    if (withdrawalIsActionableForRole(r, widget.currentUser.role)) {
+      return const Color(0xFFE65100);
+    }
+    if (r.isRejectedOverall) return Colors.red.shade700;
+    if (r.fulfilledAt != null) return Colors.blueGrey.shade700;
+    if (r.isApprovedOverall) return const Color(0xFF1B5E20);
+    return Colors.blue.shade800;
+  }
+
+  Future<void> _openLocation(WithdrawalRequestModel r) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => WithdrawalRequestLocationScreen(request: r),
+      ),
+    );
+  }
+
   Widget _withdrawalCard(WithdrawalRequestModel r) {
+    final role = widget.currentUser.role;
     final proj = r.projectName ?? 'مشروع #${r.projectId}';
-    final waitingOther = widget.currentUser.role == 'site_engineer_manager'
-        ? (r.semStatus == WithdrawalRequestModel.statusPending &&
-            r.omStatus == WithdrawalRequestModel.statusApproved)
-        : (r.omStatus == WithdrawalRequestModel.statusPending &&
-            r.semStatus == WithdrawalRequestModel.statusApproved);
+    final actionable = withdrawalIsActionableForRole(r, role);
+    final ownLine = withdrawalOwnActionLine(r, role);
+    final otherLine = withdrawalOtherManagerLine(r, role);
+    final badgeColor = _badgeColor(r);
+    final waitingOther = actionable &&
+        (role == 'site_engineer_manager'
+            ? r.omStatus == WithdrawalRequestModel.statusApproved
+            : r.semStatus == WithdrawalRequestModel.statusApproved);
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              proj,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 6),
-            Text('الموقع: ${r.locationPathLabel}'),
-            Text('المرحلة: ${_phaseAr(r.phase)}'),
-            Text('المهندس: ${r.engineerUserName}'),
-            Text('رقم الطلب: ${r.id}'),
-            Text(
-              'تاريخ ووقت الإرسال: ${_formatSubmittedAt(r.createdAt)}',
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
-            ),
-            if (waitingOther) ...[
-              const SizedBox(height: 8),
-              Text(
-                widget.currentUser.role == 'site_engineer_manager'
-                    ? 'وافق مدير العمليات — بانتظار موافقتكم لإكمال الاعتماد.'
-                    : 'وافق ${UserModel.siteEngineerManagerRoleLabel} — بانتظار موافقتكم لإكمال الاعتماد.',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.blue.shade800,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF1B5E20),
+      child: InkWell(
+        onTap: () => _openLocation(r),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      proj,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
                     ),
-                    onPressed: () => _respond(r, true),
-                    child: const Text('موافقة'),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
-                    onPressed: () => _respond(r, false),
-                    child: const Text('رفض'),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: badgeColor.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: badgeColor.withOpacity(0.5)),
+                    ),
+                    child: Text(
+                      withdrawalStatusBadgeLabel(r, role),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: badgeColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text('الموقع: ${r.locationPathLabel}'),
+              Text('المرحلة: ${_phaseAr(r.phase)}'),
+              Text('المهندس: ${r.engineerUserName}'),
+              Text('رقم الطلب: ${r.id}'),
+              Text(
+                'تاريخ ووقت الإرسال: ${_formatSubmittedAt(r.createdAt)}',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              ),
+              if (waitingOther) ...[
+                const SizedBox(height: 8),
+                Text(
+                  role == 'site_engineer_manager'
+                      ? 'وافق مدير العمليات — بانتظار موافقتكم لإكمال الاعتماد.'
+                      : 'وافق ${UserModel.siteEngineerManagerRoleLabel} — بانتظار موافقتكم لإكمال الاعتماد.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.blue.shade800,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
-            ),
-          ],
+              if (ownLine != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  ownLine,
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.5,
+                    fontWeight: FontWeight.w600,
+                    color: (role == 'site_engineer_manager'
+                                ? r.semStatus
+                                : r.omStatus) ==
+                            WithdrawalRequestModel.statusRejected
+                        ? Colors.red.shade700
+                        : const Color(0xFF1B5E20),
+                  ),
+                ),
+              ],
+              if (otherLine != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  otherLine,
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.5,
+                    color: Colors.grey.shade800,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              if (actionable)
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF1B5E20),
+                        ),
+                        onPressed: () => _respond(r, true),
+                        child: const Text('موافقة'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton(
+                        style:
+                            OutlinedButton.styleFrom(foregroundColor: Colors.red),
+                        onPressed: () => _respond(r, false),
+                        child: const Text('رفض'),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  children: [
+                    Icon(
+                      Icons.touch_app_outlined,
+                      size: 16,
+                      color: Colors.grey.shade700,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'اضغط لعرض مكان العمل',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
         ),
       ),
     );

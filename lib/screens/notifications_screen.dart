@@ -2,10 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../models/notification_item_model.dart';
+import '../models/withdrawal_request_model.dart';
 import '../services/storage_service.dart';
 import '../services/api_storage_service.dart';
 import '../utils/notification_delete_ui.dart';
 import '../utils/notification_time_display.dart';
+import 'engineer_withdraw_materials_screen.dart';
 import 'reports_sys_detail_screen.dart';
 import 'reports_sys_hub_screen.dart';
 
@@ -132,6 +134,39 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
+  /// فتح مكان العمل المعتمد مباشرة من إشعار الموافقة على طلب السحب.
+  Future<void> _openApprovedWithdrawalLocation(
+    NotificationItemModel item,
+  ) async {
+    await _markAsRead(item);
+    final requestId = item.withdrawalRequestId;
+    if (requestId == null) return;
+    WithdrawalRequestModel? request;
+    try {
+      request = await getStorage().getWithdrawalRequestById(requestId)
+          as WithdrawalRequestModel?;
+    } catch (_) {
+      request = null;
+    }
+    if (!mounted) return;
+    final target = request;
+    if (target == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذر فتح مكان العمل الخاص بالطلب')),
+      );
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EngineerWithdrawMaterialsScreen(
+          user: widget.currentUser,
+          initialProjectId: target.projectId,
+          initialLocationId: target.locationId,
+        ),
+      ),
+    );
+  }
+
   Future<bool> _deleteNotification(NotificationItemModel item) async {
     if (item.isWithdrawalPendingAction) {
       if (mounted) {
@@ -244,6 +279,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           onTap: () {
             if (item.eventType.startsWith('reports_sys_')) {
               _onNotificationTap(item);
+            } else if (item.eventType == 'withdrawal_request_approved' &&
+                item.withdrawalRequestId != null) {
+              _openApprovedWithdrawalLocation(item);
             } else {
               _markAsRead(item);
             }

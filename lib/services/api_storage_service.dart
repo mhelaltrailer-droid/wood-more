@@ -1864,6 +1864,15 @@ class ApiStorageService {
     return WithdrawalRequestModel.fromMap(m);
   }
 
+  Future<WithdrawalRequestModel?> getWithdrawalRequestById(int id) async {
+    final r = await http.get(Uri.parse(_path('withdrawal-requests/$id')));
+    if (r.statusCode == 404) return null;
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final map = jsonDecode(r.body);
+    if (map is! Map) return null;
+    return WithdrawalRequestModel.fromMap(Map<String, dynamic>.from(map));
+  }
+
   Future<List<WithdrawalRequestModel>> getWithdrawalRequestsForEngineerProject({
     required int projectId,
     required int engineerUserId,
