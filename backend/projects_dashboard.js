@@ -250,69 +250,74 @@ function pdWebdavPropfindResponse({ href, fileName, updatedAt, contentLength }) 
 }
 
 async function ensureProjectsDashboardTables(pool) {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS projects_dashboard_sheet (
-      id SERIAL PRIMARY KEY,
-      variant TEXT NOT NULL DEFAULT 'webdav',
-      file_name TEXT NOT NULL,
-      file_mime TEXT NOT NULL DEFAULT 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      file_data TEXT NOT NULL,
-      rows_json TEXT NOT NULL DEFAULT '{"sheetName":"Sheet1","rows":[[""]]}',
-      uploaded_by_user_id INTEGER NOT NULL REFERENCES users(id),
-      uploaded_by_user_name TEXT NOT NULL,
-      updated_by_user_id INTEGER REFERENCES users(id),
-      updated_by_user_name TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `);
-  await pool.query(`
-    ALTER TABLE projects_dashboard_sheet
-      DROP CONSTRAINT IF EXISTS projects_dashboard_sheet_id_check
-  `);
-  await pool.query(`
-    ALTER TABLE projects_dashboard_sheet
-      ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT 'webdav'
-  `);
-  await pool.query(`
-    ALTER TABLE projects_dashboard_sheet
-      ADD COLUMN IF NOT EXISTS rows_json TEXT NOT NULL DEFAULT '{"sheetName":"Sheet1","rows":[[""]]}'
-  `);
-  await pool.query(`
-    UPDATE projects_dashboard_sheet SET variant = 'webdav'
-    WHERE variant IS NULL OR variant = ''
-  `);
-  await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_dashboard_sheet_variant
-      ON projects_dashboard_sheet (variant)
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS projects_dashboard_notes (
-      id SERIAL PRIMARY KEY,
-      variant TEXT NOT NULL DEFAULT 'webdav',
-      author_role TEXT NOT NULL CHECK (author_role IN ('technical_office', 'operation_manager')),
-      user_id INTEGER NOT NULL REFERENCES users(id),
-      user_name TEXT NOT NULL,
-      body TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
-  await pool.query(`
-    ALTER TABLE projects_dashboard_notes
-      ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT 'webdav'
-  `);
-  await pool.query(`
-    UPDATE projects_dashboard_notes SET variant = 'webdav'
-    WHERE variant IS NULL OR variant = ''
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_projects_dashboard_notes_role_created
-      ON projects_dashboard_notes (author_role, created_at DESC)
-  `);
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_projects_dashboard_notes_variant_role_created
-      ON projects_dashboard_notes (variant, author_role, created_at DESC)
-  `);
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS projects_dashboard_sheet (
+        id SERIAL PRIMARY KEY,
+        variant TEXT NOT NULL DEFAULT 'webdav',
+        file_name TEXT NOT NULL,
+        file_mime TEXT NOT NULL DEFAULT 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        file_data TEXT NOT NULL,
+        rows_json TEXT NOT NULL DEFAULT '{"sheetName":"Sheet1","rows":[[""]]}',
+        uploaded_by_user_id INTEGER NOT NULL REFERENCES users(id),
+        uploaded_by_user_name TEXT NOT NULL,
+        updated_by_user_id INTEGER REFERENCES users(id),
+        updated_by_user_name TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(`
+      ALTER TABLE projects_dashboard_sheet
+        DROP CONSTRAINT IF EXISTS projects_dashboard_sheet_id_check
+    `);
+    await pool.query(`
+      ALTER TABLE projects_dashboard_sheet
+        ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT 'webdav'
+    `);
+    await pool.query(`
+      ALTER TABLE projects_dashboard_sheet
+        ADD COLUMN IF NOT EXISTS rows_json TEXT NOT NULL DEFAULT '{"sheetName":"Sheet1","rows":[[""]]}'
+    `);
+    await pool.query(`
+      UPDATE projects_dashboard_sheet SET variant = 'webdav'
+      WHERE variant IS NULL OR variant = ''
+    `);
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_dashboard_sheet_variant
+        ON projects_dashboard_sheet (variant)
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS projects_dashboard_notes (
+        id SERIAL PRIMARY KEY,
+        variant TEXT NOT NULL DEFAULT 'webdav',
+        author_role TEXT NOT NULL CHECK (author_role IN ('technical_office', 'operation_manager')),
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        user_name TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+    await pool.query(`
+      ALTER TABLE projects_dashboard_notes
+        ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT 'webdav'
+    `);
+    await pool.query(`
+      UPDATE projects_dashboard_notes SET variant = 'webdav'
+      WHERE variant IS NULL OR variant = ''
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_projects_dashboard_notes_role_created
+        ON projects_dashboard_notes (author_role, created_at DESC)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_projects_dashboard_notes_variant_role_created
+        ON projects_dashboard_notes (variant, author_role, created_at DESC)
+    `);
+    console.log('ensureProjectsDashboardTables: ok');
+  } catch (e) {
+    console.warn('ensureProjectsDashboardTables:', e.message);
+  }
 }
 
 function registerProjectsDashboardRoutes(app, pool, deps = {}) {

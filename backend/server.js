@@ -588,6 +588,21 @@ async function ensureWithdrawalRequestsTable() {
       ON withdrawal_requests (location_id, phase)
       WHERE fulfilled_at IS NULL AND overall_status IN ('pending', 'approved')
     `).catch(() => {});
+    // طلبات وافق عليها المديران لكن بقيت حالتها العامة "pending" (موافقات سابقة بترتيب معكوس).
+    const fixed = await pool.query(`
+      UPDATE withdrawal_requests
+      SET overall_status = 'approved',
+          updated_at = COALESCE(GREATEST(sem_responded_at, om_responded_at), updated_at)
+      WHERE sem_status = 'approved' AND om_status = 'approved'
+        AND overall_status = 'pending'
+      RETURNING id
+    `);
+    if (fixed.rowCount > 0) {
+      console.log(
+        `ensureWithdrawalRequestsTable: finalized ${fixed.rowCount} approved request(s):`,
+        fixed.rows.map((r) => r.id).join(', ')
+      );
+    }
     console.log('ensureWithdrawalRequestsTable: ok');
   } catch (e) {
     console.warn('ensureWithdrawalRequestsTable:', e.message);
@@ -1265,13 +1280,32 @@ app.get('/', (req, res) => {
 
 // Support Neon / any cloud PostgreSQL: set DATABASE_URL (with ?sslmode=require).
 // Or use PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD for local/other.
-const databaseUrl = process.env.DATABASE_URL;
+// Strip channel_binding=require — Neon dashboard URLs sometimes include it; node-pg
+// on Alpine/Render can fail handshake with that param and crash startup (exit 1).
+function normalizeDatabaseUrl(url) {
+  if (!url) return url;
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.delete('channel_binding');
+    return parsed.toString();
+  } catch (_) {
+    return String(url).replace(/([?&])channel_binding=[^&]*/gi, '$1').replace(/[?&]$/, '');
+  }
+}
+
+const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
+if (!databaseUrl && (process.env.RENDER || process.env.NODE_ENV === 'production')) {
+  console.error(
+    'WARNING: DATABASE_URL is not set. On Render → wood-more-api → Environment, set DATABASE_URL to your Neon/Postgres connection string (sslmode=require).',
+  );
+}
 const pool = databaseUrl
   ? new Pool({
       connectionString: databaseUrl,
-      ssl: databaseUrl.includes('sslmode=require') || databaseUrl.includes('neon.tech')
+      ssl: databaseUrl.includes('sslmode=require') || databaseUrl.includes('neon.tech') || databaseUrl.includes('render.com')
         ? { rejectUnauthorized: false }
         : false,
+      connectionTimeoutMillis: 15000,
     })
   : new Pool({
       host: process.env.PGHOST || 'localhost',
@@ -3295,18 +3329,23 @@ app.delete('/daily-reports/:id', async (req, res) => {
 
 // ——— Engineer balance & custody ———
 async function ensureEngineerCustodyActorColumns() {
-  await pool.query(
-    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_user_id INTEGER`,
-  );
-  await pool.query(
-    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_user_name TEXT`,
-  );
-  await pool.query(
-    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_role TEXT`,
-  );
-  await pool.query(
-    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS document_path TEXT`,
-  );
+  try {
+    await pool.query(
+      `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_user_id INTEGER`,
+    );
+    await pool.query(
+      `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_user_name TEXT`,
+    );
+    await pool.query(
+      `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_role TEXT`,
+    );
+    await pool.query(
+      `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS document_path TEXT`,
+    );
+    console.log('ensureEngineerCustodyActorColumns: ok');
+  } catch (e) {
+    console.warn('ensureEngineerCustodyActorColumns:', e.message);
+  }
 }
 
 app.get('/engineer-balance/:userId', async (req, res) => {
@@ -4628,6 +4667,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
         });
         return res.json({ ok: true });
       }
+      const omAlreadyApproved = String(row.om_status) === 'approved';
       await pool.query(
         `UPDATE withdrawal_requests SET sem_status = 'approved', sem_responded_at = $1, updated_at = $1 WHERE id = $2`,
         [now, id]
@@ -4637,6 +4677,30 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
         recipientRole: 'site_engineer_manager',
         appendLine: `تم الموافقة على الطلب — ${withdrawalFormatSubmittedAt(now)}`,
       });
+      if (omAlreadyApproved) {
+        await pool.query(
+          `UPDATE withdrawal_requests SET overall_status = 'approved', updated_at = $1 WHERE id = $2`,
+          [now, id]
+        );
+        await wrAppendToWithdrawalNotification(pool, {
+          withdrawalRequestId: id,
+          recipientRole: 'operation_manager',
+          appendLine: `وافق مدير المشروعات على الطلب — ${withdrawalFormatSubmittedAt(now)}`,
+        });
+        await withdrawalNotifyEngineer(pool, engId, {
+          title: 'تمت الموافقة على طلب سحب الخامات',
+          body:
+            `تمت الموافقة على طلب السحب — يمكنك إكمال عملية السحب وإرفاق الملفات المطلوبة ` +
+            `(إذن الصرف وإذن التسليم).\n` +
+            `الموقع: ${pathLabel || '—'} — مشروع "${projectName}"`,
+          event_type: 'withdrawal_request_approved',
+          actor_user_id: userId,
+          actor_user_name: actor.rows[0].name,
+          project_name: projectName,
+          withdrawal_request_id: id,
+        });
+        return res.json({ ok: true });
+      }
       const omBody = wrBuildOmRequestBody(
         engName,
         projectName,
@@ -6882,6 +6946,26 @@ registerProjectsDashboardRoutes(app, pool, { notifyFileUpload });
 registerExpenseStatementsRoutes(app, pool, { runNotificationSafely, notifyFileUpload });
 registerAttachmentRoutes(app, pool);
 registerWithdrawalFilesReportRoutes(app, pool);
+
+function startListening(degraded) {
+  app.listen(PORT, () => {
+    console.log(
+      degraded
+        ? `Wood & More API listening on ${PORT} (degraded: startup migrations failed — check DATABASE_URL / DB schema)`
+        : `Wood & More API listening on ${PORT}`,
+    );
+  });
+}
+
+function softEnsure(label, fn) {
+  return Promise.resolve()
+    .then(fn)
+    .catch((e) => {
+      console.warn(`${label}:`, e && e.message ? e.message : e);
+    });
+}
+
+// Never process.exit(1) on migration flakes — that is exactly Render's "Exited with status 1".
 ensurePasswordColumn()
   .then(() => ensureSystemLockTable())
   .then(() => ensureHomeIconsVisibilitySetting())
@@ -6895,8 +6979,8 @@ ensurePasswordColumn()
   .then(() => ensureNotificationsTable())
   .then(() => ensureShopDarwingNotificationsTable())
   .then(() => ensureAppReleaseTables())
-  .then(() => ensureShopDrawingTables(pool))
-  .then(() => ensureProjectsDashboardTables(pool))
+  .then(() => softEnsure('ensureShopDrawingTables', () => ensureShopDrawingTables(pool)))
+  .then(() => softEnsure('ensureProjectsDashboardTables', () => ensureProjectsDashboardTables(pool)))
   .then(() => ensureExpenseStatementsTable(pool))
   .then(() => ensureEngineerCustodyActorColumns())
   .then(() => ensureIrMirUploadsTable())
@@ -6906,10 +6990,8 @@ ensurePasswordColumn()
   .then(() => ensureReportsSysTables())
   .then(() => ensureOperationReportsTable())
   .then(() => ensureZ1EmaarFProjectLocationsSeeded())
-  .then(() => {
-    app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));
-  })
+  .then(() => startListening(false))
   .catch((e) => {
-    console.error('Startup failed:', e);
-    process.exit(1);
+    console.error('Startup migrations failed:', e);
+    startListening(true);
   });

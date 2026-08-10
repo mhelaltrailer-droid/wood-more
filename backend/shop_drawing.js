@@ -28,6 +28,7 @@ function shopDrawingAppendDocumentTypeFilter(sql, documentType, params) {
 const shopDrawingFormatArDateTime = formatArDateTimeEgypt;
 
 async function ensureShopDrawingTables(pool) {
+  try {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS shop_drawings (
       id SERIAL PRIMARY KEY,
@@ -145,6 +146,9 @@ async function ensureShopDrawingTables(pool) {
     END $$
   `).catch(() => {});
   console.log('ensureShopDrawingTables: ok');
+  } catch (e) {
+    console.warn('ensureShopDrawingTables:', e.message);
+  }
 }
 
 function shopDrawingParseOmNotes(body) {
