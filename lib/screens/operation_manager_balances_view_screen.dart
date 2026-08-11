@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/role_labels.dart';
 import '../models/user_model.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
@@ -117,7 +118,7 @@ class _OperationManagerBalancesViewScreenState
                           u.name,
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
-                        subtitle: Text('الدور: ${u.roleLabel}'),
+                        subtitle: Text('الدور: ${arabicRoleLabel(u.role)}'),
                         trailing: Text(
                           balance.toStringAsFixed(2),
                           style: const TextStyle(
