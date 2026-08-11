@@ -21,6 +21,8 @@ import '../screens/accountant_finance_screen.dart';
 import '../screens/manager_custody_expenses_hub_screen.dart';
 import '../screens/custody_expenses_view_screen.dart';
 import '../screens/expense_statements_screen.dart';
+import '../screens/operation_manager_balances_view_screen.dart';
+import '../screens/operation_manager_custody_balances_hub_screen.dart';
 import '../screens/activity_logs_screen.dart';
 import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
@@ -95,6 +97,15 @@ Widget? getScreenForRoute(String name, UserModel user) {
         currentUser: user,
         appBarTitle: 'العهده/ المصروفات',
       );
+    case 'operation-manager-custody-balances-expenses':
+      return OperationManagerCustodyBalancesHubScreen(currentUser: user);
+    case 'operation-manager-custody-expenses-view':
+      return CustodyExpensesViewScreen(
+        currentUser: user,
+        appBarTitle: 'العهده/ المصروفات',
+      );
+    case 'operation-manager-balances-view':
+      return OperationManagerBalancesViewScreen(currentUser: user);
     case 'attendance-reports':
       return AttendanceReportsScreen(currentUser: user);
     case 'reports':

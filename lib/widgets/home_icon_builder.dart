@@ -17,6 +17,7 @@ import '../screens/icons_control_screen.dart';
 import '../screens/document_control_hub_screen.dart';
 import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
+import '../screens/operation_manager_custody_balances_hub_screen.dart';
 import '../screens/postpone_fines_report_screen.dart';
 import '../screens/reports_screen.dart';
 import '../screens/reports_sys_hub_screen.dart';
@@ -224,6 +225,17 @@ class HomeIconBuilder {
               currentUser: user,
               appBarTitle: 'العهده/ المصروفات',
             ),
+          ),
+        );
+      case 'operation_manager_custody_balances_expenses':
+        return _lightCard(
+          icon: Icons.account_balance_wallet,
+          title: 'العهد/الارصدة/المصروفات',
+          subtitle: 'العهد/المصروفات + الأرصدة (اطلاع فقط)',
+          onTap: () => pushAndSaveRoute(
+            context,
+            'operation-manager-custody-balances-expenses',
+            OperationManagerCustodyBalancesHubScreen(currentUser: user),
           ),
         );
       case 'attendance_reports':

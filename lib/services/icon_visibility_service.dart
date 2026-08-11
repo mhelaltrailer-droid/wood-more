@@ -86,6 +86,12 @@ class IconVisibilityService {
     label: 'العهده/ المصروفات',
   );
 
+  static const HomeIconItem operationManagerCustodyBalancesExpensesIcon =
+      HomeIconItem(
+        id: 'operation_manager_custody_balances_expenses',
+        label: 'العهد/الارصدة/المصروفات',
+      );
+
   static const HomeIconItem withdrawalFilesReportsIcon = HomeIconItem(
     id: 'withdrawal_files_reports',
     label: 'تقارير السحب والمرفقات',
@@ -173,7 +179,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
       HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
       HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
-      custodyExpensesViewIcon,
+      operationManagerCustodyBalancesExpensesIcon,
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
