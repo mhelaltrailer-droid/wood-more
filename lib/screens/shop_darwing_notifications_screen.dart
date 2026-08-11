@@ -31,7 +31,7 @@ class _ShopDarwingNotificationsScreenState
     super.initState();
     _loadNotifications();
     _pollTimer = Timer.periodic(
-      const Duration(seconds: 8),
+      const Duration(seconds: 25),
       (_) => _refreshSilently(),
     );
   }

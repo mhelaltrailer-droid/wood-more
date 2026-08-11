@@ -268,7 +268,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
     _notificationsPollTimer?.cancel();
     _notificationsPollTimer = Timer.periodic(
-      const Duration(seconds: 8),
+      const Duration(seconds: 25),
       (_) {
         if (_canUseNotifications) _loadUnreadNotificationsCount();
         if (_canUseShopDarwingNotification) {

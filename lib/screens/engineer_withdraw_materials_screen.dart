@@ -60,7 +60,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadProjects();
-    _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       if (_selectedProject != null && mounted) {
         _refreshWithdrawalRequestsOnly();
       }

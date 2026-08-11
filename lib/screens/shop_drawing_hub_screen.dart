@@ -98,7 +98,7 @@ class _ShopDrawingHubScreenState extends State<ShopDrawingHubScreen>
       _loadTab(_tabs[_tabController.index].key);
     });
     _loadAll();
-    _pollTimer = Timer.periodic(const Duration(seconds: 12), (_) => _refreshSilently());
+    _pollTimer = Timer.periodic(const Duration(seconds: 25), (_) => _refreshSilently());
   }
 
   @override

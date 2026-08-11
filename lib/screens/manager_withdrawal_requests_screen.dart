@@ -47,7 +47,7 @@ class _ManagerWithdrawalRequestsScreenState
   void initState() {
     super.initState();
     _load();
-    _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) => _refreshSilently());
+    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) => _refreshSilently());
   }
 
   @override

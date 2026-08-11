@@ -42,7 +42,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     _scrollController.addListener(_onScroll);
     _loadNotifications();
     _pollTimer = Timer.periodic(
-      const Duration(seconds: 8),
+      const Duration(seconds: 25),
       (_) => _refreshSilently(),
     );
   }

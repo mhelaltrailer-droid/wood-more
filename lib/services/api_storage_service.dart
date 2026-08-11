@@ -48,6 +48,9 @@ import 'attendance_duplicate_guard.dart';
 /// Storage implementation that uses the REST API (PostgreSQL backend).
 class ApiStorageService {
   final String baseUrl;
+  static const Duration _hotCounterCacheTtl = Duration(seconds: 20);
+  final Map<String, ({DateTime at, int value})> _intCache = {};
+  final Map<String, ({DateTime at, AppReleaseInfoModel value})> _appReleaseCache = {};
 
   ApiStorageService(this.baseUrl);
 
@@ -148,6 +151,36 @@ class ApiStorageService {
       out.addAll(await Future.wait(futures.sublist(i, end)));
     }
     return out;
+  }
+
+  int? _readCachedInt(String key) {
+    final hit = _intCache[key];
+    if (hit == null) return null;
+    if (DateTime.now().difference(hit.at) > _hotCounterCacheTtl) {
+      _intCache.remove(key);
+      return null;
+    }
+    return hit.value;
+  }
+
+  int _storeCachedInt(String key, int value) {
+    _intCache[key] = (at: DateTime.now(), value: value);
+    return value;
+  }
+
+  AppReleaseInfoModel? _readCachedRelease(String key) {
+    final hit = _appReleaseCache[key];
+    if (hit == null) return null;
+    if (DateTime.now().difference(hit.at) > _hotCounterCacheTtl) {
+      _appReleaseCache.remove(key);
+      return null;
+    }
+    return hit.value;
+  }
+
+  AppReleaseInfoModel _storeCachedRelease(String key, AppReleaseInfoModel value) {
+    _appReleaseCache[key] = (at: DateTime.now(), value: value);
+    return value;
   }
 
   Future<int> _post(String path, Map<String, dynamic> body) async {
@@ -626,10 +659,13 @@ class ApiStorageService {
   }
 
   Future<int> getUnreadNotificationsCount(int userId) async {
+    final cacheKey = 'notifications/unread-count:$userId';
+    final cached = _readCachedInt(cacheKey);
+    if (cached != null) return cached;
     final data = await _get('notifications/unread-count?userId=$userId');
     final value = data['count'];
-    if (value is int) return value;
-    return int.tryParse('${value ?? 0}') ?? 0;
+    if (value is int) return _storeCachedInt(cacheKey, value);
+    return _storeCachedInt(cacheKey, int.tryParse('${value ?? 0}') ?? 0);
   }
 
   Future<void> markNotificationRead({
@@ -664,10 +700,13 @@ class ApiStorageService {
   }
 
   Future<int> getUnreadShopDarwingNotificationsCount(int userId) async {
+    final cacheKey = 'shop-darwing-notification/unread-count:$userId';
+    final cached = _readCachedInt(cacheKey);
+    if (cached != null) return cached;
     final data = await _get(
       'shop-darwing-notification/unread-count?userId=$userId',
     );
-    return (data['count'] as num?)?.toInt() ?? 0;
+    return _storeCachedInt(cacheKey, (data['count'] as num?)?.toInt() ?? 0);
   }
 
   Future<void> markShopDarwingNotificationRead({
@@ -2121,6 +2160,9 @@ class ApiStorageService {
     required int userId,
     required String role,
   }) async {
+    final cacheKey = 'withdrawal-requests/action-count:$userId:$role';
+    final cached = _readCachedInt(cacheKey);
+    if (cached != null) return cached;
     final uri =
         Uri.parse(_path('withdrawal-requests/action-count')).replace(
       queryParameters: {
@@ -2132,8 +2174,8 @@ class ApiStorageService {
     if (r.statusCode >= 400) throw Exception(r.body);
     final data = jsonDecode(r.body) as Map<String, dynamic>;
     final c = data['count'];
-    if (c is int) return c;
-    return int.tryParse(c?.toString() ?? '0') ?? 0;
+    if (c is int) return _storeCachedInt(cacheKey, c);
+    return _storeCachedInt(cacheKey, int.tryParse(c?.toString() ?? '0') ?? 0);
   }
 
   Future<List<WithdrawalRequestModel>> listPendingWithdrawalActionsForManager({
@@ -2208,13 +2250,19 @@ class ApiStorageService {
   }
 
   Future<int> countPendingReportsSys(int userId) async {
+    final cacheKey = 'reports-sys/pending-count:$userId';
+    final cached = _readCachedInt(cacheKey);
+    if (cached != null) return cached;
     final uri = Uri.parse(_path('reports-sys/pending-count')).replace(
       queryParameters: {'userId': userId.toString()},
     );
     final r = await http.get(uri);
     if (r.statusCode >= 400) throw Exception(r.body);
     final data = jsonDecode(r.body) as Map<String, dynamic>;
-    return int.tryParse(data['count']?.toString() ?? '0') ?? 0;
+    return _storeCachedInt(
+      cacheKey,
+      int.tryParse(data['count']?.toString() ?? '0') ?? 0,
+    );
   }
 
   Future<List<ReportsSysModel>> listReportsSysInbox({
@@ -2658,10 +2706,14 @@ class ApiStorageService {
     int userId, {
     required String documentType,
   }) async {
+    final cacheKey =
+        'shop-drawing/module-notifications/unread-count:$userId:$documentType';
+    final cached = _readCachedInt(cacheKey);
+    if (cached != null) return cached;
     final data = await _get(
       'shop-drawing/module-notifications/unread-count?userId=$userId&documentType=$documentType',
     );
-    return (data['count'] as num?)?.toInt() ?? 0;
+    return _storeCachedInt(cacheKey, (data['count'] as num?)?.toInt() ?? 0);
   }
 
   Future<void> markShopDrawingModuleNotificationRead({
@@ -2674,11 +2726,14 @@ class ApiStorageService {
   }
 
   Future<AppReleaseInfoModel> getAppReleaseLatest(int userId) async {
+    final cacheKey = 'app-release/latest:$userId';
+    final cached = _readCachedRelease(cacheKey);
+    if (cached != null) return cached;
     try {
       final data = await _get('app-release/latest?userId=$userId');
-      return AppReleaseInfoModel.fromMap(data);
+      return _storeCachedRelease(cacheKey, AppReleaseInfoModel.fromMap(data));
     } catch (_) {
-      return AppReleaseInfoModel.none();
+      return _storeCachedRelease(cacheKey, AppReleaseInfoModel.none());
     }
   }
 
