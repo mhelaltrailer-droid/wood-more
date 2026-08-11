@@ -214,6 +214,10 @@ class HomeIconBuilder {
           ),
         );
       case 'custody_expenses_view':
+        if (user.role == 'operation_manager') {
+          // For operation manager this legacy direct icon is replaced by the new hub.
+          return const SizedBox.shrink();
+        }
         return _lightCard(
           icon: Icons.receipt_long_outlined,
           title: 'العهده/ المصروفات',
