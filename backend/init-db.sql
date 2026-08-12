@@ -48,6 +48,44 @@ CREATE TABLE IF NOT EXISTS projects (
   name TEXT NOT NULL
 );
 
+-- Older non-idempotent seeds can leave duplicate project names; unique index needs one row per name.
+DO $$
+DECLARE
+  r RECORD;
+  t TEXT;
+BEGIN
+  FOR r IN
+    SELECT dup_id, keep_id
+    FROM (
+      SELECT id AS dup_id,
+             FIRST_VALUE(id) OVER (
+               PARTITION BY lower(btrim(name))
+               ORDER BY id
+             ) AS keep_id
+      FROM projects
+    ) x
+    WHERE dup_id <> keep_id
+  LOOP
+    FOR t IN
+      SELECT c.table_name
+      FROM information_schema.columns c
+      JOIN information_schema.tables tb
+        ON tb.table_schema = c.table_schema
+       AND tb.table_name = c.table_name
+      WHERE c.table_schema = current_schema()
+        AND c.column_name = 'project_id'
+        AND tb.table_type = 'BASE TABLE'
+        AND c.table_name <> 'projects'
+    LOOP
+      EXECUTE format(
+        'UPDATE %I SET project_id = $1 WHERE project_id = $2',
+        t
+      ) USING r.keep_id, r.dup_id;
+    END LOOP;
+    DELETE FROM projects WHERE id = r.dup_id;
+  END LOOP;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS ux_projects_name_norm
   ON projects (lower(btrim(name)));
 
