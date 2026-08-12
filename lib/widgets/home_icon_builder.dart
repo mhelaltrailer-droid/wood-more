@@ -31,8 +31,10 @@ import '../screens/tomorrow_work_plan_screen.dart';
 import '../screens/warehouses_view_screen.dart';
 import '../screens/withdrawal_files_reports_hub_screen.dart';
 import '../screens/work_plan_tracking_report_screen.dart';
+import '../screens/weekly_report_screen.dart';
 import '../screens/projects_dashboard_screen.dart';
 import '../screens/projects_dashboard_plus1_screen.dart';
+import '../screens/meetings_screen.dart';
 import '../services/home_icon_order_service.dart';
 import '../services/route_restore.dart';
 import '../services/storage_service.dart';
@@ -265,6 +267,18 @@ class HomeIconBuilder {
             WorkPlanTrackingReportScreen(currentUser: user),
           ),
         );
+      case 'weekly_report':
+        return _lightCard(
+          icon: Icons.calendar_view_week,
+          title: 'التقرير الاسبوعي',
+          subtitle:
+              'حضور وانصراف وخطط اليوم/الغد لكل مهندس ضمن مدة سبت–خميس',
+          onTap: () => pushAndSaveRoute(
+            context,
+            'weekly-report',
+            WeeklyReportScreen(currentUser: user),
+          ),
+        );
       case 'postpone_fines_reports':
         if (!user.canAccessPostponeFinesReports) {
           return const SizedBox.shrink();
@@ -448,6 +462,22 @@ class HomeIconBuilder {
             );
             await onShopDrawingReturn?.call();
           },
+        );
+      case 'meetings':
+        if (!user.canAccessMeetings) {
+          return const SizedBox.shrink();
+        }
+        return _lightCard(
+          icon: Icons.groups_outlined,
+          iconSize: 56,
+          title: 'Meetings',
+          subtitle: 'الاجتماعات',
+          padding: 28,
+          onTap: () => pushAndSaveRoute(
+            context,
+            'meetings',
+            const MeetingsScreen(),
+          ),
         );
       case 'reports_sys':
         return _gradientCard(

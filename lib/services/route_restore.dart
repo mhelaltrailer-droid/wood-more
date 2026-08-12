@@ -28,6 +28,7 @@ import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
 import '../screens/postpone_fines_report_screen.dart';
 import '../screens/work_plan_tracking_report_screen.dart';
+import '../screens/weekly_report_screen.dart';
 import '../screens/icons_control_screen.dart';
 import '../screens/document_control_hub_screen.dart';
 import '../screens/ir_mir_screen.dart';
@@ -41,6 +42,7 @@ import '../screens/uploaded_files_report_screen.dart';
 import '../screens/reports_sys_hub_screen.dart';
 import '../screens/projects_dashboard_screen.dart';
 import '../screens/projects_dashboard_plus1_screen.dart';
+import '../screens/meetings_screen.dart';
 import 'route_persistence.dart';
 
 /// Build the screen for a given route name (for restore after refresh). Returns null if unknown.
@@ -124,6 +126,8 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return OperationReportsScreen(user: user);
     case 'work-plan-tracking-report':
       return WorkPlanTrackingReportScreen(currentUser: user);
+    case 'weekly-report':
+      return WeeklyReportScreen(currentUser: user);
     case 'postpone-fines-report':
       return PostponeFinesReportScreen(currentUser: user);
     case 'icons-control':
@@ -156,6 +160,8 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return ProjectsDashboardScreen(currentUser: user);
     case 'projects-dashboard-plus1':
       return ProjectsDashboardPlus1Screen(currentUser: user);
+    case 'meetings':
+      return const MeetingsScreen();
     default:
       return null;
   }

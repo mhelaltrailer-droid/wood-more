@@ -7,12 +7,13 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   static const String documentControllerRoleLabel = 'Document Controller';
   static const String technicalOfficeRoleLabel = 'المكتب الفني';
   static const String topManagementRoleLabel = 'Top Managment';
+  static const String opCoordinatorRoleLabel = 'Op-Coordinator';
   static const String primaryAppAdminEmail = 'mouhammedhelal@gmail.com';
 
   final int id;
   final String name;
   final String email;
-  final String role; // 'site_engineer' | 'site_engineer_manager' | 'general_supervisor' | 'operation_manager' | 'app_admin' | 'accountant' | 'document_controller' | 'technical_office' | 'top_management'
+  final String role; // 'site_engineer' | 'site_engineer_manager' | 'general_supervisor' | 'operation_manager' | 'app_admin' | 'accountant' | 'document_controller' | 'technical_office' | 'top_management' | 'op_coordinator'
 
   const UserModel({
     required this.id,
@@ -27,6 +28,17 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   bool get isTechnicalOffice => role == shopDrawingRoleTechnicalOffice;
   bool get isTopManagement => role == shopDrawingRoleTopManagement;
   bool get isOperationManager => role == 'operation_manager';
+  bool get isOpCoordinator => role == 'op_coordinator';
+
+  /// أيقونة Meetings + جرس إشعارات الاجتماعات في الشاشة الرئيسية.
+  bool get canAccessMeetings =>
+      isOpCoordinator ||
+      isOperationManager ||
+      role == 'site_engineer_manager' ||
+      isAdmin ||
+      isTechnicalOffice;
+
+  bool get canUseMeetingsNotification => canAccessMeetings;
   bool get isShopDrawingProjectManager =>
       role == 'site_engineer_manager' && isShopDrawingPmEmail(email);
 

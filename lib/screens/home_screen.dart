@@ -9,10 +9,12 @@ import '../core/route_observer.dart';
 import 'login_screen.dart';
 import 'notifications_screen.dart';
 import 'shop_darwing_notifications_screen.dart';
+import 'meetings_notifications_screen.dart';
 import 'app_versions_screen.dart';
 import 'manager_withdrawal_requests_screen.dart';
 import 'reorderable_home_screen.dart';
 import '../widgets/shop_darwing_notification_app_bar_icon.dart';
+import '../widgets/meetings_notification_app_bar_icon.dart';
 
 /// الصفحة الرئيسية - تختلف حسب دور المستخدم
 class HomeScreen extends StatefulWidget {
@@ -41,6 +43,9 @@ class _HomeScreenState extends State<HomeScreen>
 
   bool get _canUseShopDarwingNotification =>
       widget.currentUser.canUseShopDarwingNotification;
+
+  bool get _canUseMeetingsNotification =>
+      widget.currentUser.canUseMeetingsNotification;
 
   @override
   void didChangeDependencies() {
@@ -390,6 +395,18 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                 ],
               ),
+            ),
+          if (_canUseMeetingsNotification)
+            IconButton(
+              tooltip: 'إشعارات الاجتماعات',
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const MeetingsNotificationsScreen(),
+                  ),
+                );
+              },
+              icon: const MeetingsNotificationAppBarIcon(),
             ),
           if (_canUseNotifications)
             IconButton(
