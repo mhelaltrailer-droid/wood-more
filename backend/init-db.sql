@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS projects (
   name TEXT NOT NULL
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS ux_projects_name_norm
+  ON projects (lower(btrim(name)));
+
 CREATE TABLE IF NOT EXISTS attendance_records (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id),
@@ -333,7 +336,7 @@ INSERT INTO users (name, email, role, password) VALUES
   ('Test Site Engineer', 'test-site-engineer@example.com', 'site_engineer', '0000')
 ON CONFLICT (email) DO NOTHING;
 
--- Seed projects
+-- Seed projects (idempotent; safe to re-run)
 INSERT INTO projects (name) VALUES
   ('UTC_Z5_CRC_F'), ('Mivida 31_CRC_F'), ('UTC_Z5_EMAAR Building C_F'), ('Zed east_ORASCOM_F'),
   ('Belle Vie_El-Hazek_F'), ('CAIRO GATE elain (02)_CRC_F'), ('Cairo gate_ACC_W'), ('Z1_EMAAR_F'),
@@ -343,7 +346,7 @@ INSERT INTO projects (name) VALUES
   ('cairo gate - locanda_INOVOO_F'), ('Village West _ club_FIT-OUT_W'), ('Village West _Villa_W'),
   ('Mivida gardens_Atrium_F'), ('Village West_CRC_ F'), ('Up Town Cairo _Z5 _EMAAR_W'), ('Belle Vie _ EMAAR_W'),
   ('Village West _ CRC_ W'), ('Wood&More(head office)')
-;
+ON CONFLICT ((lower(btrim(name)))) DO NOTHING;
 
 -- Seed default materials (قائمة الخامات المعتمدة؛ الترتيب للعرض في العميل)
 INSERT INTO materials (name)
