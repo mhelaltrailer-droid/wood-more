@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS projects (
   name TEXT NOT NULL
 );
 
+-- POST /projects relies on ON CONFLICT ((lower(btrim(name)))), which needs this index.
+-- Kept non-fatal: a database that still holds duplicate project names keeps working without it.
+DO $$
+BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS ux_projects_name_norm
+    ON projects (lower(btrim(name)));
+EXCEPTION WHEN unique_violation THEN
+  RAISE NOTICE 'ux_projects_name_norm not created: projects contains duplicate names (compare lower(btrim(name)))';
+END $$;
+
 CREATE TABLE IF NOT EXISTS attendance_records (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id),
@@ -333,17 +343,21 @@ INSERT INTO users (name, email, role, password) VALUES
   ('Test Site Engineer', 'test-site-engineer@example.com', 'site_engineer', '0000')
 ON CONFLICT (email) DO NOTHING;
 
--- Seed projects
-INSERT INTO projects (name) VALUES
-  ('UTC_Z5_CRC_F'), ('Mivida 31_CRC_F'), ('UTC_Z5_EMAAR Building C_F'), ('Zed east_ORASCOM_F'),
-  ('Belle Vie_El-Hazek_F'), ('CAIRO GATE elain (02)_CRC_F'), ('Cairo gate_ACC_W'), ('Z1_EMAAR_F'),
-  ('Community Center_CRC_W'), ('Terrace Zayed_CRC_W'), ('Silver Sands_REDCON_D'), ('CAR SHADE_W&M_W'),
-  ('OLD CITY_ORASCOM_W'), ('Cairo gate-Eden_ATRUM_F'), ('AUC Campus Expansion_Orascom_W&F'),
-  ('UTC - 2 Villa- Link International_W'), ('UTC - 2 Villa- Link International_F'), ('City Gate_CCC_W'),
-  ('cairo gate - locanda_INOVOO_F'), ('Village West _ club_FIT-OUT_W'), ('Village West _Villa_W'),
-  ('Mivida gardens_Atrium_F'), ('Village West_CRC_ F'), ('Up Town Cairo _Z5 _EMAAR_W'), ('Belle Vie _ EMAAR_W'),
-  ('Village West _ CRC_ W'), ('Wood&More(head office)')
-;
+-- Seed projects: only names that are still missing, so re-runs add nothing and change nothing
+INSERT INTO projects (name)
+SELECT t.name FROM unnest(ARRAY[
+  'UTC_Z5_CRC_F', 'Mivida 31_CRC_F', 'UTC_Z5_EMAAR Building C_F', 'Zed east_ORASCOM_F',
+  'Belle Vie_El-Hazek_F', 'CAIRO GATE elain (02)_CRC_F', 'Cairo gate_ACC_W', 'Z1_EMAAR_F',
+  'Community Center_CRC_W', 'Terrace Zayed_CRC_W', 'Silver Sands_REDCON_D', 'CAR SHADE_W&M_W',
+  'OLD CITY_ORASCOM_W', 'Cairo gate-Eden_ATRUM_F', 'AUC Campus Expansion_Orascom_W&F',
+  'UTC - 2 Villa- Link International_W', 'UTC - 2 Villa- Link International_F', 'City Gate_CCC_W',
+  'cairo gate - locanda_INOVOO_F', 'Village West _ club_FIT-OUT_W', 'Village West _Villa_W',
+  'Mivida gardens_Atrium_F', 'Village West_CRC_ F', 'Up Town Cairo _Z5 _EMAAR_W', 'Belle Vie _ EMAAR_W',
+  'Village West _ CRC_ W', 'Wood&More(head office)'
+]) AS t(name)
+WHERE NOT EXISTS (
+  SELECT 1 FROM projects p WHERE lower(btrim(p.name)) = lower(btrim(t.name))
+);
 
 -- Seed default materials (قائمة الخامات المعتمدة؛ الترتيب للعرض في العميل)
 INSERT INTO materials (name)
