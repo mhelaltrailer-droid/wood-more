@@ -161,7 +161,7 @@ Widget? getScreenForRoute(String name, UserModel user) {
     case 'projects-dashboard-plus1':
       return ProjectsDashboardPlus1Screen(currentUser: user);
     case 'meetings':
-      return const MeetingsScreen();
+      return MeetingsScreen(currentUser: user);
     default:
       return null;
   }

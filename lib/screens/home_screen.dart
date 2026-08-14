@@ -35,6 +35,7 @@ class _HomeScreenState extends State<HomeScreen>
   int _pendingWithdrawalRequestsCount = 0;
   int _pendingReportsSysCount = 0;
   int _pendingShopDrawingCount = 0;
+  int _unreadMeetingsNotificationsCount = 0;
   bool _hasAppReleaseUpdate = false;
   Timer? _notificationsPollTimer;
   late final AnimationController _wrRotateController;
@@ -72,6 +73,7 @@ class _HomeScreenState extends State<HomeScreen>
     _loadIconsConfig();
     _loadUnreadNotificationsCount();
     _loadUnreadShopDarwingNotificationsCount();
+    _loadUnreadMeetingsNotificationsCount();
     _loadPendingWithdrawalActionsCount();
     _loadPendingReportsSysCount();
     _loadPendingShopDrawingCount();
@@ -88,6 +90,7 @@ class _HomeScreenState extends State<HomeScreen>
     _loadIconsConfig();
     _loadUnreadNotificationsCount();
     _loadUnreadShopDarwingNotificationsCount();
+    _loadUnreadMeetingsNotificationsCount();
     _loadPendingWithdrawalActionsCount();
     _loadPendingReportsSysCount();
     _loadPendingShopDrawingCount();
@@ -172,6 +175,29 @@ class _HomeScreenState extends State<HomeScreen>
     } catch (_) {
       if (!mounted) return;
       setState(() => _unreadShopDarwingNotificationsCount = 0);
+    }
+  }
+
+  Future<void> _loadUnreadMeetingsNotificationsCount() async {
+    if (!_canUseMeetingsNotification) {
+      if (!mounted) return;
+      setState(() => _unreadMeetingsNotificationsCount = 0);
+      return;
+    }
+    try {
+      final storage = getStorage();
+      if (storage is! ApiStorageService) {
+        if (mounted) setState(() => _unreadMeetingsNotificationsCount = 0);
+        return;
+      }
+      final count = await storage.getUnreadMeetingsNotificationsCount(
+        widget.currentUser.id,
+      );
+      if (!mounted) return;
+      setState(() => _unreadMeetingsNotificationsCount = count);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _unreadMeetingsNotificationsCount = 0);
     }
   }
 
@@ -267,6 +293,7 @@ class _HomeScreenState extends State<HomeScreen>
   void _startNotificationsPollingIfManager() {
     if (!_canUseNotifications &&
         !_canUseShopDarwingNotification &&
+        !_canUseMeetingsNotification &&
         !widget.currentUser.canAccessShopDrawingHomeIcon &&
         getStorage() is! ApiStorageService) {
       return;
@@ -278,6 +305,9 @@ class _HomeScreenState extends State<HomeScreen>
         if (_canUseNotifications) _loadUnreadNotificationsCount();
         if (_canUseShopDarwingNotification) {
           _loadUnreadShopDarwingNotificationsCount();
+        }
+        if (_canUseMeetingsNotification) {
+          _loadUnreadMeetingsNotificationsCount();
         }
         _loadPendingWithdrawalActionsCount();
         _loadPendingReportsSysCount();
@@ -400,13 +430,58 @@ class _HomeScreenState extends State<HomeScreen>
             IconButton(
               tooltip: 'إشعارات الاجتماعات',
               onPressed: () async {
+                final storage = getStorage();
+                if (storage is ApiStorageService) {
+                  try {
+                    await storage.markAllMeetingsNotificationsRead(
+                      currentUser.id,
+                    );
+                  } catch (_) {}
+                }
+                await _loadUnreadMeetingsNotificationsCount();
+                if (!context.mounted) return;
                 await Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => const MeetingsNotificationsScreen(),
+                    builder: (_) => MeetingsNotificationsScreen(
+                      currentUser: currentUser,
+                    ),
                   ),
                 );
+                await _loadUnreadMeetingsNotificationsCount();
               },
-              icon: const MeetingsNotificationAppBarIcon(),
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const MeetingsNotificationAppBarIcon(),
+                  if (_unreadMeetingsNotificationsCount > 0)
+                    Positioned(
+                      right: -6,
+                      top: -6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(minWidth: 18),
+                        child: Text(
+                          _unreadMeetingsNotificationsCount > 99
+                              ? '99+'
+                              : '$_unreadMeetingsNotificationsCount',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           if (_canUseNotifications)
             IconButton(
@@ -515,8 +590,10 @@ class _HomeScreenState extends State<HomeScreen>
         iconConfig: _iconConfig,
         pendingReportsSysCount: _pendingReportsSysCount,
         pendingShopDrawingCount: _pendingShopDrawingCount,
+        unreadMeetingsCount: _unreadMeetingsNotificationsCount,
         onReportsSysReturn: _loadPendingReportsSysCount,
         onShopDrawingReturn: _loadPendingShopDrawingCount,
+        onMeetingsReturn: _loadUnreadMeetingsNotificationsCount,
       ),
     );
   }

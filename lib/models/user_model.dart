@@ -31,14 +31,21 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   bool get isOpCoordinator => role == 'op_coordinator';
 
   /// أيقونة Meetings + جرس إشعارات الاجتماعات في الشاشة الرئيسية.
+  /// للأدمن: المسؤول الرئيسي فقط (mouhammedhelal@gmail.com).
   bool get canAccessMeetings =>
       isOpCoordinator ||
       isOperationManager ||
       role == 'site_engineer_manager' ||
-      isAdmin ||
-      isTechnicalOffice;
+      isTechnicalOffice ||
+      isPrimaryAppAdmin;
 
   bool get canUseMeetingsNotification => canAccessMeetings;
+
+  /// إنشاء/رفع/استبدال ملفات الاجتماعات — Op-Coordinator فقط.
+  bool get canUploadMeetings => isOpCoordinator;
+
+  /// حذف ملف أو اجتماع بالكامل — المسؤول الرئيسي فقط.
+  bool get canDeleteMeetings => isPrimaryAppAdmin;
   bool get isShopDrawingProjectManager =>
       role == 'site_engineer_manager' && isShopDrawingPmEmail(email);
 

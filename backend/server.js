@@ -19,6 +19,10 @@ const { registerAttachmentRoutes } = require('./attachments');
 const {
   registerWithdrawalFilesReportRoutes,
 } = require('./withdrawal_files_reports');
+const {
+  ensureMeetingsTables,
+  registerMeetingsRoutes,
+} = require('./meetings');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -1178,6 +1182,7 @@ const ACTIVITY_LOG_SKIPPED_GET_PATHS = new Set([
   '/shop-drawing/pending-count',
   '/shop-drawing/module-notifications/unread-count',
   '/shop-darwing-notification/unread-count',
+  '/meetings-notifications/unread-count',
   '/withdrawal-requests/action-count',
   '/app-release/latest',
 ]);
@@ -6892,6 +6897,7 @@ registerProjectsDashboardRoutes(app, pool, { notifyFileUpload });
 registerExpenseStatementsRoutes(app, pool, { runNotificationSafely, notifyFileUpload });
 registerAttachmentRoutes(app, pool);
 registerWithdrawalFilesReportRoutes(app, pool);
+registerMeetingsRoutes(app, pool, { runNotificationSafely });
 ensurePasswordColumn()
   .then(() => ensureSystemLockTable())
   .then(() => ensureHomeIconsVisibilitySetting())
@@ -6904,6 +6910,7 @@ ensurePasswordColumn()
   .then(() => ensurePostponeReasonsTable())
   .then(() => ensureNotificationsTable())
   .then(() => ensureShopDarwingNotificationsTable())
+  .then(() => ensureMeetingsTables(pool))
   .then(() => ensureAppReleaseTables())
   .then(() => ensureShopDrawingTables(pool))
   .then(() => ensureProjectsDashboardTables(pool))

@@ -16,6 +16,7 @@ void main() {
     expect(user.isOpCoordinator, isTrue);
     expect(user.canAccessMeetings, isTrue);
     expect(user.canUseMeetingsNotification, isTrue);
+    expect(user.canUploadMeetings, isTrue);
 
     final eligible = eligibleHomeIconIds(
       user: user,
@@ -28,19 +29,47 @@ void main() {
     for (final role in [
       'operation_manager',
       'site_engineer_manager',
-      'app_admin',
       'technical_office',
       'op_coordinator',
     ]) {
       final user = _user(role);
       expect(user.canAccessMeetings, isTrue, reason: role);
       expect(user.canUseMeetingsNotification, isTrue, reason: role);
+      expect(user.canDeleteMeetings, isFalse, reason: role);
+      expect(
+        user.canUploadMeetings,
+        role == 'op_coordinator',
+        reason: role,
+      );
       final eligible = eligibleHomeIconIds(
         user: user,
         iconConfig: IconVisibilityService.defaultForRole(role),
       );
       expect(eligible, contains('meetings'), reason: role);
     }
+  });
+
+  test('only primary app admin has meetings among admins + delete', () {
+    final otherAdmin = _user('app_admin');
+    expect(otherAdmin.canAccessMeetings, isFalse);
+    expect(otherAdmin.canUseMeetingsNotification, isFalse);
+    expect(otherAdmin.canDeleteMeetings, isFalse);
+
+    final primary = UserModel(
+      id: 2,
+      name: 'Admin',
+      email: UserModel.primaryAppAdminEmail,
+      role: 'app_admin',
+    );
+    expect(primary.canAccessMeetings, isTrue);
+    expect(primary.canUseMeetingsNotification, isTrue);
+    expect(primary.canDeleteMeetings, isTrue);
+    expect(primary.canUploadMeetings, isFalse);
+    final eligible = eligibleHomeIconIds(
+      user: primary,
+      iconConfig: IconVisibilityService.defaultForRole('app_admin'),
+    );
+    expect(eligible, contains('meetings'));
   });
 
   test('op_coordinator is registered in icon visibility roles', () {

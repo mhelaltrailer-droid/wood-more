@@ -9,6 +9,7 @@ COPY projects_dashboard.js ./
 COPY expense_statements.js ./
 COPY attachments.js ./
 COPY withdrawal_files_reports.js ./
+COPY meetings.js ./
 COPY scripts/lib ./scripts/lib
 COPY scripts/seed_z1_emaar_f_project_locations.sql ./scripts/seed_z1_emaar_f_project_locations.sql
 EXPOSE 3000

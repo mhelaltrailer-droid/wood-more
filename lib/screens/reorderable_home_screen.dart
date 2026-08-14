@@ -10,8 +10,10 @@ class ReorderableHomeScreen extends StatefulWidget {
   final Map<String, bool>? iconConfig;
   final int pendingReportsSysCount;
   final int pendingShopDrawingCount;
+  final int unreadMeetingsCount;
   final Future<void> Function()? onReportsSysReturn;
   final Future<void> Function()? onShopDrawingReturn;
+  final Future<void> Function()? onMeetingsReturn;
 
   const ReorderableHomeScreen({
     super.key,
@@ -19,8 +21,10 @@ class ReorderableHomeScreen extends StatefulWidget {
     required this.iconConfig,
     this.pendingReportsSysCount = 0,
     this.pendingShopDrawingCount = 0,
+    this.unreadMeetingsCount = 0,
     this.onReportsSysReturn,
     this.onShopDrawingReturn,
+    this.onMeetingsReturn,
   });
 
   @override
@@ -153,8 +157,10 @@ class _ReorderableHomeScreenState extends State<ReorderableHomeScreen> {
                       iconId: iconId,
                       pendingReportsSysCount: widget.pendingReportsSysCount,
                       pendingShopDrawingCount: widget.pendingShopDrawingCount,
+                      unreadMeetingsCount: widget.unreadMeetingsCount,
                       onReportsSysReturn: widget.onReportsSysReturn,
                       onShopDrawingReturn: widget.onShopDrawingReturn,
+                      onMeetingsReturn: widget.onMeetingsReturn,
                     ),
                   ),
                 );

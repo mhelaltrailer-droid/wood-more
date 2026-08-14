@@ -25,6 +25,8 @@ import '../models/activity_log_model.dart';
 import '../models/notification_attachment_model.dart';
 import '../models/notification_item_model.dart';
 import '../models/shop_darwing_notification_model.dart';
+import '../models/meeting_model.dart';
+import '../models/meeting_notification_model.dart';
 import '../models/ir_mir_upload_model.dart';
 import '../models/ms_sd_record_model.dart';
 import '../models/mos_itp_record_model.dart';
@@ -97,6 +99,12 @@ class ApiStorageService {
     if (isHtml) {
       return Exception('خطأ من الخادم (${r.statusCode}). تحقق من نشر API محدّث.');
     }
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['error'] != null) {
+        return Exception(decoded['error'].toString());
+      }
+    } catch (_) {}
     return Exception(body.isNotEmpty ? body : 'HTTP ${r.statusCode}');
   }
 
@@ -725,6 +733,182 @@ class ApiStorageService {
     final uri = Uri.parse(
       _path('shop-darwing-notification/$notificationId'),
     ).replace(queryParameters: {'userId': '$userId'});
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  String _meetingsUnreadCacheKey(int userId) =>
+      'meetings-notifications/unread-count:$userId';
+
+  Future<List<MeetingModel>> getMeetings({
+    required int userId,
+    String? query,
+  }) async {
+    final q = (query ?? '').trim();
+    final path = q.isEmpty
+        ? 'meetings?userId=$userId'
+        : 'meetings?userId=$userId&q=${Uri.encodeQueryComponent(q)}';
+    final list = await _getList(path);
+    return list
+        .map((e) => MeetingModel.fromMap(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
+  Future<MeetingModel> getMeetingDetail({
+    required int userId,
+    required int meetingId,
+  }) async {
+    final data = await _get('meetings/$meetingId?userId=$userId');
+    return MeetingModel.fromMap(data);
+  }
+
+  Future<MeetingModel> createMeeting({
+    required int userId,
+    required String meetingNumber,
+    required String subject,
+    required String scheduledAt,
+    required String fileName,
+    required String mimeType,
+    required String dataBase64,
+    required int sizeBytes,
+  }) async {
+    final uri = Uri.parse(_path('meetings'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'meeting_number': meetingNumber,
+        'subject': subject,
+        'scheduled_at': scheduledAt,
+        'file_name': fileName,
+        'mime_type': mimeType,
+        'data_base64': dataBase64,
+        'size_bytes': sizeBytes,
+      }),
+    );
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'meetings');
+    return MeetingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<MeetingModel> uploadMeetingFile({
+    required int userId,
+    required int meetingId,
+    required String fileType,
+    required String fileName,
+    required String mimeType,
+    required String dataBase64,
+    required int sizeBytes,
+  }) async {
+    final uri = Uri.parse(_path('meetings/$meetingId/files/$fileType'));
+    final r = await http.put(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'file_name': fileName,
+        'mime_type': mimeType,
+        'data_base64': dataBase64,
+        'size_bytes': sizeBytes,
+      }),
+    );
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'meetings/$meetingId/files/$fileType');
+    }
+    return MeetingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<Map<String, String>> getMeetingFileData({
+    required int userId,
+    required int meetingId,
+    required String fileType,
+  }) async {
+    final data = await _get(
+      'meetings/$meetingId/files/$fileType?userId=$userId',
+    );
+    return {
+      'file_name': (data['file_name'] ?? '').toString(),
+      'mime_type': (data['mime_type'] ?? 'application/pdf').toString(),
+      'data_base64': (data['data_base64'] ?? '').toString(),
+    };
+  }
+
+  Future<MeetingModel> deleteMeetingFile({
+    required int userId,
+    required int meetingId,
+    required String fileType,
+  }) async {
+    final uri = Uri.parse(_path('meetings/$meetingId/files/$fileType')).replace(
+      queryParameters: {'userId': '$userId'},
+    );
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'meetings/$meetingId/files/$fileType');
+    }
+    return MeetingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<void> deleteMeeting({
+    required int userId,
+    required int meetingId,
+  }) async {
+    final uri = Uri.parse(_path('meetings/$meetingId')).replace(
+      queryParameters: {'userId': '$userId'},
+    );
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'meetings/$meetingId');
+    }
+  }
+
+  Future<List<MeetingNotificationModel>> getMeetingsNotifications(
+    int userId,
+  ) async {
+    final list = await _getList('meetings-notifications?userId=$userId');
+    return list
+        .map(
+          (e) => MeetingNotificationModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<int> getUnreadMeetingsNotificationsCount(int userId) async {
+    final cacheKey = _meetingsUnreadCacheKey(userId);
+    final cached = _readCachedInt(cacheKey);
+    if (cached != null) return cached;
+    final data = await _get('meetings-notifications/unread-count?userId=$userId');
+    return _storeCachedInt(cacheKey, (data['count'] as num?)?.toInt() ?? 0);
+  }
+
+  Future<void> markAllMeetingsNotificationsRead(int userId) async {
+    await _put('meetings-notifications/read-all', {'userId': userId});
+    _intCache.remove(_meetingsUnreadCacheKey(userId));
+  }
+
+  Future<void> markMeetingsNotificationRead({
+    required int notificationId,
+    required int userId,
+  }) async {
+    await _put('meetings-notifications/$notificationId/read', {
+      'userId': userId,
+    });
+    _intCache.remove(_meetingsUnreadCacheKey(userId));
+  }
+
+  Future<void> deleteMeetingsNotification({
+    required int notificationId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('meetings-notifications/$notificationId'))
+        .replace(queryParameters: {'userId': '$userId'});
     final r = await http.delete(uri);
     if (r.statusCode >= 400) throw Exception(r.body);
   }

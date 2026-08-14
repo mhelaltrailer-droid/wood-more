@@ -35,9 +35,11 @@ import '../screens/weekly_report_screen.dart';
 import '../screens/projects_dashboard_screen.dart';
 import '../screens/projects_dashboard_plus1_screen.dart';
 import '../screens/meetings_screen.dart';
+import '../services/api_storage_service.dart';
 import '../services/home_icon_order_service.dart';
 import '../services/route_restore.dart';
 import '../services/storage_service.dart';
+import 'meetings_icon.dart';
 
 class HomeIconBuilder {
   const HomeIconBuilder._();
@@ -48,8 +50,10 @@ class HomeIconBuilder {
     required String iconId,
     int pendingReportsSysCount = 0,
     int pendingShopDrawingCount = 0,
+    int unreadMeetingsCount = 0,
     Future<void> Function()? onReportsSysReturn,
     Future<void> Function()? onShopDrawingReturn,
+    Future<void> Function()? onMeetingsReturn,
   }) {
     switch (iconId) {
       case 'attendance':
@@ -468,16 +472,27 @@ class HomeIconBuilder {
           return const SizedBox.shrink();
         }
         return _lightCard(
-          icon: Icons.groups_outlined,
-          iconSize: 56,
+          iconWidget: const MeetingsIcon(size: 64),
+          iconSize: 64,
           title: 'Meetings',
-          subtitle: 'الاجتماعات',
           padding: 28,
-          onTap: () => pushAndSaveRoute(
-            context,
-            'meetings',
-            const MeetingsScreen(),
-          ),
+          badgeCount: unreadMeetingsCount,
+          onTap: () async {
+            final storage = getStorage();
+            if (storage is ApiStorageService) {
+              try {
+                await storage.markAllMeetingsNotificationsRead(user.id);
+              } catch (_) {}
+            }
+            await onMeetingsReturn?.call();
+            if (!context.mounted) return;
+            await pushAndSaveRoute(
+              context,
+              'meetings',
+              MeetingsScreen(currentUser: user),
+            );
+            await onMeetingsReturn?.call();
+          },
         );
       case 'reports_sys':
         return _gradientCard(
@@ -519,56 +534,88 @@ class HomeIconBuilder {
   }
 
   static Widget _lightCard({
-    required IconData icon,
+    IconData? icon,
+    Widget? iconWidget,
     required String title,
     String? subtitle,
     required Future<void> Function() onTap,
     double iconSize = 64,
     double padding = 32,
+    int badgeCount = 0,
   }) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: EdgeInsets.all(padding),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE8F5E9),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.3)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Icon(icon, size: iconSize, color: const Color(0xFF1B5E20)),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1B5E20),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            if (subtitle != null && subtitle.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: const Color(0xFF1B5E20).withOpacity(0.9),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(padding),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F5E9),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.3)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
                 ),
-                textAlign: TextAlign.center,
+              ],
+            ),
+            child: Column(
+              children: [
+                iconWidget ??
+                    Icon(icon!, size: iconSize, color: const Color(0xFF1B5E20)),
+                const SizedBox(height: 16),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1B5E20),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                if (subtitle != null && subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: const Color(0xFF1B5E20).withOpacity(0.9),
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (badgeCount > 0)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                constraints: const BoxConstraints(minWidth: 22),
+                child: Text(
+                  badgeCount > 99 ? '99+' : '$badgeCount',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
-            ],
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
