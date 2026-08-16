@@ -1,0 +1,6 @@
+node_modules
+.env
+*.md
+scripts/*
+!scripts/lib
+!scripts/seed_z1_emaar_f_project_locations.sql

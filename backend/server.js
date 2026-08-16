@@ -1175,6 +1175,7 @@ async function _enrichActivityLogRow(row) {
 // rows/day with no audit value. Only GET is skipped: PUT /system-lock stays audited.
 const ACTIVITY_LOG_SKIPPED_GET_PATHS = new Set([
   '/',
+  '/healthz',
   '/system-lock',
   '/home-icons-visibility',
   '/notifications/unread-count',
@@ -1266,6 +1267,10 @@ app.use((req, res, next) => {
 
 app.get('/', (req, res) => {
   res.json({ ok: true, message: 'Wood & More API', docs: 'Use POST /auth/login for login, /users, /projects, etc.' });
+});
+
+app.get('/healthz', (_req, res) => {
+  res.status(200).json({ ok: true });
 });
 
 // Support Neon / any cloud PostgreSQL: set DATABASE_URL (with ?sslmode=require).
@@ -1385,6 +1390,9 @@ async function ensureAttendanceCalendarDateColumn() {
 
 /** تطبيق seed هيكلة Z1_EMAAR_F من الملف (آمن للتكرار بفضل NOT EXISTS داخل SQL). */
 async function ensureZ1EmaarFProjectLocationsSeeded() {
+  if (String(process.env.RUN_LOCATION_SEED || '').trim() !== '1') {
+    return;
+  }
   try {
     const sqlPath = path.join(__dirname, 'scripts', 'seed_z1_emaar_f_project_locations.sql');
     if (!fs.existsSync(sqlPath)) {
