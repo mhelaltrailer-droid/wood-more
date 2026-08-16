@@ -77,6 +77,9 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   bool get canManageMosItpRecords =>
       email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
 
+  /// رفع مرفقات IR / MIR (مهندس موقع أو Document Controller).
+  bool get canUploadIrMir => isSiteEngineer || isDocumentController;
+
   /// عرض مرفقات IR/MIR ووحدات المستندات (بدون رفع من مهندس الموقع).
   bool get canViewUploadedDocuments =>
       isManager || isAdmin || isDocumentController;

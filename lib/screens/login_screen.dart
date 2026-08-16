@@ -196,7 +196,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             textDirection: TextDirection.ltr,
                             decoration: const InputDecoration(
                               labelText: 'البريد الإلكتروني أو الاسم',
-                              hintText: 'مثال: shams أو islam.shams2050@gmail.com',
+                              hintText: 'user-name , user@mail',
                               prefixIcon: Icon(Icons.email_outlined),
                               border: OutlineInputBorder(),
                             ),

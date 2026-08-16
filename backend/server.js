@@ -2538,8 +2538,12 @@ app.post('/ir-mir/uploads', async (req, res) => {
 
     const proj = await pool.query('SELECT id FROM projects WHERE id = $1', [projectId]);
     if (proj.rows.length === 0) return res.status(400).json({ error: 'project not found' });
-    const usr = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
+    const usr = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
     if (usr.rows.length === 0) return res.status(400).json({ error: 'user not found' });
+    const uploaderRole = String(usr.rows[0].role || '').trim();
+    if (uploaderRole !== 'site_engineer' && uploaderRole !== 'document_controller') {
+      return res.status(403).json({ error: 'only site engineer or document controller can upload IR/MIR' });
+    }
 
     if (!fileData.startsWith('data:')) {
       fileData = `data:${fileMime};base64,${fileData}`;

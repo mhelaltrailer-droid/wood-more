@@ -11,7 +11,7 @@ import '../services/storage_service.dart';
 import '../utils/image_upload_compress.dart';
 import '../utils/open_stored_attachment.dart';
 
-/// IR-MIR: مهندس موقع يرفع، المدير/المسؤول/مدير العمليات يعرضون.
+/// IR-MIR: مهندس موقع و Document Controller يرفعون؛ المدير/المسؤول/مدير العمليات يعرضون.
 class IrMirScreen extends StatefulWidget {
   final UserModel currentUser;
 
@@ -32,9 +32,9 @@ class _IrMirScreenState extends State<IrMirScreen> {
 
   bool _loading = false;
 
-  bool get _viewerMode =>
-      !widget.currentUser.isSiteEngineer &&
-      widget.currentUser.canViewUploadedDocuments;
+  bool get _canUpload => widget.currentUser.canUploadIrMir;
+
+  bool get _viewerMode => !_canUpload && widget.currentUser.canViewUploadedDocuments;
 
   int? get _currentParentId =>
       _folderPath.isEmpty ? null : _folderPath.last;
@@ -853,12 +853,15 @@ class _IrMirScreenState extends State<IrMirScreen> {
                     const SizedBox(height: 16),
                     if (_viewerMode)
                       _viewerMirList()
-                    else
+                    else ...[
                       FilledButton.icon(
                         onPressed: _showMirForm,
                         icon: const Icon(Icons.add),
                         label: const Text('إرفاق MIR جديد'),
                       ),
+                      const SizedBox(height: 12),
+                      _viewerMirList(),
+                    ],
                   ],
                   if (_project != null && _branch == 'ir') ...[
                     const SizedBox(height: 8),

@@ -158,7 +158,7 @@ abstract class _ChildSubtitle {
 class _IrMirSubtitle extends _ChildSubtitle {
   const _IrMirSubtitle();
   @override
-  String resolve(UserModel user) => user.isSiteEngineer
+  String resolve(UserModel user) => user.canUploadIrMir
       ? 'رفع مستندات MIR أو IR حسب هيكلة المشروع'
       : 'عرض مرفقات MIR و IR من مهندسي المواقع';
 }

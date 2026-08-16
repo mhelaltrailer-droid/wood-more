@@ -71,11 +71,13 @@ void main() {
     test('DC يرفع ولا يدير بعد الحفظ', () {
       expect(dc.canUploadMsSd, isTrue);
       expect(dc.canUploadMosItp, isTrue);
+      expect(dc.canUploadIrMir, isTrue);
       expect(dc.canManageMsSdRecords, isFalse);
       expect(dc.canManageMosItpRecords, isFalse);
     });
 
     test('مهندس/مدير/عمليات يعرضون فقط', () {
+      expect(engineer.canUploadIrMir, isTrue);
       for (final u in [engineer, manager, opManager]) {
         expect(u.canUploadMsSd, isFalse);
         expect(u.canUploadMosItp, isFalse);
@@ -84,6 +86,8 @@ void main() {
         expect(u.canManageMsSdRecords, isFalse);
         expect(u.canManageMosItpRecords, isFalse);
       }
+      expect(manager.canUploadIrMir, isFalse);
+      expect(opManager.canUploadIrMir, isFalse);
     });
 
     test('المحاسب بلا وصول', () {

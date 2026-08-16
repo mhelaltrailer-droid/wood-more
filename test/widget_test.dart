@@ -29,6 +29,7 @@ void main() {
     );
     expect(docController.isDocumentController, isTrue);
     expect(docController.canViewUploadedDocuments, isTrue);
+    expect(docController.canUploadIrMir, isTrue);
     expect(docController.canUseNotifications, isFalse);
   });
 }
