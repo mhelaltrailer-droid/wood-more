@@ -242,23 +242,25 @@ class ApiStorageService {
     return UserModel.fromMap(m);
   }
 
-  /// التحقق من تسجيل الدخول (بريد + كلمة سر) عبر API
+  /// التحقق من تسجيل الدخول (بريد أو اسم + كلمة سر) عبر API
   Future<UserModel?> validateLogin(String email, String password) async {
-    try {
-      final uri = Uri.parse(_path('auth/login'));
-      final r = await http.post(
-        uri,
-        body: jsonEncode({'email': email.trim(), 'password': password}),
-        headers: {'Content-Type': 'application/json'},
-      );
-      if (r.statusCode != 200) return null;
-      if (r.body.isEmpty) return null;
-      final decoded = jsonDecode(r.body);
-      if (decoded == null || decoded is! Map<String, dynamic>) return null;
-      return UserModel.fromMap(decoded);
-    } catch (_) {
-      return null;
+    final uri = Uri.parse(_path('auth/login'));
+    final r = await http.post(
+      uri,
+      body: jsonEncode({'email': email.trim(), 'password': password}),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (r.statusCode == 401) return null;
+    if (r.statusCode == 423) {
+      throw Exception('System Locked for maintainance please try again later');
     }
+    if (r.statusCode != 200) {
+      throw Exception('تعذر الاتصال بالخادم (${r.statusCode})');
+    }
+    if (r.body.isEmpty) return null;
+    final decoded = jsonDecode(r.body);
+    if (decoded == null || decoded is! Map<String, dynamic>) return null;
+    return UserModel.fromMap(decoded);
   }
 
   Future<bool> isSystemLocked() async {

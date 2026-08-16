@@ -1313,6 +1313,37 @@ async function ensureSystemLockTable() {
   }
 }
 
+function isMissingRelationError(e) {
+  return e && (e.code === '42P01' || String(e.message || '').includes('does not exist'));
+}
+
+async function readSystemLocked() {
+  try {
+    const lockR = await pool.query(
+      `SELECT value FROM app_settings WHERE key = 'system_locked' LIMIT 1`
+    );
+    return lockR.rows.length > 0 && String(lockR.rows[0].value || '0').trim() === '1';
+  } catch (e) {
+    if (isMissingRelationError(e)) {
+      await ensureSystemLockTable();
+      return false;
+    }
+    throw e;
+  }
+}
+
+async function findUserForLogin(identifier) {
+  const id = String(identifier || '').trim().toLowerCase();
+  if (!id) return null;
+  const sql =
+    "SELECT id, name, email, role, COALESCE(password, '0000') AS password FROM users";
+  const byEmail = await pool.query(`${sql} WHERE LOWER(TRIM(email)) = $1`, [id]);
+  if (byEmail.rows.length === 1) return byEmail.rows[0];
+  const byName = await pool.query(`${sql} WHERE LOWER(TRIM(name)) = $1`, [id]);
+  if (byName.rows.length === 1) return byName.rows[0];
+  return null;
+}
+
 async function ensureUserHomeIconOrderTable() {
   try {
     await pool.query(`
@@ -1635,7 +1666,7 @@ async function ensureLocationMaterialsTables() {
   }
 }
 
-// ——— Auth (email + password) ———
+// ——— Auth (email or unique name + password) ———
 app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
@@ -1643,22 +1674,18 @@ app.post('/auth/login', async (req, res) => {
     const pwd = (password || '').trim();
     if (!emailNorm || !pwd) return res.status(400).json({ error: 'email and password required' });
     const lockEmailBypass = 'mouhammedhelal@gmail.com';
-    const lockR = await pool.query(
-      `SELECT value FROM app_settings WHERE key = 'system_locked' LIMIT 1`
-    );
-    const isLocked = lockR.rows.length > 0 && String(lockR.rows[0].value || '0').trim() === '1';
-    if (isLocked && emailNorm !== lockEmailBypass) {
-      return res.status(423).json({
-        error: 'system_locked',
-        message: 'System Locked for maintainance please try again later',
-      });
+    const isLocked = await readSystemLocked();
+    const row = await findUserForLogin(emailNorm);
+    if (isLocked) {
+      const loginEmail = String(row?.email || emailNorm).trim().toLowerCase();
+      if (loginEmail !== lockEmailBypass) {
+        return res.status(423).json({
+          error: 'system_locked',
+          message: 'System Locked for maintainance please try again later',
+        });
+      }
     }
-    const r = await pool.query(
-      'SELECT id, name, email, role, COALESCE(password, \'0000\') AS password FROM users WHERE LOWER(TRIM(email)) = $1',
-      [emailNorm]
-    );
-    if (r.rows.length === 0) return res.status(401).json(null);
-    const row = r.rows[0];
+    if (!row) return res.status(401).json(null);
     const stored = (row.password || '0000').trim();
     if (stored !== pwd) return res.status(401).json(null);
     res.json({ id: parseInt(row.id), name: row.name, email: row.email, role: row.role });
@@ -1669,10 +1696,7 @@ app.post('/auth/login', async (req, res) => {
 
 app.get('/system-lock', async (req, res) => {
   try {
-    const r = await pool.query(
-      `SELECT value FROM app_settings WHERE key = 'system_locked' LIMIT 1`
-    );
-    const locked = r.rows.length > 0 && String(r.rows[0].value || '0').trim() === '1';
+    const locked = await readSystemLocked();
     res.json({ locked });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });

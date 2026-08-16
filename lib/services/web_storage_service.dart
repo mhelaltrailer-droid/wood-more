@@ -766,15 +766,23 @@ class WebStorageService {
     }
     final emailLower = email.trim().toLowerCase();
     final pwd = password.trim();
+    Map<String, dynamic>? byEmail;
+    final byName = <Map<String, dynamic>>[];
     for (final m in list) {
       final map = Map<String, dynamic>.from(m as Map);
       final storedEmail = (map['email']?.toString() ?? '').trim().toLowerCase();
-      if (storedEmail != emailLower) continue;
-      final stored = (map['password']?.toString() ?? '0000').trim();
-      if (stored.isEmpty || pwd != stored) return null;
-      return UserModel.fromMap(map);
+      final storedName = (map['name']?.toString() ?? '').trim().toLowerCase();
+      if (storedEmail == emailLower) {
+        byEmail = map;
+        break;
+      }
+      if (storedName == emailLower) byName.add(map);
     }
-    return null;
+    final map = byEmail ?? (byName.length == 1 ? byName.first : null);
+    if (map == null) return null;
+    final stored = (map['password']?.toString() ?? '0000').trim();
+    if (stored.isEmpty || pwd != stored) return null;
+    return UserModel.fromMap(map);
   }
 
   Future<List<ProjectModel>> getProjects() async {

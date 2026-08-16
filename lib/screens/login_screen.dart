@@ -59,7 +59,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (user == null) {
         setState(() {
-          _errorMessage = 'البريد الإلكتروني أو كلمة السر غير صحيحة';
+          _errorMessage = 'البريد الإلكتروني/الاسم أو كلمة السر غير صحيحة';
           _isLoading = false;
         });
         return;
@@ -195,13 +195,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             keyboardType: TextInputType.emailAddress,
                             textDirection: TextDirection.ltr,
                             decoration: const InputDecoration(
-                              labelText: 'البريد الإلكتروني',
+                              labelText: 'البريد الإلكتروني أو الاسم',
+                              hintText: 'مثال: shams أو islam.shams2050@gmail.com',
                               prefixIcon: Icon(Icons.email_outlined),
                               border: OutlineInputBorder(),
                             ),
                             validator: (v) {
                               if (v == null || v.trim().isEmpty) {
-                                return 'أدخل البريد الإلكتروني';
+                                return 'أدخل البريد الإلكتروني أو الاسم';
                               }
                               return null;
                             },
