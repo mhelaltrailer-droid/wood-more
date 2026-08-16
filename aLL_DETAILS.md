@@ -301,7 +301,7 @@ Same manager screens where configured, plus:
 | `salary_deduction_screen.dart` | Salary deduction PDF form |
 | `dashboard_screen.dart` | Demo management dashboard (static mock) |
 
-#### Shared reports & chat
+#### Shared reports
 
 | Screen | Purpose |
 |--------|---------|
@@ -309,7 +309,6 @@ Same manager screens where configured, plus:
 | `user_custody_report_screen.dart` | Custody movements; PDF |
 | `attendance_sub_report_screen.dart` | Attendance movements; PDF |
 | `sub_reports_screen.dart` | Hub for sub-reports (**not wired** in current navigation) |
-| `private_chat_screen.dart` | Chat between two fixed admin emails |
 
 ### 3.5 `backend/`
 
@@ -441,13 +440,6 @@ For each feature: **user perspective** (what people see) and **system perspectiv
 |---|---|
 | **User** | Bell icon with unread count; list of events (attendance, withdrawals, plan postpone, etc.). |
 | **System** | `notifications` table; inserted by server on domain events; `/notifications`, `/notifications/unread-count`, mark read. |
-
-### 4.16 Private admin chat
-
-| | |
-|---|---|
-| **User** | Two designated emails can exchange messages. |
-| **System** | `private_chat_messages`; `/private-chat/messages`; restricted to Shams ↔ primary admin pair. |
 
 ### 4.17 Reporting & PDF export
 
@@ -625,7 +617,7 @@ SSL auto-enabled when URL contains `sslmode=require` or `neon.tech`.
 | GET | `/notifications` | Inbox for userId |
 | GET | `/notifications/unread-count` | Badge count |
 | PUT | `/notifications/:id/read` | Mark read |
-| GET/POST | `/private-chat/messages` | Restricted chat |
+
 
 #### IR / MIR
 
@@ -749,7 +741,6 @@ UI event
 | `projects` | Project master |
 | `attendance_records` | Check-in/out events |
 | `notifications` | In-app notifications per recipient |
-| `private_chat_messages` | Admin-manager chat |
 | `materials` | Global material name catalog |
 | `daily_reports` | Legacy daily reports (JSON columns for materials/expenses/contractors) |
 | `project_locations` | Tree: folder \| work_site |
@@ -788,7 +779,6 @@ UI event
 | `LocationMaterialModel`, `LocationWithdrawalModel`, `LocationWithdrawalForPeriodModel` | Site warehouse |
 | `WithdrawalRequestModel` | withdrawal_requests |
 | `NotificationItemModel` | notifications |
-| `PrivateChatMessageModel` | private_chat_messages |
 | `IrMirUploadModel` | ir_mir_uploads |
 | `ActivityLogModel` | activity_logs |
 | `PendingPostponeFineActionModel`, `PostponeFineReportRowModel` | Plan postpone UI |
@@ -1102,7 +1092,7 @@ Admin-only icon: `icons_control` (when `canManageIconsControl`).
 10. Work plans + executed_plans + postpone/fines workflow  
 11. Operation reports + tracking  
 12. Withdrawal request dual approval (SEM + OM)  
-13. Notifications + private chat  
+13. Notifications  
 14. IR/MIR uploads  
 15. `operation_manager` role  
 16. Reorderable home icons + per-role visibility control  

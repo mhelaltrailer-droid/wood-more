@@ -55,7 +55,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 39,
+      version: 40,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -269,9 +269,6 @@ class DatabaseService {
     if (oldVersion < 23) {
       await _createNotificationsTable(db);
     }
-    if (oldVersion < 24) {
-      await _createPrivateChatMessagesTable(db);
-    }
     if (oldVersion < 25) {
       try {
         await db.execute(
@@ -443,6 +440,11 @@ class DatabaseService {
         } catch (_) {}
       }
     }
+    if (oldVersion < 40) {
+      try {
+        await db.execute('DROP TABLE IF EXISTS private_chat_messages');
+      } catch (_) {}
+    }
   }
 
   Future<void> _createExpenseStatementsTable(Database db) async {
@@ -571,19 +573,6 @@ class DatabaseService {
         created_at TEXT NOT NULL,
         is_read INTEGER NOT NULL DEFAULT 0,
         read_at TEXT
-      )
-    ''');
-  }
-
-  Future<void> _createPrivateChatMessagesTable(Database db) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS private_chat_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sender_email TEXT NOT NULL,
-        sender_name TEXT NOT NULL,
-        receiver_email TEXT NOT NULL,
-        body TEXT NOT NULL,
-        created_at TEXT NOT NULL
       )
     ''');
   }
