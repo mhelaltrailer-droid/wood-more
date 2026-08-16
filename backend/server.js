@@ -1270,7 +1270,22 @@ app.get('/', (req, res) => {
 
 // Support Neon / any cloud PostgreSQL: set DATABASE_URL (with ?sslmode=require).
 // Or use PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD for local/other.
-const databaseUrl = process.env.DATABASE_URL;
+function normalizeDatabaseUrl(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    u.searchParams.delete('channel_binding');
+    return u.toString();
+  } catch (_) {
+    return s
+      .replace(/([?&])channel_binding=[^&]*/gi, '$1')
+      .replace(/\?&/, '?')
+      .replace(/[?&]$/, '');
+  }
+}
+
+const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
 const pool = databaseUrl
   ? new Pool({
       connectionString: databaseUrl,
@@ -1328,7 +1343,8 @@ async function readSystemLocked() {
       await ensureSystemLockTable();
       return false;
     }
-    throw e;
+    console.warn('readSystemLocked:', e.message);
+    return false;
   }
 }
 
@@ -3338,18 +3354,22 @@ app.delete('/daily-reports/:id', async (req, res) => {
 
 // ——— Engineer balance & custody ———
 async function ensureEngineerCustodyActorColumns() {
-  await pool.query(
-    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_user_id INTEGER`,
-  );
-  await pool.query(
-    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_user_name TEXT`,
-  );
-  await pool.query(
-    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_role TEXT`,
-  );
-  await pool.query(
-    `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS document_path TEXT`,
-  );
+  try {
+    await pool.query(
+      `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_user_id INTEGER`,
+    );
+    await pool.query(
+      `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_user_name TEXT`,
+    );
+    await pool.query(
+      `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS actor_role TEXT`,
+    );
+    await pool.query(
+      `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS document_path TEXT`,
+    );
+  } catch (e) {
+    console.warn('ensureEngineerCustodyActorColumns:', e.message);
+  }
 }
 
 app.get('/engineer-balance/:userId', async (req, res) => {
@@ -6926,35 +6946,47 @@ registerExpenseStatementsRoutes(app, pool, { runNotificationSafely, notifyFileUp
 registerAttachmentRoutes(app, pool);
 registerWithdrawalFilesReportRoutes(app, pool);
 registerMeetingsRoutes(app, pool, { runNotificationSafely });
-ensurePasswordColumn()
-  .then(() => ensureSystemLockTable())
-  .then(() => ensureHomeIconsVisibilitySetting())
-  .then(() => ensureUserHomeIconOrderTable())
-  .then(() => ensureAttendanceCalendarDateColumn())
-  .then(() => ensureDetailedReportsTables())
-  .then(() => ensureLocationMaterialsTables())
-  .then(() => ensureActivityLogsTable())
-  .then(() => ensureExecutedPlansTable())
-  .then(() => ensurePostponeReasonsTable())
-  .then(() => ensureNotificationsTable())
-  .then(() => ensureShopDarwingNotificationsTable())
-  .then(() => ensureMeetingsTables(pool))
-  .then(() => ensureAppReleaseTables())
-  .then(() => ensureShopDrawingTables(pool))
-  .then(() => ensureProjectsDashboardTables(pool))
-  .then(() => ensureExpenseStatementsTable(pool))
-  .then(() => ensureEngineerCustodyActorColumns())
-  .then(() => ensureIrMirUploadsTable())
-  .then(() => ensureMsSdTables())
-  .then(() => ensureMosItpTables())
-  .then(() => ensureWithdrawalRequestsTable())
-  .then(() => ensureReportsSysTables())
-  .then(() => ensureOperationReportsTable())
-  .then(() => ensureZ1EmaarFProjectLocationsSeeded())
-  .then(() => {
-    app.listen(PORT, () => console.log(`Wood & More API listening on ${PORT}`));
-  })
-  .catch((e) => {
-    console.error('Startup failed:', e);
-    process.exit(1);
+
+async function runStartupMigrations() {
+  const steps = [
+    ensurePasswordColumn,
+    ensureSystemLockTable,
+    ensureHomeIconsVisibilitySetting,
+    ensureUserHomeIconOrderTable,
+    ensureAttendanceCalendarDateColumn,
+    ensureDetailedReportsTables,
+    ensureLocationMaterialsTables,
+    ensureActivityLogsTable,
+    ensureExecutedPlansTable,
+    ensurePostponeReasonsTable,
+    ensureNotificationsTable,
+    ensureShopDarwingNotificationsTable,
+    () => ensureMeetingsTables(pool),
+    ensureAppReleaseTables,
+    () => ensureShopDrawingTables(pool),
+    () => ensureProjectsDashboardTables(pool),
+    () => ensureExpenseStatementsTable(pool),
+    ensureEngineerCustodyActorColumns,
+    ensureIrMirUploadsTable,
+    ensureMsSdTables,
+    ensureMosItpTables,
+    ensureWithdrawalRequestsTable,
+    ensureReportsSysTables,
+    ensureOperationReportsTable,
+    ensureZ1EmaarFProjectLocationsSeeded,
+  ];
+  for (const step of steps) {
+    try {
+      await step();
+    } catch (e) {
+      console.warn('startup step failed:', e && e.message ? e.message : e);
+    }
+  }
+}
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Wood & More API listening on ${PORT}`);
+  runStartupMigrations().catch((e) => {
+    console.warn('Startup migrations failed:', e && e.message ? e.message : e);
   });
+});

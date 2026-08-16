@@ -255,7 +255,14 @@ class ApiStorageService {
       throw Exception('System Locked for maintainance please try again later');
     }
     if (r.statusCode != 200) {
-      throw Exception('تعذر الاتصال بالخادم (${r.statusCode})');
+      var detail = 'تعذر الاتصال بالخادم (${r.statusCode})';
+      try {
+        final decoded = jsonDecode(r.body);
+        if (decoded is Map && decoded['error'] != null) {
+          detail = '$detail: ${decoded['error']}';
+        }
+      } catch (_) {}
+      throw Exception(detail);
     }
     if (r.body.isEmpty) return null;
     final decoded = jsonDecode(r.body);
