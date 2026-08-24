@@ -537,12 +537,14 @@ class HomeIconBuilder {
     IconData? icon,
     Widget? iconWidget,
     required String title,
+    // ignore: unused_element_parameter
     String? subtitle,
     required Future<void> Function() onTap,
     double iconSize = 64,
     double padding = 32,
     int badgeCount = 0,
   }) {
+    // subtitle kept at call sites but intentionally not shown on home cards.
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
@@ -578,17 +580,6 @@ class HomeIconBuilder {
                   ),
                   textAlign: TextAlign.center,
                 ),
-                if (subtitle != null && subtitle.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: const Color(0xFF1B5E20).withOpacity(0.9),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
               ],
             ),
           ),
@@ -623,12 +614,14 @@ class HomeIconBuilder {
   static Widget _gradientCard({
     required IconData icon,
     required String title,
+    // ignore: unused_element_parameter
     required String subtitle,
     required Future<void> Function() onTap,
     double iconSize = 64,
     double padding = 32,
     int badgeCount = 0,
   }) {
+    // subtitle kept at call sites but intentionally not shown on home cards.
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
@@ -663,15 +656,6 @@ class HomeIconBuilder {
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: Colors.white,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.white.withOpacity(0.9),
                   ),
                   textAlign: TextAlign.center,
                 ),

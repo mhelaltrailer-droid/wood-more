@@ -444,12 +444,30 @@ class ApiStorageService {
       ..sort((a, b) => a.name.compareTo(b.name));
   }
 
-  Future<int> addProject(String name) async {
-    return _post('projects', {'name': name});
+  Future<int> addProject(String name, {String mainContractor = ''}) async {
+    return _post('projects', {
+      'name': name,
+      'main_contractor': mainContractor,
+    });
   }
 
-  Future<void> updateProject(int id, String name) async {
-    await _put('projects/$id', {'name': name});
+  Future<void> updateProject(
+    int id,
+    String name, {
+    String mainContractor = '',
+  }) async {
+    await _put('projects/$id', {
+      'name': name,
+      'main_contractor': mainContractor,
+    });
+  }
+
+  /// رقم طلب تسلسلي لأذن الصرف/التسليم (مثل 001)
+  Future<String> nextDisbursementNoteNumber() async {
+    final r = await _postReturnMap('disbursement-notes/next-number', {});
+    if (r['number'] != null) return r['number'].toString();
+    if (r['id'] != null) return r['id'].toString().padLeft(3, '0');
+    return '001';
   }
 
   Future<void> deleteProject(int id) async {

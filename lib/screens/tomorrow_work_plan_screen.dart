@@ -39,6 +39,7 @@ class TomorrowWorkPlanScreen extends StatelessWidget {
       summaryFieldLabel: 'تفاصيل خطة عمل الغد',
       summaryMaxLines: 6,
       summaryRequired: true,
+      enableNoWorkPlanOption: true,
       showAttachmentsSection: false,
       showPlannedExecutionDate: true,
       showCraftsmanAndAssistantCounts: true,

@@ -45,7 +45,8 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS projects (
   id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL
+  name TEXT NOT NULL,
+  main_contractor TEXT NOT NULL DEFAULT ''
 );
 
 -- POST /projects relies on ON CONFLICT ((lower(btrim(name)))), which needs this index.

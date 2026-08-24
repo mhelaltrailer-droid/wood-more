@@ -94,6 +94,7 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
   Future<void> _exportPdf() async {
     if (_rows.isEmpty) return;
     final dateFormat = DateFormat('yyyy/MM/dd', 'ar');
+    final rangeLabel = DateFormat('yyyy-MM-dd', 'ar');
     final fontBase = await PdfGoogleFonts.tajawalRegular();
     final fontBold = await PdfGoogleFonts.tajawalBold();
     final theme = pw.ThemeData.withFont(base: fontBase, bold: fontBold);
@@ -102,79 +103,126 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
       final logoBytes = await rootBundle.load('assets/images/logo.png');
       logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
     } catch (_) {}
-    final doc = pw.Document();
+    final doc = pw.Document(theme: theme);
     doc.addPage(
-      pw.Page(
+      pw.MultiPage(
         theme: theme,
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-        build: (ctx) => pw.Directionality(
-          textDirection: pw.TextDirection.rtl,
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              if (logoImage != null) pw.Center(child: pw.Container(height: 56, margin: const pw.EdgeInsets.only(bottom: 12), child: pw.Image(logoImage!, fit: pw.BoxFit.contain))),
-              pw.Container(
-                padding: const pw.EdgeInsets.symmetric(vertical: 12),
-                decoration: pw.BoxDecoration(color: PdfColors.green50, borderRadius: pw.BorderRadius.circular(8), border: pw.Border.all(color: PdfColors.green800)),
-                child: pw.Center(child: pw.Text('تقرير المقاول | Contractor Report', textDirection: pw.TextDirection.rtl, style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.green900))),
+        pageFormat: PdfPageFormat.a4.landscape,
+        margin: const pw.EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+        textDirection: pw.TextDirection.rtl,
+        build: (ctx) => [
+          if (logoImage != null)
+            pw.Center(
+              child: pw.Container(
+                height: 52,
+                margin: const pw.EdgeInsets.only(bottom: 10),
+                child: pw.Image(logoImage, fit: pw.BoxFit.contain),
               ),
-              pw.SizedBox(height: 8),
-              pw.Text('المقاول: $_selectedContractor', textDirection: pw.TextDirection.rtl, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-              pw.Text('من ${dateFormat.format(_dateFrom)} إلى ${dateFormat.format(_dateTo)}', textDirection: pw.TextDirection.rtl, style: const pw.TextStyle(fontSize: 10)),
-              pw.SizedBox(height: 12),
-              pw.Table(
-                border: pw.TableBorder.all(width: 0.5),
-                columnWidths: {
-                  0: const pw.FlexColumnWidth(1),
-                  1: const pw.FlexColumnWidth(1.2),
-                  2: const pw.FlexColumnWidth(1.1),
-                  3: const pw.FlexColumnWidth(1.2),
-                  4: const pw.FlexColumnWidth(1.4),
-                  5: const pw.FlexColumnWidth(0.8),
-                  6: const pw.FlexColumnWidth(0.8),
-                  7: const pw.FlexColumnWidth(0.8),
-                },
+            ),
+          pw.Container(
+            padding: const pw.EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.green50,
+              borderRadius: pw.BorderRadius.circular(8),
+              border: pw.Border.all(color: PdfColors.green800, width: 0.8),
+            ),
+            child: pw.Center(
+              child: pw.Text(
+                'تقرير المقاول | Contractor Report',
+                textDirection: pw.TextDirection.rtl,
+                style: pw.TextStyle(
+                  fontSize: 15,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.green900,
+                ),
+              ),
+            ),
+          ),
+          pw.SizedBox(height: 8),
+          pw.Text(
+            'المقاول: $_selectedContractor',
+            textDirection: pw.TextDirection.rtl,
+            style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.Text(
+            'من ${dateFormat.format(_dateFrom)} إلى ${dateFormat.format(_dateTo)}',
+            textDirection: pw.TextDirection.rtl,
+            style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey800),
+          ),
+          pw.SizedBox(height: 12),
+          pw.Table(
+            border: pw.TableBorder.all(width: 0.45, color: PdfColors.grey600),
+            columnWidths: {
+              0: const pw.FlexColumnWidth(1),
+              1: const pw.FlexColumnWidth(1.2),
+              2: const pw.FlexColumnWidth(1.1),
+              3: const pw.FlexColumnWidth(1.2),
+              4: const pw.FlexColumnWidth(1.4),
+              5: const pw.FlexColumnWidth(0.7),
+              6: const pw.FlexColumnWidth(0.7),
+              7: const pw.FlexColumnWidth(0.7),
+            },
+            children: [
+              pw.TableRow(
+                repeat: true,
+                verticalAlignment: pw.TableCellVerticalAlignment.top,
+                decoration: const pw.BoxDecoration(color: PdfColors.grey300),
                 children: [
-                  pw.TableRow(
-                    decoration: const pw.BoxDecoration(color: PdfColors.grey300),
-                    children: [
-                      _cell('التاريخ', true),
-                      _cell('المقاول', true),
-                      _cell('المهندس', true),
-                      _cell('المشروع', true),
-                      _cell('مكان العمل', true),
-                      _cell('صنايعي', true),
-                      _cell('مساعد', true),
-                      _cell('عمال', true),
-                    ],
-                  ),
-                  ..._rows.map((r) => pw.TableRow(
-                        children: [
-                          _cell(r.planDate != null ? dateFormat.format(r.planDate!) : '—', false),
-                          _cell(r.contractorName, false),
-                          _cell(r.engineerName, false),
-                          _cell(r.projectName, false),
-                          _cell(r.workPlace, false),
-                          _cell('${r.craftsmanCount}', false),
-                          _cell('${r.assistantCount}', false),
-                          _cell('${r.workersCount}', false),
-                        ],
-                      )),
+                  _cell('التاريخ', true),
+                  _cell('المقاول', true),
+                  _cell('المهندس', true),
+                  _cell('المشروع', true),
+                  _cell('مكان العمل', true),
+                  _cell('صنايعي', true),
+                  _cell('مساعد', true),
+                  _cell('عمال', true),
                 ],
+              ),
+              ..._rows.map(
+                (r) => pw.TableRow(
+                  verticalAlignment: pw.TableCellVerticalAlignment.top,
+                  children: [
+                    _cell(
+                      r.planDate != null ? dateFormat.format(r.planDate!) : '—',
+                      false,
+                    ),
+                    _cell(r.contractorName, false),
+                    _cell(r.engineerName, false),
+                    _cell(r.projectName, false),
+                    _cell(r.workPlace, false),
+                    _cell('${r.craftsmanCount}', false),
+                    _cell('${r.assistantCount}', false),
+                    _cell('${r.workersCount}', false),
+                  ],
+                ),
               ),
             ],
           ),
-        ),
+        ],
       ),
     );
     final bytes = await doc.save();
-    await Printing.sharePdf(bytes: bytes, filename: 'تقرير_المقاول_${_selectedContractor}_${dateFormat.format(_dateFrom)}.pdf');
+    await Printing.sharePdf(
+      bytes: bytes,
+      filename:
+          'تقرير_المقاول_${_selectedContractor}_${rangeLabel.format(_dateFrom)}_${rangeLabel.format(_dateTo)}.pdf',
+    );
   }
 
   pw.Widget _cell(String text, bool isHeader) => pw.Padding(
         padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-        child: pw.Text(text, textDirection: pw.TextDirection.rtl, style: pw.TextStyle(fontSize: 9, fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal, color: isHeader ? PdfColors.green900 : PdfColors.black)),
+        child: pw.Align(
+          alignment: pw.Alignment.topRight,
+          child: pw.Text(
+            text.trim().isEmpty ? '—' : text,
+            textDirection: pw.TextDirection.rtl,
+            style: pw.TextStyle(
+              fontSize: isHeader ? 8.5 : 8,
+              fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal,
+              color: isHeader ? PdfColors.green900 : PdfColors.black,
+            ),
+          ),
+        ),
       );
 
   @override

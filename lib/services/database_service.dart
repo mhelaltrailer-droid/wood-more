@@ -55,7 +55,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 40,
+      version: 41,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -77,7 +77,14 @@ class DatabaseService {
     await db.execute('''
       CREATE TABLE projects (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL
+        name TEXT NOT NULL,
+        main_contractor TEXT NOT NULL DEFAULT ''
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE disbursement_note_seq (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL
       )
     ''');
 
@@ -444,6 +451,19 @@ class DatabaseService {
       try {
         await db.execute('DROP TABLE IF EXISTS private_chat_messages');
       } catch (_) {}
+    }
+    if (oldVersion < 41) {
+      try {
+        await db.execute(
+          "ALTER TABLE projects ADD COLUMN main_contractor TEXT NOT NULL DEFAULT ''",
+        );
+      } catch (_) {}
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS disbursement_note_seq (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at TEXT NOT NULL
+        )
+      ''');
     }
   }
 
@@ -1761,7 +1781,7 @@ class DatabaseService {
   }
 
   // ——— إدارة المشاريع ———
-  Future<int> addProject(String name) async {
+  Future<int> addProject(String name, {String mainContractor = ''}) async {
     final db = await database;
     final normalized = name.trim().toLowerCase();
     final existing = await db.query(
@@ -1771,18 +1791,44 @@ class DatabaseService {
       whereArgs: [normalized],
       limit: 1,
     );
-    if (existing.isNotEmpty) return existing.first['id'] as int;
-    return db.insert('projects', {'name': name.trim()});
+    if (existing.isNotEmpty) {
+      final id = existing.first['id'] as int;
+      if (mainContractor.trim().isNotEmpty) {
+        await db.update(
+          'projects',
+          {'main_contractor': mainContractor.trim()},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
+      return id;
+    }
+    return db.insert('projects', {
+      'name': name.trim(),
+      'main_contractor': mainContractor.trim(),
+    });
   }
 
-  Future<void> updateProject(int id, String name) async {
+  Future<void> updateProject(
+    int id,
+    String name, {
+    String mainContractor = '',
+  }) async {
     final db = await database;
     await db.update(
       'projects',
-      {'name': name},
+      {'name': name, 'main_contractor': mainContractor.trim()},
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<String> nextDisbursementNoteNumber() async {
+    final db = await database;
+    final id = await db.insert('disbursement_note_seq', {
+      'created_at': DateTime.now().toIso8601String(),
+    });
+    return id.toString().padLeft(3, '0');
   }
 
   Future<void> deleteProject(int id) async {

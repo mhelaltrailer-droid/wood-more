@@ -867,8 +867,31 @@ async function notifyAppAdminsWorkPlanSaved(pool, {
   hasAttachments = false,
   reportId = null,
   attachmentCount = null,
+  noWorkPlan = false,
+  summary = null,
 }) {
   const role = await fetchUserRole(pool, userId);
+  const canNotify =
+    role === 'site_engineer' ||
+    (noWorkPlan && role === 'general_supervisor');
+  if (!canNotify) return;
+  const proj = String(projectName || '').trim() || 'غير محدد';
+  if (noWorkPlan) {
+    const reason = String(summary || '').trim() || 'بدون توضيح';
+    await notifyAppAdmins(pool, {
+      title: 'تنبيه — لا توجد خطة عمل للغد',
+      body:
+        `قام "${userName}" بعدم وجود خطة عمل للغد\n` +
+        `السبب: ${reason}\n` +
+        `المشروع: "${proj}"\n` +
+        `تاريخ الخطة: ${formatDateYmd(reportDatetime)}`,
+      eventType: 'tomorrow_work_plan_none',
+      actorUserId: userId,
+      actorUserName: userName,
+      projectName: projectName || null,
+    });
+    return;
+  }
   if (role !== 'site_engineer') return;
   const dayKind = classifyPlanDay(reportDatetime);
   let planLabel;
@@ -883,7 +906,6 @@ async function notifyAppAdminsWorkPlanSaved(pool, {
     planLabel = `خطة عمل (${formatDateYmd(reportDatetime)})`;
     eventType = isUpdate ? 'work_plan_updated' : 'work_plan_saved';
   }
-  const proj = String(projectName || '').trim() || 'غير محدد';
   const action = isUpdate ? 'عدّل' : 'حفظ';
   await notifyAppAdmins(pool, {
     title: `تنبيه — ${planLabel}`,
@@ -1986,8 +2008,16 @@ app.delete('/users/:id', async (req, res) => {
 // ——— Projects ———
 app.get('/projects', async (req, res) => {
   try {
-    const r = await pool.query('SELECT id, name FROM projects ORDER BY name');
-    res.json(r.rows.map(row => ({ id: parseInt(row.id), name: row.name })));
+    const r = await pool.query(
+      'SELECT id, name, COALESCE(main_contractor, \'\') AS main_contractor FROM projects ORDER BY name'
+    );
+    res.json(
+      r.rows.map((row) => ({
+        id: parseInt(row.id),
+        name: row.name,
+        main_contractor: row.main_contractor || '',
+      }))
+    );
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -1996,13 +2026,21 @@ app.get('/projects', async (req, res) => {
 app.post('/projects', async (req, res) => {
   try {
     const name = String(req.body?.name || '').trim();
+    const mainContractor = String(
+      req.body?.main_contractor ?? req.body?.mainContractor ?? ''
+    ).trim();
     if (!name) return res.status(400).json({ error: 'name required' });
     const r = await pool.query(
-      `INSERT INTO projects (name)
-       VALUES ($1)
-       ON CONFLICT ((lower(btrim(name)))) DO UPDATE SET name = EXCLUDED.name
+      `INSERT INTO projects (name, main_contractor)
+       VALUES ($1, $2)
+       ON CONFLICT ((lower(btrim(name)))) DO UPDATE SET
+         name = EXCLUDED.name,
+         main_contractor = CASE
+           WHEN EXCLUDED.main_contractor <> '' THEN EXCLUDED.main_contractor
+           ELSE projects.main_contractor
+         END
        RETURNING id`,
-      [name]
+      [name, mainContractor]
     );
     res.json(parseInt(r.rows[0].id));
   } catch (e) {
@@ -2012,8 +2050,30 @@ app.post('/projects', async (req, res) => {
 
 app.put('/projects/:id', async (req, res) => {
   try {
-    await pool.query('UPDATE projects SET name = $1 WHERE id = $2', [req.body.name, req.params.id]);
+    const name = String(req.body?.name || '').trim();
+    const mainContractor = String(
+      req.body?.main_contractor ?? req.body?.mainContractor ?? ''
+    ).trim();
+    if (!name) return res.status(400).json({ error: 'name required' });
+    await pool.query(
+      'UPDATE projects SET name = $1, main_contractor = $2 WHERE id = $3',
+      [name, mainContractor, req.params.id]
+    );
     res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+/** رقم طلب تسلسلي لأذن الصرف/التسليم (001, 002, …) */
+app.post('/disbursement-notes/next-number', async (req, res) => {
+  try {
+    const r = await pool.query(
+      'INSERT INTO disbursement_note_seq DEFAULT VALUES RETURNING id'
+    );
+    const n = parseInt(r.rows[0].id, 10);
+    const padded = String(n).padStart(3, '0');
+    res.json({ number: padded, id: n });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -3639,16 +3699,42 @@ app.post('/detailed-reports', async (req, res) => {
     const executedTodaySummary = parseExecutedTodaySummaryFromBody(b);
     const projectId = b.projectId != null ? parseInt(b.projectId) : null;
     const projectName = (b.projectName != null && String(b.projectName).trim() !== '') ? String(b.projectName).trim() : null;
+    const noWorkPlan = b.noWorkPlan === true || b.no_work_plan === true;
+    const reportDatetime = b.reportDatetime || now;
+    const planDay = formatDateYmd(reportDatetime);
+
+    if (noWorkPlan) {
+      if (!summary) {
+        return res.status(400).json({ error: 'no_work_plan_reason_required' });
+      }
+      if (b.userId == null) {
+        return res.status(400).json({ error: 'userId required' });
+      }
+      const existing = await pool.query(
+        `SELECT id FROM detailed_reports
+         WHERE user_id = $1
+           AND LEFT(COALESCE(report_datetime, ''), 10) = $2
+         LIMIT 1`,
+        [b.userId, planDay],
+      );
+      if (existing.rows.length > 0) {
+        return res.status(409).json({
+          error: 'already_has_plan_for_day',
+          message: 'لا يمكن تسجيل «لا توجد خطة عمل» لأن لديك خطة مسجّلة لهذا اليوم',
+        });
+      }
+    }
+
     const expensesJson = (b.expenses != null && Array.isArray(b.expenses) && b.expenses.length > 0)
       ? JSON.stringify(b.expenses) : null;
     const attachmentsJson = (b.attachments != null && Array.isArray(b.attachments) && b.attachments.length > 0)
       ? JSON.stringify(b.attachments) : null;
     const r = await pool.query(
       'INSERT INTO detailed_reports (user_id, user_name, report_datetime, project_id, project_name, supervisor_id, created_at, summary, executed_today_summary, expenses_json, attachments_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id',
-      [b.userId, b.userName, b.reportDatetime || now, projectId, projectName, b.supervisorId || null, now, summary, executedTodaySummary, expensesJson, attachmentsJson]
+      [b.userId, b.userName, reportDatetime, projectId, projectName, b.supervisorId || null, now, summary, executedTodaySummary, expensesJson, attachmentsJson]
     );
     const reportId = parseInt(r.rows[0].id);
-    const lines = Array.isArray(b.lines) ? b.lines : [];
+    const lines = noWorkPlan ? [] : (Array.isArray(b.lines) ? b.lines : []);
     for (const line of lines) {
       const locationId = line.locationId != null ? parseInt(line.locationId) : null;
       const zoneId = line.zoneId != null ? parseInt(line.zoneId) : null;
@@ -3679,11 +3765,13 @@ app.post('/detailed-reports', async (req, res) => {
       userId: b.userId,
       userName: b.userName,
       projectName: projectName,
-      reportDatetime: b.reportDatetime || now,
+      reportDatetime,
       isUpdate: false,
       hasAttachments,
       reportId,
       attachmentCount: countDetailedReportFiles(b),
+      noWorkPlan,
+      summary,
     });
     res.json(reportId);
   } catch (e) {
@@ -6955,6 +7043,109 @@ registerAttachmentRoutes(app, pool);
 registerWithdrawalFilesReportRoutes(app, pool);
 registerMeetingsRoutes(app, pool, { runNotificationSafely });
 
+async function ensureProjectsMainContractor() {
+  await pool.query(
+    `ALTER TABLE projects ADD COLUMN IF NOT EXISTS main_contractor TEXT NOT NULL DEFAULT ''`
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS disbursement_note_seq (
+      id SERIAL PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  // تعبئة Main Contractor للمشاريع الحالية حسب القائمة المعتمدة (مطابقة بالاسم بعد تطبيع بسيط)
+  const seed = [
+    ['Village Wes_CRC_ F', 'CRC DORRA'],
+    ['Village West_CRC_ F', 'CRC DORRA'],
+    ['Village West_CRC_F', 'CRC DORRA'],
+    ['Up Town Cairo _Z5 _EMAAR_W', 'Emaar Misr'],
+    ['Belle Vie _ EMAAR_W', 'Emaar Misr'],
+    ['Village West _ CRC_ W', 'CRC DORRA'],
+    ['UTC_Z5 _ CRC_ F', 'CRC DORRA'],
+    ['UTC_Z5_CRC_F', 'CRC DORRA'],
+    ['Zed east _ORASCOM _F', 'Orascom'],
+    ['Zed east_ORASCOM_F', 'Orascom'],
+    ['Belle Vie _El-Hazek _F', 'El-Hazek'],
+    ['Belle Vie_El-Hazek_F', 'El-Hazek'],
+    ['CAIRO GATE elain (02) _CRC_F', 'CRC DORRA'],
+    ['CAIRO GATE elain (02)_CRC_F', 'CRC DORRA'],
+    ['Cairo gate_ACC _W', 'ACC'],
+    ['Cairo gate_ACC_W', 'ACC'],
+    ['Z1 _ EMAAR _F', 'Emaar Misr'],
+    ['Z1_EMAAR_F', 'Emaar Misr'],
+    ['Community Center _CRC_W', 'CRC DORRA'],
+    ['Community Center_CRC_W', 'CRC DORRA'],
+    ['Terrace Zayed _CRC _W', 'CRC DORRA'],
+    ['Terrace Zayed_CRC_W', 'CRC DORRA'],
+    ['Silver Sands _REDCON _ D', 'Redcon'],
+    ['Silver Sands_REDCON_D', 'Redcon'],
+    ['CAR SHADE _W&M _W', 'W&M'],
+    ['CAR SHADE_W&M_W', 'W&M'],
+    ['OLD CITY _ORASCOM _W', 'Orascom'],
+    ['OLD CITY_ORASCOM_W', 'Orascom'],
+    ['Cairo gate-Eden _ ATRUM _ F', 'Atrum'],
+    ['Cairo gate-Eden_ATRUM_F', 'Atrum'],
+    ['AUC Campus Expansion', 'Ehaf'],
+    ['City Gate', 'CCC'],
+    ['UTC - 2 Villa- Link Enternational', 'Link Enternational'],
+    ['UTC - 2 Villa- Link International', 'Link Enternational'],
+    ['Village West _ club', 'DORRA Fit-out'],
+    ['Ramla Villas', 'Not-Found'],
+    ['Soul', 'Not-Found'],
+    ['Alam Al Roum', 'CCC'],
+    ['Alam alroum', 'CCC'],
+    ['Mivida Gardens', 'INNOVO'],
+    ['Mivida gardens', 'INNOVO'],
+  ];
+  const norm = (s) =>
+    String(s || '')
+      .toLowerCase()
+      .replace(/[_]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  // أسماء المشاريع غالباً بصيغة "(1)Name" أو "197- Name"
+  const canonicalize = (s) =>
+    norm(s)
+      .replace(/^\(\d+\)\s*/, '')
+      .replace(/^\d+\s*[-–.]?\s*/, '')
+      .trim();
+  const byCanon = new Map();
+  for (const [n, c] of seed) {
+    byCanon.set(canonicalize(n), c);
+  }
+  const resolveContractor = (projectName) => {
+    const key = canonicalize(projectName);
+    if (!key) return null;
+    if (byCanon.has(key)) return byCanon.get(key);
+    // تطابق جزئي: البذرة محتواة في اسم المشروع أو العكس
+    let best = null;
+    let bestLen = 0;
+    for (const [seedKey, c] of byCanon.entries()) {
+      if (!seedKey || seedKey.length < 4) continue;
+      if (key === seedKey || key.startsWith(seedKey) || key.includes(seedKey) || seedKey.includes(key)) {
+        if (seedKey.length > bestLen) {
+          best = c;
+          bestLen = seedKey.length;
+        }
+      }
+    }
+    return best;
+  };
+  const projects = await pool.query('SELECT id, name, main_contractor FROM projects');
+  for (const row of projects.rows) {
+    const contractor = resolveContractor(row.name);
+    if (!contractor) continue;
+    const current = String(row.main_contractor || '').trim();
+    // لا نكتب فوق قيمة أدخلها المستخدم يدوياً إن اختلفت عن البذرة
+    if (current && current !== contractor && current !== 'Not-Found') continue;
+    if (current === contractor) continue;
+    await pool.query('UPDATE projects SET main_contractor = $1 WHERE id = $2', [
+      contractor,
+      row.id,
+    ]);
+  }
+}
+
 async function runStartupMigrations() {
   const steps = [
     ensurePasswordColumn,
@@ -6982,6 +7173,7 @@ async function runStartupMigrations() {
     ensureReportsSysTables,
     ensureOperationReportsTable,
     ensureZ1EmaarFProjectLocationsSeeded,
+    ensureProjectsMainContractor,
   ];
   for (const step of steps) {
     try {

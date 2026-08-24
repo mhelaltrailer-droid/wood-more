@@ -271,6 +271,8 @@ class DetailedReportModel {
   final String? summary;
   /// ملخص ما تم تنفيذه اليوم (خطة عمل الغد).
   final String? executedTodaySummary;
+  /// إعلان «لا توجد خطة عمل» لليوم (بدون بنود مواقع/مقاولين).
+  final bool noWorkPlan;
   final List<DetailedReportLineModel> lines;
   /// بنود الماليات (اختياري، عند استخدام صفحة التقرير المفصل - الماليات)
   final List<ExpenseItem> expenses;
@@ -288,6 +290,7 @@ class DetailedReportModel {
     this.createdAt,
     this.summary,
     this.executedTodaySummary,
+    this.noWorkPlan = false,
     this.lines = const [],
     this.expenses = const [],
     this.attachments = const [],
@@ -302,6 +305,7 @@ class DetailedReportModel {
         'supervisorId': supervisorId,
         if (summary != null && summary!.trim().isNotEmpty) 'summary': summary!.trim(),
         ...executedTodaySummaryJsonEntries(),
+        if (noWorkPlan) 'noWorkPlan': true,
         'lines': lines.map((e) => e.toJson()).toList(),
         if (expenses.isNotEmpty) 'expenses': expenses.map((e) => e.toJson()).toList(),
         if (attachments.isNotEmpty) 'attachments': attachments.map((e) => e.toJson()).toList(),
@@ -366,6 +370,7 @@ class DetailedReportModel {
         m,
         attachments: attachmentModels,
       ),
+      noWorkPlan: m['noWorkPlan'] == true || m['no_work_plan'] == true,
       lines: enrichLinesWithManualWorkLocations(
         lineModels,
         attachmentModels,

@@ -98,6 +98,9 @@ class DetailedReportScreen extends StatefulWidget {
   /// عند التعديل: معرّف التقرير المحفوظ؛ يُستدعى [updateDetailedReport] بدل الإضافة.
   final int? editingReportId;
 
+  /// زر «لا توجد خطة عمل» (خطة عمل الغد) — مهندس الموقع / المشرف العام.
+  final bool enableNoWorkPlanOption;
+
   const DetailedReportScreen({
     super.key,
     required this.user,
@@ -129,6 +132,7 @@ class DetailedReportScreen extends StatefulWidget {
     this.workSavedSuccessMessage,
     this.onReadOnlyProceedToFinances,
     this.editingReportId,
+    this.enableNoWorkPlanOption = false,
   });
 
   @override
@@ -162,6 +166,8 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
   String? _finalModificationSummary;
   bool _postponedLocked = false;
   String? _postponedReasonText;
+  bool _noWorkPlanMode = false;
+  bool _checkingNoWorkPlan = false;
   final _modificationSummaryController = TextEditingController();
 
   bool _loadingStructure = false;
@@ -715,6 +721,69 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     setState(() => block.phaseSlots.removeAt(slotIndex));
   }
 
+  Future<bool> _userHasPlanForDate(DateTime day) async {
+    final from = DateTime(day.year, day.month, day.day);
+    final to = from;
+    try {
+      final list = await _db.getDetailedReports(
+        dateFrom: from,
+        dateTo: to,
+        userId: widget.user.id,
+      );
+      return list.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _toggleNoWorkPlanMode() async {
+    if (!widget.enableNoWorkPlanOption || _isReadOnlyNow) return;
+    if (_noWorkPlanMode) {
+      setState(() {
+        _noWorkPlanMode = false;
+        _summaryController.clear();
+      });
+      return;
+    }
+    final planDay = widget.showPlannedExecutionDate && _plannedExecutionDate != null
+        ? DateTime(
+            _plannedExecutionDate!.year,
+            _plannedExecutionDate!.month,
+            _plannedExecutionDate!.day,
+          )
+        : (widget.plannedExecutionDefaultDate != null
+            ? DateTime(
+                widget.plannedExecutionDefaultDate!.year,
+                widget.plannedExecutionDefaultDate!.month,
+                widget.plannedExecutionDefaultDate!.day,
+              )
+            : DateTime.now().add(const Duration(days: 1)));
+    setState(() => _checkingNoWorkPlan = true);
+    final hasPlan = await _userHasPlanForDate(planDay);
+    if (!mounted) return;
+    setState(() => _checkingNoWorkPlan = false);
+    if (hasPlan) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'لا يمكن اختيار «لا توجد خطة عمل» لأن لديك خطة مسجّلة لهذا اليوم',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _noWorkPlanMode = true;
+      _summaryController.clear();
+      _workSiteRows = [
+        WorkSiteBlockRow(
+          showCraftsmanAndAssistantCounts: widget.showCraftsmanAndAssistantCounts,
+        ),
+      ];
+    });
+  }
+
   DetailedReportModel? _buildReportForNext() {
     if (!_formKey.currentState!.validate()) return null;
     if (widget.showPlannedExecutionDate && _plannedExecutionDate == null) {
@@ -742,77 +811,94 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
         return null;
       }
     }
+
     final lines = <DetailedReportLineModel>[];
-    for (final block in _workSiteRows) {
-      if (!_isOtherProject) {
-        if (!_rowPlaceOk(block)) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                _useManualWorkLocation
-                    ? 'اكتب «مكان / موقع العمل» لكل موقع عمل تُدخل له مراحل'
-                    : (_projectLocs.isNotEmpty
-                          ? (_projectHasWorkSites
-                                ? 'أكمل اختيار الموقع الفرعي حتى «موقع العمل» لكل موقع عمل تُدخل له مراحل'
-                                : 'اختر الموقع الفرعي من الهيكلة لكل موقع عمل')
-                          : 'اختر المنطقة (زون) والمبنى لكل موقع عمل تُدخل له مراحل'),
+    if (!_noWorkPlanMode) {
+      for (final block in _workSiteRows) {
+        if (!_isOtherProject) {
+          if (!_rowPlaceOk(block)) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  _useManualWorkLocation
+                      ? 'اكتب «مكان / موقع العمل» لكل موقع عمل تُدخل له مراحل'
+                      : (_projectLocs.isNotEmpty
+                            ? (_projectHasWorkSites
+                                  ? 'أكمل اختيار الموقع الفرعي حتى «موقع العمل» لكل موقع عمل تُدخل له مراحل'
+                                  : 'اختر الموقع الفرعي من الهيكلة لكل موقع عمل')
+                            : 'اختر المنطقة (زون) والمبنى لكل موقع عمل تُدخل له مراحل'),
+                ),
+                backgroundColor: Colors.orange,
               ),
+            );
+            return null;
+          }
+        }
+        var addedAnyPhase = false;
+        final baseWorkers = block.phaseSlots.isNotEmpty
+            ? block.phaseSlots.first.workersCount
+            : 0;
+        for (final slot in block.phaseSlots) {
+          if (slot.phaseId == null) continue;
+          lines.add(
+            DetailedReportLineModel(
+              contractorId: block.contractorId,
+              zoneId: _isOtherProject || _projectLocs.isNotEmpty
+                  ? null
+                  : block.zoneId,
+              buildingId: _isOtherProject || _projectLocs.isNotEmpty
+                  ? null
+                  : block.buildingId,
+              locationId: _isOtherProject || _projectLocs.isEmpty
+                  ? null
+                  : block.locationId,
+              manualWorkLocation: _useManualWorkLocation &&
+                      block.manualWorkLocation.trim().isNotEmpty
+                  ? block.manualWorkLocation.trim()
+                  : null,
+              phaseId: slot.phaseId!,
+              contractorWorkersCount: widget.showCraftsmanAndAssistantCounts
+                  ? slot.craftsmanCount
+                  : 0,
+              selfWorkersCount: widget.showCraftsmanAndAssistantCounts
+                  ? slot.assistantCount
+                  : 0,
+              workersCount: baseWorkers,
+            ),
+          );
+          addedAnyPhase = true;
+        }
+        if (!_isOtherProject && _rowPlaceOk(block) && !addedAnyPhase) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('أضف مرحلة واحدة على الأقل لكل موقع عمل مكتمل'),
               backgroundColor: Colors.orange,
             ),
           );
           return null;
         }
       }
-      var addedAnyPhase = false;
-      final baseWorkers = block.phaseSlots.isNotEmpty
-          ? block.phaseSlots.first.workersCount
-          : 0;
-      for (final slot in block.phaseSlots) {
-        if (slot.phaseId == null) continue;
-        lines.add(
-          DetailedReportLineModel(
-            contractorId: block.contractorId,
-            zoneId: _isOtherProject || _projectLocs.isNotEmpty
-                ? null
-                : block.zoneId,
-            buildingId: _isOtherProject || _projectLocs.isNotEmpty
-                ? null
-                : block.buildingId,
-            locationId: _isOtherProject || _projectLocs.isEmpty
-                ? null
-                : block.locationId,
-            manualWorkLocation: _useManualWorkLocation &&
-                    block.manualWorkLocation.trim().isNotEmpty
-                ? block.manualWorkLocation.trim()
-                : null,
-            phaseId: slot.phaseId!,
-            contractorWorkersCount: widget.showCraftsmanAndAssistantCounts
-                ? slot.craftsmanCount
-                : 0,
-            selfWorkersCount: widget.showCraftsmanAndAssistantCounts
-                ? slot.assistantCount
-                : 0,
-            workersCount: baseWorkers,
-          ),
-        );
-        addedAnyPhase = true;
-      }
-      if (!_isOtherProject && _rowPlaceOk(block) && !addedAnyPhase) {
+      if (lines.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('أضف مرحلة واحدة على الأقل لكل موقع عمل مكتمل'),
-            backgroundColor: Colors.orange,
-          ),
+          const SnackBar(content: Text('أضف على الأقل مرحلة واحدة')),
         );
         return null;
       }
     }
-    if (lines.isEmpty) {
+
+    final reasonText = _summaryController.text.trim();
+    if (_noWorkPlanMode && reasonText.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('أضف على الأقل مرحلة واحدة')),
+        const SnackBar(content: Text('اكتب سبب عدم وجود خطة عمل')),
       );
       return null;
     }
+    final summaryForSave = _noWorkPlanMode
+        ? (reasonText.startsWith('لا توجد خطة عمل')
+            ? reasonText
+            : 'لا توجد خطة عمل: $reasonText')
+        : (widget.showSummaryField && reasonText.isNotEmpty ? reasonText : null);
+
     final ownerId =
         widget.editingReportId != null && widget.initialReport != null
         ? widget.initialReport!.userId
@@ -852,14 +938,12 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
           : _selectedProject!.name,
       supervisorId: _selectedSupervisor?.id,
       createdAt: widget.initialReport?.createdAt,
-      summary:
-          widget.showSummaryField && _summaryController.text.trim().isNotEmpty
-          ? _summaryController.text.trim()
-          : null,
+      summary: summaryForSave,
       executedTodaySummary: widget.showExecutedTodaySummaryField &&
               _executedTodaySummaryController.text.trim().isNotEmpty
           ? _executedTodaySummaryController.text.trim()
           : null,
+      noWorkPlan: _noWorkPlanMode,
       lines: lines,
       expenses: exp,
       attachments: att,
@@ -880,6 +964,26 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
   Future<void> _saveWorkWithoutFinances() async {
     final report = _buildReportForNext();
     if (report == null || !mounted) return;
+    if (_noWorkPlanMode) {
+      final day = DateTime(
+        report.reportDatetime.year,
+        report.reportDatetime.month,
+        report.reportDatetime.day,
+      );
+      final hasPlan = await _userHasPlanForDate(day);
+      if (!mounted) return;
+      if (hasPlan) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'لا يمكن التسجيل: لديك خطة مسجّلة لهذا اليوم',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+    }
     setState(() => _persistingWorkOnly = true);
     try {
       if (widget.editingReportId != null) {
@@ -891,8 +995,10 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            widget.workSavedSuccessMessage ??
-                'تم حفظ التقرير. يمكنك إدخال الماليات من أيقونة الماليات عند الحاجة',
+            _noWorkPlanMode
+                ? 'تم تسجيل عدم وجود خطة عمل للغد'
+                : (widget.workSavedSuccessMessage ??
+                    'تم حفظ التقرير. يمكنك إدخال الماليات من أيقونة الماليات عند الحاجة'),
           ),
           backgroundColor: Colors.green,
         ),
@@ -2074,11 +2180,53 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
           child: ListView(
             padding: const EdgeInsets.all(20),
             children: [
-              _readOnlyRow(
-                'اسم المهندس',
-                widget.initialReport != null
-                    ? widget.initialReport!.userName
-                    : widget.user.name,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: _readOnlyRow(
+                      'اسم المهندس',
+                      widget.initialReport != null
+                          ? widget.initialReport!.userName
+                          : widget.user.name,
+                    ),
+                  ),
+                  if (widget.enableNoWorkPlanOption &&
+                      !_isReadOnlyNow &&
+                      widget.editingReportId == null) ...[
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: _checkingNoWorkPlan
+                          ? null
+                          : _toggleNoWorkPlanMode,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _noWorkPlanMode
+                            ? Colors.white
+                            : const Color(0xFF1B5E20),
+                        backgroundColor: _noWorkPlanMode
+                            ? const Color(0xFF1B5E20)
+                            : null,
+                        side: const BorderSide(color: Color(0xFF1B5E20)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                      child: _checkingNoWorkPlan
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(
+                              _noWorkPlanMode
+                                  ? 'إلغاء'
+                                  : 'لا توجد خطة عمل',
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                    ),
+                  ],
+                ],
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<ProjectModel>(
@@ -2195,8 +2343,9 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                 ),
               ],
               const SizedBox(height: 24),
-              if (_selectedProject != null ||
-                  (widget.readOnly && widget.initialReport != null)) ...[
+              if (!_noWorkPlanMode &&
+                  (_selectedProject != null ||
+                      (widget.readOnly && widget.initialReport != null))) ...[
                 const Text(
                   'توزيع العمال حسب الموقع والمرحلة',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
@@ -2211,6 +2360,21 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                     icon: const Icon(Icons.add),
                     label: const Text('إضافة موقع عمل آخر'),
                   ),
+              ],
+              if (_noWorkPlanMode) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: const Text(
+                    'تم اختيار «لا توجد خطة عمل» — بنود المواقع/المقاولين/العمال ستظهر كـ (—) في تقارير المتابعة.',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
               ],
               if (_lockProjectAndDate &&
                   _selectedProject == null &&
@@ -2281,26 +2445,38 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                 ),
                 const SizedBox(height: 20),
               ],
-              if (widget.showSummaryField) ...[
-                TextFormField(
-                  controller: _summaryController,
-                  maxLines: widget.summaryMaxLines,
-                  readOnly: _isReadOnlyNow,
-                  decoration: InputDecoration(
-                    labelText: widget.summaryRequired && !_isReadOnlyNow
-                        ? '${widget.summaryFieldLabel} *'
-                        : widget.summaryFieldLabel,
-                    border: const OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                  ),
-                  validator: widget.summaryRequired && !_isReadOnlyNow
-                      ? (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'حقل «${widget.summaryFieldLabel}» إلزامي';
-                          }
-                          return null;
-                        }
-                      : null,
+              if (widget.showSummaryField || _noWorkPlanMode) ...[
+                Builder(
+                  builder: (context) {
+                    final label = _noWorkPlanMode
+                        ? 'سبب عدم وجود خطة عمل'
+                        : widget.summaryFieldLabel;
+                    final requiredField = _noWorkPlanMode ||
+                        (widget.summaryRequired && !_isReadOnlyNow);
+                    return TextFormField(
+                      controller: _summaryController,
+                      maxLines: _noWorkPlanMode ? 5 : widget.summaryMaxLines,
+                      readOnly: _isReadOnlyNow,
+                      decoration: InputDecoration(
+                        labelText: requiredField ? '$label *' : label,
+                        border: const OutlineInputBorder(),
+                        alignLabelWithHint: true,
+                        hintText: _noWorkPlanMode
+                            ? 'اكتب سبب عدم وجود خطة عمل للغد'
+                            : null,
+                      ),
+                      validator: requiredField
+                          ? (v) {
+                              if (v == null || v.trim().isEmpty) {
+                                return _noWorkPlanMode
+                                    ? 'سبب عدم وجود خطة عمل إلزامي'
+                                    : 'حقل «${widget.summaryFieldLabel}» إلزامي';
+                              }
+                              return null;
+                            }
+                          : null,
+                    );
+                  },
                 ),
                 const SizedBox(height: 20),
               ],

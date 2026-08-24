@@ -35,25 +35,72 @@ class _AdminProjectsScreenState extends State<AdminProjectsScreen> {
 
   Future<void> _showForm([ProjectModel? item]) async {
     final nameC = TextEditingController(text: item?.name ?? '');
+    final contractorC =
+        TextEditingController(text: item?.mainContractor ?? '');
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(item == null ? 'إضافة مشروع' : 'تعديل مشروع'),
-        content: TextField(controller: nameC, decoration: const InputDecoration(labelText: 'اسم المشروع'), textDirection: TextDirection.ltr),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameC,
+                decoration: const InputDecoration(labelText: 'اسم المشروع'),
+                textDirection: TextDirection.ltr,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: contractorC,
+                decoration: const InputDecoration(
+                  labelText: 'Main Contractor',
+                  hintText: 'اسم المقاول الرئيسي',
+                ),
+                textDirection: TextDirection.ltr,
+              ),
+            ],
+          ),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
           FilledButton(
             onPressed: () async {
               final name = nameC.text.trim();
+              final contractor = contractorC.text.trim();
               if (name.isEmpty) return;
               Navigator.pop(ctx);
               try {
-                if (item == null) await _db.addProject(name);
-                else await _db.updateProject(item.id, name);
+                if (item == null) {
+                  await _db.addProject(name, mainContractor: contractor);
+                } else {
+                  await _db.updateProject(
+                    item.id,
+                    name,
+                    mainContractor: contractor,
+                  );
+                }
                 _load();
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحفظ'), backgroundColor: Colors.green));
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('تم الحفظ'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
               } catch (e) {
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('خطأ: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               }
             },
             child: const Text('حفظ'),
@@ -64,39 +111,95 @@ class _AdminProjectsScreenState extends State<AdminProjectsScreen> {
   }
 
   Future<void> _delete(ProjectModel p) async {
-    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: const Text('تأكيد'), content: Text('حذف "${p.name}"؟ سيتم حذف المناطق التابعة أيضاً.'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حذف'))]));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تأكيد'),
+        content: Text('حذف "${p.name}"؟ سيتم حذف المناطق التابعة أيضاً.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
     if (ok != true || !mounted) return;
     try {
       await _db.deleteProject(p.id);
       _load();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم الحذف'), backgroundColor: Colors.green));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم الحذف'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('إدارة المشاريع'), backgroundColor: const Color(0xFF1B5E20), foregroundColor: Colors.white),
-      body: _loading ? const Center(child: CircularProgressIndicator()) : ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _list.length,
-        itemBuilder: (context, i) {
-          final p = _list[i];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              title: Text(p.name),
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(icon: const Icon(Icons.edit), onPressed: () => _showForm(p)),
-                IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _delete(p)),
-              ]),
-            ),
-          );
-        },
+      appBar: AppBar(
+        title: const Text('إدارة المشاريع'),
+        backgroundColor: const Color(0xFF1B5E20),
+        foregroundColor: Colors.white,
       ),
-      floatingActionButton: FloatingActionButton(onPressed: () => _showForm(), child: const Icon(Icons.add), backgroundColor: const Color(0xFF1B5E20)),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _list.length,
+              itemBuilder: (context, i) {
+                final p = _list[i];
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    title: Text(p.name),
+                    subtitle: p.mainContractor.trim().isEmpty
+                        ? const Text(
+                            'Main Contractor: —',
+                            style: TextStyle(fontSize: 12),
+                          )
+                        : Text(
+                            'Main Contractor: ${p.mainContractor}',
+                            style: const TextStyle(fontSize: 12),
+                            textDirection: TextDirection.ltr,
+                          ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () => _showForm(p),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () => _delete(p),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showForm(),
+        backgroundColor: const Color(0xFF1B5E20),
+        child: const Icon(Icons.add),
+      ),
     );
   }
 }

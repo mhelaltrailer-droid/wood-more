@@ -1185,7 +1185,7 @@ class WebStorageService {
     await prefs.setString(_usersKey, jsonEncode(list));
   }
 
-  Future<int> addProject(String name) async {
+  Future<int> addProject(String name, {String mainContractor = ''}) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectsKey)!) as List;
@@ -1193,29 +1193,58 @@ class WebStorageService {
     for (final row in list) {
       final map = Map<String, dynamic>.from(row as Map);
       final existing = (map['name']?.toString() ?? '').trim().toLowerCase();
-      if (existing == normalized) return map['id'] as int;
+      if (existing == normalized) {
+        if (mainContractor.trim().isNotEmpty) {
+          map['main_contractor'] = mainContractor.trim();
+          final idx = list.indexOf(row);
+          if (idx >= 0) list[idx] = map;
+          await prefs.setString(_projectsKey, jsonEncode(list));
+        }
+        return map['id'] as int;
+      }
     }
     final nextId = list.isEmpty
         ? 1
         : (list.map((e) => e['id'] as int).reduce((a, b) => a > b ? a : b) + 1);
-    list.add({'id': nextId, 'name': name.trim()});
+    list.add({
+      'id': nextId,
+      'name': name.trim(),
+      'main_contractor': mainContractor.trim(),
+    });
     list.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
     await prefs.setString(_projectsKey, jsonEncode(list));
     return nextId;
   }
 
-  Future<void> updateProject(int id, String name) async {
+  Future<void> updateProject(
+    int id,
+    String name, {
+    String mainContractor = '',
+  }) async {
     await _initData();
     final prefs = await _prefs;
     final list = jsonDecode(prefs.getString(_projectsKey)!) as List;
     for (var i = 0; i < list.length; i++) {
       if ((list[i] as Map)['id'] == id) {
-        list[i] = {'id': id, 'name': name};
+        list[i] = {
+          'id': id,
+          'name': name,
+          'main_contractor': mainContractor.trim(),
+        };
         break;
       }
     }
     list.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
     await prefs.setString(_projectsKey, jsonEncode(list));
+  }
+
+  Future<String> nextDisbursementNoteNumber() async {
+    await _initData();
+    final prefs = await _prefs;
+    const key = 'disbursement_note_seq';
+    final next = (prefs.getInt(key) ?? 0) + 1;
+    await prefs.setInt(key, next);
+    return next.toString().padLeft(3, '0');
   }
 
   Future<void> deleteProject(int id) async {

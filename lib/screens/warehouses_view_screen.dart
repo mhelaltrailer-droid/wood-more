@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 
 import '../models/location_material_model.dart';
 import '../models/location_withdrawal_model.dart';
@@ -11,6 +13,7 @@ import '../models/user_model.dart';
 import '../services/project_warehouse_loading.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
+import '../utils/disbursement_note_pdf.dart';
 import 'home_screen.dart';
 
 /// المخازن — عرض خامات مواقع العمل ومرفقات أذن الصرف/التسليم بعد السحب (بدون إمكانية السحب).
@@ -131,6 +134,21 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
     return path.join(' / ');
   }
 
+  /// رقم الفيلا في PDF: المسار الكامل بشرطة مائلة (مثل T01-101/B3-1)
+  String _villaNumberForPdf(ProjectLocationModel loc) {
+    final path = <String>[loc.name];
+    var current = loc;
+    while (current.parentId != null) {
+      final parents =
+          _allLocations.where((e) => e.id == current.parentId).toList();
+      if (parents.isEmpty) break;
+      final parent = parents.first;
+      path.insert(0, parent.name);
+      current = parent;
+    }
+    return path.join('/');
+  }
+
   List<String> _parseImageJson(String? jsonStr) {
     if (jsonStr == null || jsonStr.trim().isEmpty) return [];
     try {
@@ -151,37 +169,156 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
     }
   }
 
-  void _showMaterialsDialog(String title, List<LocationMaterialModel> materials) {
+  void _showMaterialsDialog({
+    required String title,
+    required String phaseLabel,
+    required String villaName,
+    required List<LocationMaterialModel> materials,
+  }) {
+    DateTime exportDate = DateTime.now();
+    var exporting = false;
+
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: materials.isEmpty
-              ? const Text('لا توجد خامات')
-              : ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: materials.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final m = materials[i];
-                    return ListTile(
-                      dense: true,
-                      title: Text(m.materialName),
-                      trailing: Text('${m.quantity} ${m.unit}'),
-                    );
-                  },
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return AlertDialog(
+              title: Text(title),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'المرحلة: $phaseLabel',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade700,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 320),
+                      child: materials.isEmpty
+                          ? const Text('لا توجد خامات')
+                          : ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: materials.length,
+                              separatorBuilder: (_, _) =>
+                                  const Divider(height: 1),
+                              itemBuilder: (_, i) {
+                                final m = materials[i];
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(m.materialName),
+                                  trailing: Text('${m.quantity} ${m.unit}'),
+                                );
+                              },
+                            ),
+                    ),
+                    const SizedBox(height: 12),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('تاريخ التصدير'),
+                      subtitle: Text(
+                        DateFormat('yyyy/MM/dd').format(exportDate),
+                      ),
+                      trailing: const Icon(Icons.calendar_today),
+                      onTap: exporting
+                          ? null
+                          : () async {
+                              final picked = await showDatePicker(
+                                context: ctx,
+                                initialDate: exportDate,
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime(2100),
+                              );
+                              if (picked != null) {
+                                setLocal(() => exportDate = picked);
+                              }
+                            },
+                    ),
+                  ],
                 ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('إغلاق'),
-          ),
-        ],
-      ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: exporting ? null : () => Navigator.pop(ctx),
+                  child: const Text('إغلاق'),
+                ),
+                FilledButton.icon(
+                  onPressed: materials.isEmpty || exporting
+                      ? null
+                      : () async {
+                          setLocal(() => exporting = true);
+                          try {
+                            await _exportMaterialsPdf(
+                              materials: materials,
+                              villaName: villaName,
+                              phaseLabel: phaseLabel,
+                              date: exportDate,
+                            );
+                            if (ctx.mounted) Navigator.pop(ctx);
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('تعذر تصدير PDF: $e'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          } finally {
+                            if (ctx.mounted) {
+                              setLocal(() => exporting = false);
+                            }
+                          }
+                        },
+                  icon: exporting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.picture_as_pdf),
+                  label: Text(exporting ? 'جاري التصدير…' : 'تصدير PDF'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF1B5E20),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
+  }
+
+  Future<void> _exportMaterialsPdf({
+    required List<LocationMaterialModel> materials,
+    required String villaName,
+    required String phaseLabel,
+    required DateTime date,
+  }) async {
+    final project = _selectedProject;
+    if (project == null) return;
+    final requestNumber =
+        await _db.nextDisbursementNoteNumber() as String;
+    final bytes = await buildDisbursementNotePdf(
+      requestNumber: requestNumber,
+      villaNumber: villaName,
+      projectName: project.name,
+      contractorName: project.mainContractor,
+      date: date,
+      lines: materials.map(DisbursementNoteLine.fromMaterial).toList(),
+    );
+    final safeVilla = villaName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final filename =
+        'اذن_صرف_${safeVilla}_${phaseLabel}_${DateFormat('yyyyMMdd').format(date)}.pdf';
+    await Printing.sharePdf(bytes: bytes, filename: filename);
   }
 
   void _showPermitImagesDialog(String title, List<String> dataUrls) {
@@ -255,6 +392,7 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
     required List<LocationMaterialModel> materials,
     required LocationWithdrawalModel? withdrawal,
     required String locationPath,
+    required String villaName,
   }) {
     final disUrls = withdrawal != null
         ? _parseImageJson(withdrawal.disbursementPermitImagesJson)
@@ -309,8 +447,10 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
                 onPressed: materials.isEmpty
                     ? null
                     : () => _showMaterialsDialog(
-                          '$label — $locationPath',
-                          materials,
+                          title: '$label — $locationPath',
+                          phaseLabel: label,
+                          villaName: villaName,
+                          materials: materials,
                         ),
                 icon: const Icon(Icons.list_alt, size: 18),
                 label: const Text('عرض الخامات'),
@@ -484,6 +624,7 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
                         materials: firstMats,
                         withdrawal: firstW,
                         locationPath: path,
+                        villaName: _villaNumberForPdf(loc),
                       ),
                       const SizedBox(height: 8),
                       _phaseViewBlock(
@@ -491,6 +632,7 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
                         materials: secondMats,
                         withdrawal: secondW,
                         locationPath: path,
+                        villaName: _villaNumberForPdf(loc),
                       ),
                     ],
                   ),
