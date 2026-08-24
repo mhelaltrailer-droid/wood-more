@@ -63,7 +63,7 @@ void main() {
 
     test('ApiStorageService.validateLogin succeeds with known test account', () async {
       final storage = ApiStorageService(_productionApiBase);
-      final user = await storage.validateLogin('Tester', '0000');
+      final user = await storage.validateLogin('tester', '0000');
       expect(user, isNotNull);
       expect(user!.email.toLowerCase(), 'tester');
       expect(user.role, 'site_engineer');

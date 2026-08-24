@@ -1071,22 +1071,16 @@ class DatabaseService {
     return UserModel.fromMap(maps.first);
   }
 
-  /// التحقق من تسجيل الدخول (بريد أو اسم + كلمة سر)، كلمة السر الافتراضية المؤقتة: 0000
+  /// التحقق من تسجيل الدخول (بريد + كلمة سر)، كلمة السر الافتراضية المؤقتة: 0000
   Future<UserModel?> validateLogin(String email, String password) async {
     final db = await database;
     final emailNorm = email.trim().toLowerCase();
     final pwdNorm = password.trim();
-    var maps = await db.rawQuery(
+    final maps = await db.rawQuery(
       'SELECT * FROM users WHERE LOWER(TRIM(email)) = ?',
       [emailNorm],
     );
-    if (maps.isEmpty) {
-      maps = await db.rawQuery(
-        'SELECT * FROM users WHERE LOWER(TRIM(name)) = ?',
-        [emailNorm],
-      );
-      if (maps.length != 1) return null;
-    }
+    if (maps.isEmpty) return null;
     final row = maps.first;
     final stored = (row['password']?.toString() ?? '0000').trim();
     if (stored.isEmpty) return null;

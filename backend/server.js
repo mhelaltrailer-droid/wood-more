@@ -1381,9 +1381,7 @@ async function findUserForLogin(identifier) {
   const sql =
     "SELECT id, name, email, role, COALESCE(password, '0000') AS password FROM users";
   const byEmail = await pool.query(`${sql} WHERE LOWER(TRIM(email)) = $1`, [id]);
-  if (byEmail.rows.length === 1) return byEmail.rows[0];
-  const byName = await pool.query(`${sql} WHERE LOWER(TRIM(name)) = $1`, [id]);
-  if (byName.rows.length === 1) return byName.rows[0];
+  if (byEmail.rows.length >= 1) return byEmail.rows[0];
   return null;
 }
 
@@ -1712,7 +1710,7 @@ async function ensureLocationMaterialsTables() {
   }
 }
 
-// ——— Auth (email or unique name + password) ———
+// ——— Auth (email + password only) ———
 app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};

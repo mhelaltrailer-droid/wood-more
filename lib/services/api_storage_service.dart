@@ -242,7 +242,7 @@ class ApiStorageService {
     return UserModel.fromMap(m);
   }
 
-  /// التحقق من تسجيل الدخول (بريد أو اسم + كلمة سر) عبر API
+  /// التحقق من تسجيل الدخول (بريد + كلمة سر) عبر API
   Future<UserModel?> validateLogin(String email, String password) async {
     final uri = Uri.parse(_path('auth/login'));
     final r = await http.post(
