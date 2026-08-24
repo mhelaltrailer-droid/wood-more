@@ -165,6 +165,7 @@ class IconVisibilityService {
       ..._projectManagerHomeIcons,
       HomeIconItem(id: 'weekly_report', label: 'التقرير الاسبوعي'),
       managerCustodyExpensesIcon,
+      HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
       meetingsIcon,
     ],
     roleGeneralSupervisor: [
