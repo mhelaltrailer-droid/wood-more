@@ -20,6 +20,12 @@ function esIsApproverEmail(email) {
   return esNormEmail(email) === EXPENSE_APPROVER_EMAIL;
 }
 
+function esIsApproverUser(user) {
+  if (!user) return false;
+  if (esIsApproverEmail(user.email)) return true;
+  return String(user.role || '').trim() === 'projects_manager';
+}
+
 function esIsPrimaryAdminEmail(email) {
   return esNormEmail(email) === PRIMARY_ADMIN_EMAIL;
 }
@@ -78,10 +84,18 @@ async function esNotifyUser(pool, userId, fields) {
 }
 
 async function esNotifyApprover(pool, fields) {
-  const r = await pool.query(
+  let r = await pool.query(
     'SELECT id, role FROM users WHERE LOWER(TRIM(email)) = $1 LIMIT 1',
     [EXPENSE_APPROVER_EMAIL],
   );
+  if (!r.rows.length) {
+    r = await pool.query(
+      `SELECT id, role FROM users
+       WHERE role = 'projects_manager'
+       ORDER BY id ASC
+       LIMIT 1`,
+    );
+  }
   if (!r.rows.length) return;
   const row = r.rows[0];
   await pool.query(
@@ -367,7 +381,7 @@ function registerExpenseStatementsRoutes(
       if (!actor.rows.length) {
         return res.status(404).json({ error: 'user not found' });
       }
-      if (!esIsApproverEmail(actor.rows[0].email)) {
+      if (!esIsApproverUser(actor.rows[0])) {
         return res.status(403).json({ error: 'غير مصرح بالاعتماد أو الرفض' });
       }
 

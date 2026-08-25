@@ -156,8 +156,9 @@ class UserModel {
   bool get canManageSiteEngineerExpensesReport =>
       isAdmin && email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
 
-  /// اعتماد/رفض بيانات صرف مهندسي المواقع — البريد المحدد فقط.
+  /// اعتماد/رفض بيانات صرف مهندسي المواقع — البريد المعتمد أو Projects Manager.
   bool get canApproveExpenseStatements =>
+      isProjectsManager ||
       email.trim().toLowerCase() == ExpenseStatementModel.approverEmail;
 
   /// الاطلاع على بيانات الصرف المعتمدة/المرفوضة (مدير العمليات + المسؤول الأساسي).

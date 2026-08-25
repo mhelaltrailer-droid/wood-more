@@ -4351,8 +4351,8 @@ class DatabaseService {
     if (!autoApprove) {
       final approvers = await db.query(
         'users',
-        where: 'LOWER(TRIM(email)) = ?',
-        whereArgs: [ExpenseStatementModel.approverEmail],
+        where: 'LOWER(TRIM(email)) = ? OR role = ?',
+        whereArgs: [ExpenseStatementModel.approverEmail, 'projects_manager'],
       );
       if (approvers.isNotEmpty) {
         final a = approvers.first;
@@ -4407,7 +4407,9 @@ class DatabaseService {
     if (actors.isEmpty) throw Exception('user not found');
     final actor = actors.first;
     final email = (actor['email'] ?? '').toString().trim().toLowerCase();
-    if (email != ExpenseStatementModel.approverEmail) {
+    final role = (actor['role'] ?? '').toString().trim();
+    if (email != ExpenseStatementModel.approverEmail &&
+        role != 'projects_manager') {
       throw Exception('غير مصرح بالاعتماد أو الرفض');
     }
     final rows = await db.query(
