@@ -7172,6 +7172,77 @@ async function ensureProjectsManagerRole() {
   );
 }
 
+/**
+ * حذف الحساب المكرر ID=683 مع الإبقاء على ID=12 دون تعديل بيانات 12.
+ */
+async function ensureRemoveDuplicateUser683() {
+  const client = await pool.connect();
+  try {
+    const dup = await client.query(
+      `SELECT id, email, name, role FROM users WHERE id = 683 LIMIT 1`,
+    );
+    if (dup.rows.length === 0) return;
+
+    const keep = await client.query(`SELECT id FROM users WHERE id = 12 LIMIT 1`);
+    if (keep.rows.length === 0) {
+      console.warn('ensureRemoveDuplicateUser683: user 12 missing — skip deleting 683');
+      return;
+    }
+
+    const id = 683;
+    await client.query('BEGIN');
+
+    // إعادة إسناد السجلات التاريخية إلى 12 بدل فقدانها، ثم تنظيف الارتباطات
+    const reassignTo12 = [
+      `UPDATE shop_drawings SET created_by_user_id = 12 WHERE created_by_user_id = $1`,
+      `UPDATE shop_drawings SET current_assignee_user_id = 12 WHERE current_assignee_user_id = $1`,
+      `UPDATE reports_sys SET created_by_user_id = 12 WHERE created_by_user_id = $1`,
+      `UPDATE reports_sys SET current_assignee_user_id = 12 WHERE current_assignee_user_id = $1`,
+      `UPDATE reports_sys_actions SET actor_user_id = 12 WHERE actor_user_id = $1`,
+      `UPDATE reports_sys_actions SET from_user_id = 12 WHERE from_user_id = $1`,
+      `UPDATE reports_sys_actions SET to_user_id = 12 WHERE to_user_id = $1`,
+      `UPDATE expense_statements SET submitter_user_id = 12 WHERE submitter_user_id = $1`,
+      `UPDATE expense_statements SET balance_user_id = 12 WHERE balance_user_id = $1`,
+      `UPDATE expense_statements SET responded_by_user_id = 12 WHERE responded_by_user_id = $1`,
+      `UPDATE meetings SET created_by_user_id = 12 WHERE created_by_user_id = $1`,
+      `UPDATE meeting_files SET uploaded_by_user_id = 12 WHERE uploaded_by_user_id = $1`,
+      `UPDATE notifications SET actor_user_id = 12 WHERE actor_user_id = $1`,
+      `UPDATE engineer_custody SET actor_user_id = 12 WHERE actor_user_id = $1`,
+    ];
+    for (const sql of reassignTo12) {
+      try {
+        await client.query(sql, [id]);
+      } catch (_) {}
+    }
+
+    await deleteUserAndDependencies(client, id);
+
+    const extraDeletes = [
+      `DELETE FROM shop_darwing_notifications WHERE recipient_user_id = $1`,
+      `DELETE FROM meeting_notifications WHERE recipient_user_id = $1`,
+      `DELETE FROM ms_sd_records WHERE user_id = $1`,
+      `DELETE FROM mos_itp_records WHERE user_id = $1`,
+      `DELETE FROM operation_reports WHERE user_id = $1`,
+    ];
+    for (const sql of extraDeletes) {
+      try {
+        await client.query(sql, [id]);
+      } catch (_) {}
+    }
+
+    await client.query('DELETE FROM users WHERE id = $1', [id]);
+    await client.query('COMMIT');
+    console.log('ensureRemoveDuplicateUser683: deleted user 683; kept user 12');
+  } catch (e) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    console.warn('ensureRemoveDuplicateUser683:', e && e.message ? e.message : e);
+  } finally {
+    client.release();
+  }
+}
+
 /** حذف مرفقات أذن التسليم فوراً — تم توحيد الأذن في أذن الصرف &التسليم فقط. */
 async function ensureClearDeliveryPermitImages() {
   await pool.query(`
@@ -7212,6 +7283,7 @@ async function runStartupMigrations() {
     ensureZ1EmaarFProjectLocationsSeeded,
     ensureProjectsMainContractor,
     ensureProjectsManagerRole,
+    ensureRemoveDuplicateUser683,
     ensureClearDeliveryPermitImages,
   ];
   for (const step of steps) {
