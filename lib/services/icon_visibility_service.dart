@@ -60,6 +60,7 @@ class IconVisibilityService {
     switch (role) {
       case roleSiteEngineer:
       case roleSiteEngineerManager:
+      case roleProjectsManager:
       case roleGeneralSupervisor:
         return _docControlChildrenWithoutQs;
       case roleDocumentController:
