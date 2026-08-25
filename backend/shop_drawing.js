@@ -188,12 +188,21 @@ async function shopDrawingGetUser(pool, userId) {
 }
 
 async function shopDrawingGetPmUser(pool) {
-  const r = await pool.query(
+  // أولاً البريد التاريخي إن وُجد، وإلا Projects Manager (المستخدم 12 بديلاً عن 683)
+  const byEmail = await pool.query(
     `SELECT id, name, email, role FROM users
      WHERE LOWER(TRIM(email)) = $1 LIMIT 1`,
     [SHOP_DRAWING_PM_EMAIL.toLowerCase()],
   );
-  return r.rows[0] || null;
+  if (byEmail.rows[0]) return byEmail.rows[0];
+  const byRole = await pool.query(
+    `SELECT id, name, email, role FROM users
+     WHERE role = $1
+     ORDER BY CASE WHEN id = 12 THEN 0 ELSE 1 END, id ASC
+     LIMIT 1`,
+    [SHOP_DRAWING_PROJECTS_MANAGER_ROLE],
+  );
+  return byRole.rows[0] || null;
 }
 
 async function shopDrawingGetBellRecipientIds(pool) {
