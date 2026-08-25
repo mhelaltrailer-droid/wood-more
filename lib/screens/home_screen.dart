@@ -347,7 +347,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ? RotationTransition(
                     turns: _wrRotateController,
                     child: IconButton(
-                      tooltip: currentUser.role == 'site_engineer_manager'
+                      tooltip: currentUser.hasSiteEngineerManagerPrivileges
                           ? 'طلبات سحب خامات وتأجيل خطط بانتظار قراركم'
                           : 'طلبات سحب خامات',
                       onPressed: () async {
@@ -364,7 +364,7 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   )
                 : IconButton(
-                    tooltip: currentUser.role == 'site_engineer_manager'
+                    tooltip: currentUser.hasSiteEngineerManagerPrivileges
                         ? 'طلبات سحب خامات وتأجيل خطط بانتظار قراركم'
                         : 'طلبات سحب خامات',
                     onPressed: () async {

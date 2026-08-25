@@ -7,6 +7,8 @@ String arabicRoleLabel(String role) {
       return 'مهندس موقع';
     case 'site_engineer_manager':
       return UserModel.siteEngineerManagerRoleLabel;
+    case 'projects_manager':
+      return UserModel.projectsManagerRoleLabel;
     case 'general_supervisor':
       return UserModel.generalSupervisorRoleLabel;
     case 'operation_manager':

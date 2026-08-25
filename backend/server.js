@@ -31,6 +31,10 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '120mb' }));
 const PRIMARY_APP_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
+const SEM_LIKE_ROLES = ['site_engineer_manager', 'projects_manager'];
+function isSemLikeRole(role) {
+  return SEM_LIKE_ROLES.includes(String(role || '').trim());
+}
 
 async function ensureActivityLogsTable() {
   try {
@@ -540,7 +544,7 @@ function reportsSysHasFullAccess(role) {
   const r = String(role || '').trim();
   return r === 'app_admin'
     || r === 'operation_manager'
-    || r === 'site_engineer_manager'
+    || isSemLikeRole(r)
     || r === 'general_supervisor'
     || r === 'document_controller';
 }
@@ -785,7 +789,7 @@ async function runNotificationSafely(label, fn) {
 }
 
 /// مستقبلو إشعارات رفع الملفات: مسؤول التطبيق ومدير العمليات ومدير المشروعات.
-const FILE_UPLOAD_NOTIFY_ROLES = ['app_admin', 'operation_manager', 'site_engineer_manager'];
+const FILE_UPLOAD_NOTIFY_ROLES = ['app_admin', 'operation_manager', 'site_engineer_manager', 'projects_manager'];
 
 /// إشعار موحّد لأي رفع ملف في التطبيق. `attachmentSource` + `attachmentRecordId`
 /// هما ما يسمح للواجهة بفتح المرفقات مباشرة من الإشعار عبر /attachments.
@@ -1469,6 +1473,21 @@ async function ensureHomeIconsVisibilitySetting() {
         mos_itp: true,
         manager_custody_expenses: true,
         meetings: true,
+        shop_drawing: true,
+      },
+      projects_manager: {
+        attendance_reports: true,
+        work_plan_tracking_report: true,
+        weekly_report: true,
+        new_icon: true,
+        contractor_report: true,
+        ir_mir: true,
+        warehouses_view: true,
+        ms_sd: true,
+        mos_itp: true,
+        manager_custody_expenses: true,
+        meetings: true,
+        shop_drawing: true,
       },
       general_supervisor: {
         attendance: true,
@@ -1833,7 +1852,7 @@ app.put('/users/:id/home-icon-order', async (req, res) => {
 app.put('/home-icons-visibility/:role', async (req, res) => {
   try {
     const role = String(req.params.role || '').trim();
-    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'general_supervisor', 'operation_manager', 'app_admin', 'accountant', 'document_controller', 'technical_office', 'top_management', 'op_coordinator']);
+    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'projects_manager', 'general_supervisor', 'operation_manager', 'app_admin', 'accountant', 'document_controller', 'technical_office', 'top_management', 'op_coordinator']);
     if (!allowedRoles.has(role)) return res.status(400).json({ error: 'invalid role' });
 
     const requesterEmail = String(req.body?.requesterEmail || '').trim().toLowerCase();
@@ -2377,7 +2396,7 @@ app.post('/attendance', async (req, res) => {
       )
       SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE
       FROM users
-      WHERE role IN ('site_engineer_manager', 'operation_manager', 'app_admin')`,
+      WHERE role IN ('site_engineer_manager', 'projects_manager', 'operation_manager', 'app_admin')`,
       [
         'تنبيه حضور/انصراف',
         body,
@@ -4312,15 +4331,14 @@ app.get('/location-withdrawals-for-period', async (req, res) => {
 
 app.post('/location-withdrawal', async (req, res) => {
   try {
-    const { locationId, userId, userName, disbursementPermitImagesJson, deliveryPermitImagesJson } = req.body;
+    const { locationId, userId, userName, disbursementPermitImagesJson } = req.body;
     const phase = String(req.body?.phase || 'first_fix').trim().toLowerCase();
     const now = new Date().toISOString();
     const disbursementImages = withdrawalParsePermitImages(disbursementPermitImagesJson);
-    const deliveryImages = withdrawalParsePermitImages(deliveryPermitImagesJson);
-    if (disbursementImages == null || deliveryImages == null) {
+    if (disbursementImages == null) {
       return res.status(400).json({
         error: 'permit_images_required',
-        message: 'يجب إرفاق أذن الصرف وأذن التسليم (صورة أو صورتين لكل منهما)',
+        message: 'يجب إرفاق أذن الصرف &التسليم (صورة أو صورتين كحد أقصى)',
       });
     }
     const existing = await pool.query('SELECT id FROM location_withdrawal WHERE location_id = $1 AND phase = $2', [locationId, phase]);
@@ -4351,7 +4369,7 @@ app.post('/location-withdrawal', async (req, res) => {
     }
     const withdrawalIns = await pool.query(
       'INSERT INTO location_withdrawal (location_id, phase, user_id, user_name, created_at, disbursement_permit_images_json, delivery_permit_images_json) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-      [locationId, phase, userId, userName, now, JSON.stringify(disbursementImages), JSON.stringify(deliveryImages)]
+      [locationId, phase, userId, userName, now, JSON.stringify(disbursementImages), '[]']
     );
     const withdrawalId = parseInt(withdrawalIns.rows[0].id, 10);
     for (const m of materials.rows) {
@@ -4389,12 +4407,12 @@ app.post('/location-withdrawal', async (req, res) => {
     await notifyFileUpload(pool, userId, userName, {
       title: 'مرفقات سحب خامات',
       body:
-        `قام "${userName}" بإرفاق أذن الصرف وأذن التسليم مع سحب الخامات — مشروع "${projectName || 'غير محدد'}" — مرحلة: ${phase}`,
+        `قام "${userName}" بإرفاق أذن الصرف &التسليم مع سحب الخامات — مشروع "${projectName || 'غير محدد'}" — مرحلة: ${phase}`,
       eventType: 'withdrawal_permit_upload',
       projectName,
       attachmentSource: 'location_withdrawal',
       attachmentRecordId: withdrawalId,
-      attachmentCount: disbursementImages.length + deliveryImages.length,
+      attachmentCount: disbursementImages.length,
     });
     res.json({ ok: true });
   } catch (e) {
@@ -4541,7 +4559,7 @@ app.post('/withdrawal-requests', async (req, res) => {
       idNum,
       now,
     );
-    await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
+    await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager', 'projects_manager'], {
       title: 'طلب سحب خامات',
       body: bodyN,
       event_type: 'withdrawal_request_new',
@@ -4642,7 +4660,7 @@ app.get('/withdrawal-requests/action-count', async (req, res) => {
       return res.json({ count: 0 });
     }
     let q;
-    if (role === 'site_engineer_manager') {
+    if (isSemLikeRole(role)) {
       q = `SELECT (
         (SELECT COUNT(*)::int FROM withdrawal_requests
            WHERE overall_status = 'pending' AND sem_status = 'pending' AND fulfilled_at IS NULL)
@@ -4674,7 +4692,7 @@ app.get('/withdrawal-requests/pending-actions', async (req, res) => {
       return res.json([]);
     }
     let r;
-    if (role === 'site_engineer_manager') {
+    if (isSemLikeRole(role)) {
       r = await pool.query(
         `SELECT wr.*, p.name AS project_name FROM withdrawal_requests wr
          INNER JOIN projects p ON p.id = wr.project_id
@@ -4740,7 +4758,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
     const actor = await pool.query('SELECT id, role, name FROM users WHERE id = $1', [userId]);
     if (actor.rows.length === 0) return res.status(404).json({ error: 'user not found' });
     const actorRole = String(actor.rows[0].role || '');
-    if (actorRole !== 'site_engineer_manager' && actorRole !== 'operation_manager') {
+    if (!isSemLikeRole(actorRole) && actorRole !== 'operation_manager') {
       return res.status(403).json({ error: 'forbidden' });
     }
     const rq = await pool.query('SELECT * FROM withdrawal_requests WHERE id = $1', [id]);
@@ -4759,7 +4777,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
     const engId = parseInt(row.engineer_user_id, 10);
     const engName = row.engineer_user_name;
 
-    if (actorRole === 'site_engineer_manager') {
+    if (isSemLikeRole(actorRole)) {
       if (String(row.sem_status) !== 'pending') {
         return res.status(400).json({ error: 'already_responded' });
       }
@@ -6029,7 +6047,7 @@ app.post('/executed-plans', async (req, res) => {
         `تاريخ إعادة فتح الخطة: ${reopenDay}${notesLine}\n` +
         `اقتراح توقيع غرامة (من المهندس): ${fineSuggestion}\n` +
         `رقم المرجع: ${execId}`;
-      await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager'], {
+      await withdrawalInsertNotificationsForRoles(pool, ['site_engineer_manager', 'projects_manager'], {
         title: 'تأجيل خطة عمل اليوم — يتطلب قرار الغرامة',
         body,
         eventType: 'work_plan_postponed',
@@ -6085,7 +6103,7 @@ app.get('/executed-plans/pending-sem-fine-actions', async (req, res) => {
     const userId = parseInt(String(req.query.userId || ''), 10);
     if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
     const u = await pool.query('SELECT role FROM users WHERE id = $1', [userId]);
-    if (u.rows.length === 0 || String(u.rows[0].role) !== 'site_engineer_manager') {
+    if (u.rows.length === 0 || !isSemLikeRole(String(u.rows[0].role))) {
       return res.json([]);
     }
     const r = await pool.query(
@@ -6262,7 +6280,7 @@ app.post('/executed-plans/:id/sem-fine-resolution', async (req, res) => {
       return res.status(400).json({ error: 'invalid id or managerUserId' });
     }
     const actor = await pool.query('SELECT id, role, name FROM users WHERE id = $1', [managerUserId]);
-    if (actor.rows.length === 0 || String(actor.rows[0].role) !== 'site_engineer_manager') {
+    if (actor.rows.length === 0 || !isSemLikeRole(String(actor.rows[0].role))) {
       return res.status(403).json({ error: 'forbidden' });
     }
     const semName = String(actor.rows[0].name || '').trim() || 'مدير المشروعات';
@@ -7144,6 +7162,27 @@ async function ensureProjectsMainContractor() {
   }
 }
 
+async function ensureProjectsManagerRole() {
+  // ترقية المستخدم ID=12 (Abdelrhman / Projects Manager) للدور الجديد إن وُجد
+  await pool.query(
+    `UPDATE users
+     SET role = 'projects_manager'
+     WHERE id = 12
+        OR (LOWER(TRIM(email)) = 'abdelrhman' AND role = 'site_engineer_manager')`
+  );
+}
+
+/** حذف مرفقات أذن التسليم فوراً — تم توحيد الأذن في أذن الصرف &التسليم فقط. */
+async function ensureClearDeliveryPermitImages() {
+  await pool.query(`
+    UPDATE location_withdrawal
+    SET delivery_permit_images_json = '[]'
+    WHERE delivery_permit_images_json IS NOT NULL
+      AND TRIM(delivery_permit_images_json) <> ''
+      AND TRIM(delivery_permit_images_json) <> '[]'
+  `);
+}
+
 async function runStartupMigrations() {
   const steps = [
     ensurePasswordColumn,
@@ -7172,6 +7211,8 @@ async function runStartupMigrations() {
     ensureOperationReportsTable,
     ensureZ1EmaarFProjectLocationsSeeded,
     ensureProjectsMainContractor,
+    ensureProjectsManagerRole,
+    ensureClearDeliveryPermitImages,
   ];
   for (const step of steps) {
     try {

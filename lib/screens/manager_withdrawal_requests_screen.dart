@@ -33,7 +33,7 @@ class _ManagerWithdrawalRequestsScreenState
   Timer? _pollTimer;
 
   bool get _isSem =>
-      widget.currentUser.role == 'site_engineer_manager';
+      widget.currentUser.hasSiteEngineerManagerPrivileges;
 
   Future<List<PendingPostponeFineActionModel>> _fetchPostponeItemsIfSem() async {
     final db = _db;
@@ -494,7 +494,7 @@ class _ManagerWithdrawalRequestsScreenState
     final otherLine = withdrawalOtherManagerLine(r, role);
     final badgeColor = _badgeColor(r);
     final waitingOther = actionable &&
-        (role == 'site_engineer_manager'
+        (withdrawalIsSemLikeRole(role)
             ? r.omStatus == WithdrawalRequestModel.statusApproved
             : r.semStatus == WithdrawalRequestModel.statusApproved);
     return Card(
@@ -551,7 +551,7 @@ class _ManagerWithdrawalRequestsScreenState
               if (waitingOther) ...[
                 const SizedBox(height: 8),
                 Text(
-                  role == 'site_engineer_manager'
+                  withdrawalIsSemLikeRole(role)
                       ? 'وافق مدير العمليات — بانتظار موافقتكم لإكمال الاعتماد.'
                       : 'وافق ${UserModel.siteEngineerManagerRoleLabel} — بانتظار موافقتكم لإكمال الاعتماد.',
                   style: TextStyle(
@@ -569,7 +569,7 @@ class _ManagerWithdrawalRequestsScreenState
                     fontSize: 13,
                     height: 1.5,
                     fontWeight: FontWeight.w600,
-                    color: (role == 'site_engineer_manager'
+                    color: (withdrawalIsSemLikeRole(role)
                                 ? r.semStatus
                                 : r.omStatus) ==
                             WithdrawalRequestModel.statusRejected

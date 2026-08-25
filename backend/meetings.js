@@ -7,6 +7,7 @@ const MEETINGS_ROLES = [
   'op_coordinator',
   'operation_manager',
   'site_engineer_manager',
+  'projects_manager',
   'technical_office',
 ];
 

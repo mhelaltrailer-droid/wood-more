@@ -10,7 +10,7 @@
 // لمرفق واحد عند الطلب.
 // =============================================================================
 
-const ATTACHMENT_VIEWER_ROLES = ['app_admin', 'operation_manager', 'site_engineer_manager'];
+const ATTACHMENT_VIEWER_ROLES = ['app_admin', 'operation_manager', 'site_engineer_manager', 'projects_manager'];
 
 /// الحد الأقصى لحجم مرفق يُسمح بإرجاعه في استجابة JSON واحدة.
 const ATTACHMENT_MAX_FETCH_BYTES = 25 * 1024 * 1024;
@@ -338,11 +338,10 @@ const ATTACHMENT_SOURCES = {
 
   location_withdrawal: attRowGroupsSource({
     table: 'location_withdrawal',
-    columns: ['phase', 'disbursement_permit_images_json', 'delivery_permit_images_json'],
+    columns: ['phase', 'disbursement_permit_images_json'],
     titleFor: (row) => `أذون سحب الخامات — مرحلة: ${row.phase || '—'}`,
     groups: [
-      { key: 'disbursement', column: 'disbursement_permit_images_json', label: 'أذن الصرف' },
-      { key: 'delivery', column: 'delivery_permit_images_json', label: 'أذن التسليم' },
+      { key: 'disbursement', column: 'disbursement_permit_images_json', label: 'أذن الصرف &التسليم' },
     ],
   }),
 

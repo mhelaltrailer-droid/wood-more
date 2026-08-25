@@ -343,6 +343,23 @@ class WebStorageService {
       await prefs.setString(_locationMaterialsKey, jsonEncode([]));
     if (prefs.getString(_locationWithdrawalKey) == null)
       await prefs.setString(_locationWithdrawalKey, jsonEncode([]));
+    else {
+      try {
+        final list = jsonDecode(prefs.getString(_locationWithdrawalKey)!) as List;
+        var changed = false;
+        for (final e in list) {
+          final m = e as Map;
+          final cur = m['delivery_permit_images_json'];
+          if (cur != null && cur.toString().trim().isNotEmpty && cur.toString().trim() != '[]') {
+            m['delivery_permit_images_json'] = '[]';
+            changed = true;
+          }
+        }
+        if (changed) {
+          await prefs.setString(_locationWithdrawalKey, jsonEncode(list));
+        }
+      } catch (_) {}
+    }
     if (prefs.getString(_unitsKey) == null)
       await prefs.setString(_unitsKey, jsonEncode([]));
     if (prefs.getString(_buildingMaterialsKey) == null)
@@ -854,6 +871,7 @@ class WebStorageService {
         .where(
           (u) =>
               u.role == 'site_engineer_manager' ||
+              u.role == 'projects_manager' ||
               u.role == 'operation_manager' ||
               u.role == 'app_admin',
         )
@@ -1892,7 +1910,7 @@ class WebStorageService {
       'user_name': userName,
       'created_at': nowStr,
       'disbursement_permit_images_json': disbursementPermitImagesJson,
-      'delivery_permit_images_json': deliveryPermitImagesJson,
+      'delivery_permit_images_json': '[]',
     });
     await prefs.setString(_locationWithdrawalKey, jsonEncode(withdrawals));
   }

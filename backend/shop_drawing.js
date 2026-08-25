@@ -2,6 +2,16 @@ const { formatArDateTimeEgypt } = require('./egypt_local_time');
 
 const SHOP_DRAWING_PM_EMAIL = 'abdelrhmanellaithy828@gmail.com';
 const SHOP_DRAWING_PRIMARY_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
+const SHOP_DRAWING_PROJECTS_MANAGER_ROLE = 'projects_manager';
+
+function shopDrawingIsPmActor(user) {
+  if (!user) return false;
+  const email = String(user.email || '').trim().toLowerCase();
+  return (
+    email === SHOP_DRAWING_PM_EMAIL.toLowerCase() ||
+    String(user.role || '').trim() === SHOP_DRAWING_PROJECTS_MANAGER_ROLE
+  );
+}
 const SHOP_DRAWING_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const SHOP_DRAWING_MAX_ATTACHMENTS = 10;
 const SHOP_DRAWING_DOC_SHOP = 'shop_drawing';
@@ -210,7 +220,7 @@ function shopDrawingIsModuleNotificationUser(user) {
   const email = String(user.email || '').trim().toLowerCase();
   return (
     String(user.role || '') === 'technical_office' ||
-    email === SHOP_DRAWING_PM_EMAIL.toLowerCase()
+    shopDrawingIsPmActor(user)
   );
 }
 
@@ -511,10 +521,10 @@ function registerShopDrawingRoutes(app, pool, deps) {
         sql = `SELECT COUNT(*)::int AS count FROM shop_drawings
                WHERE created_by_user_id = $1 AND status = 'returned_to_to'`;
         params = [userId];
-      } else if (email === SHOP_DRAWING_PM_EMAIL.toLowerCase()) {
+      } else if (shopDrawingIsPmActor(user)) {
         sql = `SELECT COUNT(*)::int AS count FROM shop_drawings
-               WHERE status = 'pending_pm' AND current_assignee_user_id = $1`;
-        params = [userId];
+               WHERE status = 'pending_pm'`;
+        params = [];
       } else if (String(user.role) === 'operation_manager') {
         sql = `SELECT COUNT(*)::int AS count FROM shop_drawings WHERE status = 'pending_om'`;
         params = [];
@@ -555,10 +565,10 @@ function registerShopDrawingRoutes(app, pool, deps) {
           sql = `SELECT * FROM shop_drawings
                  WHERE created_by_user_id = $1 AND status = 'returned_to_to'`;
           params = [userId];
-        } else if (email === SHOP_DRAWING_PM_EMAIL.toLowerCase()) {
+        } else if (shopDrawingIsPmActor(user)) {
           sql = `SELECT * FROM shop_drawings
-                 WHERE status = 'pending_pm' AND current_assignee_user_id = $1`;
-          params = [userId];
+                 WHERE status = 'pending_pm'`;
+          params = [];
         } else if (role === 'operation_manager' || email === SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase()) {
           sql = `SELECT * FROM shop_drawings WHERE status = 'pending_om'`;
           params = [];
@@ -574,7 +584,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
         const canView =
           role === 'technical_office' ||
           role === 'top_management' ||
-          email === SHOP_DRAWING_PM_EMAIL.toLowerCase() ||
+          shopDrawingIsPmActor(user) ||
           role === 'operation_manager' ||
           email === SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase();
         if (!canView) return res.status(403).json({ error: 'forbidden' });
@@ -911,8 +921,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
       if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
 
       const actor = await shopDrawingGetUser(pool, userId);
-      const email = String(actor?.email || '').trim().toLowerCase();
-      if (!actor || email !== SHOP_DRAWING_PM_EMAIL.toLowerCase()) {
+      if (!actor || !shopDrawingIsPmActor(actor)) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
@@ -922,7 +931,11 @@ function registerShopDrawingRoutes(app, pool, deps) {
       if (String(row.status) !== 'pending_pm') {
         return res.status(400).json({ error: 'invalid_status' });
       }
-      if (parseInt(row.current_assignee_user_id, 10) !== userId) {
+      const assigneeId = parseInt(row.current_assignee_user_id, 10);
+      const isEmailPm =
+        String(actor.email || '').trim().toLowerCase() ===
+        SHOP_DRAWING_PM_EMAIL.toLowerCase();
+      if (isEmailPm && assigneeId !== userId) {
         return res.status(403).json({ error: 'not_assignee' });
       }
 
@@ -975,8 +988,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
       if (!reason) return res.status(400).json({ error: 'reason_required' });
 
       const actor = await shopDrawingGetUser(pool, userId);
-      const email = String(actor?.email || '').trim().toLowerCase();
-      if (!actor || email !== SHOP_DRAWING_PM_EMAIL.toLowerCase()) {
+      if (!actor || !shopDrawingIsPmActor(actor)) {
         return res.status(403).json({ error: 'forbidden' });
       }
 

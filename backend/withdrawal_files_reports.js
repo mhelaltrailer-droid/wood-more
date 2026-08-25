@@ -78,8 +78,8 @@ function wfrApprovalLabel(status) {
 
 /// يشتق حالة السحب من صف الطلب وصف السحب الفعلي معاً.
 function wfrDeriveStatus(row) {
-  const attachmentsCount =
-    (parseInt(row.disbursement_count, 10) || 0) + (parseInt(row.delivery_count, 10) || 0);
+  // اكتمال المرفقات يُحسب بأذن الصرف &التسليم فقط (تم إلغاء أذن التسليم المنفصل)
+  const attachmentsCount = parseInt(row.disbursement_count, 10) || 0;
   if (row.withdrawal_id != null) {
     return {
       status: attachmentsCount > 0 ? 'completed' : 'completed_no_files',
@@ -129,7 +129,7 @@ function wfrWithdrawalRow(row) {
     withdrawal_user_id: row.withdrawal_user_id != null ? parseInt(row.withdrawal_user_id, 10) : null,
     withdrawal_user_name: row.withdrawal_user_name || '',
     disbursement_files_count: parseInt(row.disbursement_count, 10) || 0,
-    delivery_files_count: parseInt(row.delivery_count, 10) || 0,
+    delivery_files_count: 0,
     attachments_count: derived.attachments_count,
     is_completed: derived.is_completed,
     status: derived.status,
@@ -154,8 +154,7 @@ const WFR_FILE_KIND_LABELS = {
   ITP: 'ITP',
   SHOP_DRAWING: 'Shop-Drawing',
   PO: 'PO',
-  DISBURSEMENT_PERMIT: 'أذن الصرف',
-  DELIVERY_PERMIT: 'أذن التسليم',
+  DISBURSEMENT_PERMIT: 'أذن الصرف &التسليم',
 };
 
 function wfrFileRow(row) {
@@ -477,8 +476,7 @@ function registerWithdrawalFilesReportRoutes(app, pool) {
         LEFT JOIN loc_path lp ON lp.id = lw.location_id
         CROSS JOIN LATERAL (
           VALUES
-            ('disbursement', 'DISBURSEMENT_PERMIT', 'أذن الصرف', lw.disbursement_permit_images_json),
-            ('delivery', 'DELIVERY_PERMIT', 'أذن التسليم', lw.delivery_permit_images_json)
+            ('disbursement', 'DISBURSEMENT_PERMIT', 'أذن الصرف &التسليم', lw.disbursement_permit_images_json)
         ) AS g(key, kind_code, label, col)
         CROSS JOIN LATERAL json_array_elements_text(
           CASE WHEN g.col ~ '^\\s*\\[' THEN g.col::json ELSE '[]'::json END

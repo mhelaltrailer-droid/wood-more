@@ -11,7 +11,7 @@ class NotificationAttachmentModel {
   /// 'image' | 'pdf' | 'file' — يحدد طريقة العرض.
   final String kind;
 
-  /// وصف عربي اختياري (مثل "أذن الصرف" أو "بند صرف: ...").
+  /// وصف عربي اختياري (مثل "أذن الصرف &التسليم" أو "بند صرف: ...").
   final String? label;
 
   /// false لملفات لا تُنقل عبر الواجهة (نسخ APK مثلاً).

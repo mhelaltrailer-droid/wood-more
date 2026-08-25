@@ -85,7 +85,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
     // مدير المشروعات لا يضيف رصيداً لحساب المحاسب (السحب مسموح).
     if (!widget.currentUser.isAccountant &&
         user.isAccountant &&
-        widget.currentUser.role == 'site_engineer_manager') {
+        widget.currentUser.hasSiteEngineerManagerPrivileges) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('لا يمكن لمدير المشروعات إضافة رصيد لحساب المحاسب'),
@@ -338,7 +338,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
   String? _selfBadgeLabel(UserModel user) {
     if (user.id != widget.currentUser.id) return null;
     if (widget.currentUser.isAccountant) return 'المحاسب';
-    if (widget.currentUser.role == 'site_engineer_manager') {
+    if (widget.currentUser.hasSiteEngineerManagerPrivileges) {
       return UserModel.siteEngineerManagerRoleLabel;
     }
     return null;
@@ -377,7 +377,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                   final isSelf = u.id == widget.currentUser.id;
                   final selfBadge = _selfBadgeLabel(u);
                   final showAdd = (!isSelf || widget.currentUser.isAccountant) &&
-                      !(widget.currentUser.role == 'site_engineer_manager' &&
+                      !(widget.currentUser.hasSiteEngineerManagerPrivileges &&
                           u.isAccountant);
                   final showWithdraw = !isSelf;
                   return Card(

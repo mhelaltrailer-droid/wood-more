@@ -2,13 +2,17 @@ import '../models/withdrawal_request_model.dart';
 import 'notification_time_display.dart';
 
 const String withdrawalRoleSem = 'site_engineer_manager';
+const String withdrawalRoleProjectsManager = 'projects_manager';
 const String withdrawalRoleOm = 'operation_manager';
+
+bool withdrawalIsSemLikeRole(String role) =>
+    role == withdrawalRoleSem || role == withdrawalRoleProjectsManager;
 
 /// هل ما زال الطلب بانتظار قرار من صاحب هذا الدور؟
 bool withdrawalIsActionableForRole(WithdrawalRequestModel r, String role) {
   if (r.fulfilledAt != null) return false;
   if (r.overallStatus != WithdrawalRequestModel.statusPending) return false;
-  if (role == withdrawalRoleSem) {
+  if (withdrawalIsSemLikeRole(role)) {
     return r.semStatus == WithdrawalRequestModel.statusPending;
   }
   if (role == withdrawalRoleOm) {
@@ -19,13 +23,13 @@ bool withdrawalIsActionableForRole(WithdrawalRequestModel r, String role) {
 }
 
 String _statusForRole(WithdrawalRequestModel r, String role) =>
-    role == withdrawalRoleSem ? r.semStatus : r.omStatus;
+    withdrawalIsSemLikeRole(role) ? r.semStatus : r.omStatus;
 
 DateTime? _respondedAtForRole(WithdrawalRequestModel r, String role) =>
-    role == withdrawalRoleSem ? r.semRespondedAt : r.omRespondedAt;
+    withdrawalIsSemLikeRole(role) ? r.semRespondedAt : r.omRespondedAt;
 
 String? _reasonForRole(WithdrawalRequestModel r, String role) =>
-    role == withdrawalRoleSem ? r.semReason : r.omReason;
+    withdrawalIsSemLikeRole(role) ? r.semReason : r.omReason;
 
 /// سطر الإجراء الذي اتخذه صاحب الدور نفسه، أو null إن لم يتخذ قراراً بعد.
 String? withdrawalOwnActionLine(WithdrawalRequestModel r, String role) {
@@ -42,7 +46,8 @@ String? withdrawalOwnActionLine(WithdrawalRequestModel r, String role) {
 
 /// سطر يوضّح قرار المدير الآخر على نفس الطلب، أو null إن لم يقرر بعد.
 String? withdrawalOtherManagerLine(WithdrawalRequestModel r, String role) {
-  final otherRole = role == withdrawalRoleSem ? withdrawalRoleOm : withdrawalRoleSem;
+  final otherRole =
+      withdrawalIsSemLikeRole(role) ? withdrawalRoleOm : withdrawalRoleSem;
   final respondedAt = _respondedAtForRole(r, otherRole);
   if (respondedAt == null) return null;
   final at = formatNotificationDateTime(respondedAt);

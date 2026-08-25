@@ -79,6 +79,5 @@ const uploadedFileKindFilters = <String, String>{
   'ITP': 'ITP',
   'SHOP_DRAWING': 'Shop-Drawing',
   'PO': 'PO',
-  'DISBURSEMENT_PERMIT': 'أذن الصرف',
-  'DELIVERY_PERMIT': 'أذن التسليم',
+  'DISBURSEMENT_PERMIT': 'أذن الصرف &التسليم',
 };

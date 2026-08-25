@@ -18,7 +18,7 @@ class WithdrawalFilesReportsHubScreen extends StatelessWidget {
         icon: Icons.warehouse_outlined,
         title: 'تقرير سحب الخامات',
         subtitle:
-            'المشاريع ومواقع العمل التي تم سحب خامتها — طلب سحب فقط أم تم إكمال السحب مع أذون الصرف والتسليم',
+            'المشاريع ومواقع العمل التي تم سحب خامتها — طلب سحب فقط أم تم إكمال السحب مع أذن الصرف &التسليم',
         routeName: 'material-withdrawals-report',
         screen: MaterialWithdrawalsReportScreen(currentUser: currentUser),
       ),

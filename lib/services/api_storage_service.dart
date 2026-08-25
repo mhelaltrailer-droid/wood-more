@@ -1885,8 +1885,7 @@ class ApiStorageService {
       'userName': userName,
       if (disbursementPermitImagesJson != null)
         'disbursementPermitImagesJson': disbursementPermitImagesJson,
-      if (deliveryPermitImagesJson != null)
-        'deliveryPermitImagesJson': deliveryPermitImagesJson,
+      'deliveryPermitImagesJson': '[]',
     };
     final r = await http.post(
       uri,

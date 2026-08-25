@@ -11,6 +11,7 @@ class IconVisibilityService {
   static const String roleAppAdmin = 'app_admin';
   static const String roleSiteEngineer = 'site_engineer';
   static const String roleSiteEngineerManager = 'site_engineer_manager';
+  static const String roleProjectsManager = 'projects_manager';
   static const String roleGeneralSupervisor = 'general_supervisor';
   static const String roleOperationManager = 'operation_manager';
   static const String roleAccountant = 'accountant';
@@ -120,6 +121,7 @@ class IconVisibilityService {
     roleAppAdmin: 'App admin',
     roleSiteEngineer: 'Site engineer',
     roleSiteEngineerManager: 'مدير المشروعات',
+    roleProjectsManager: 'Projects Manager',
     roleGeneralSupervisor: 'مشرف عام',
     roleOperationManager: 'Operation manager',
     roleAccountant: 'Accountant',
@@ -162,6 +164,13 @@ class IconVisibilityService {
     ],
     roleDocumentController: _documentControllerHomeIcons,
     roleSiteEngineerManager: [
+      ..._projectManagerHomeIcons,
+      HomeIconItem(id: 'weekly_report', label: 'التقرير الاسبوعي'),
+      managerCustodyExpensesIcon,
+      HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
+      meetingsIcon,
+    ],
+    roleProjectsManager: [
       ..._projectManagerHomeIcons,
       HomeIconItem(id: 'weekly_report', label: 'التقرير الاسبوعي'),
       managerCustodyExpensesIcon,

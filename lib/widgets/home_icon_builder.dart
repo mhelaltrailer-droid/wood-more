@@ -104,7 +104,7 @@ class HomeIconBuilder {
           iconSize: 56,
           title: 'المخزن (سحب الخامات)',
           subtitle:
-              'عرض الخامات المتاحة للسحب لكل مكان فرعي وإتمام السحب مع أذن الصرف والتسليم',
+              'عرض الخامات المتاحة للسحب لكل مكان فرعي وإتمام السحب مع أذن الصرف &التسليم',
           padding: 28,
           onTap: () => _openAfterAttendanceCheck(
             context: context,
@@ -376,7 +376,7 @@ class HomeIconBuilder {
         return _lightCard(
           icon: Icons.warehouse,
           title: 'المخازن',
-          subtitle: 'عرض الخامات وأذون الصرف والتسليم بعد السحب (قراءة فقط)',
+          subtitle: 'عرض الخامات وأذن الصرف &التسليم بعد السحب (قراءة فقط)',
           onTap: () => pushAndSaveRoute(
             context,
             'warehouses-view',

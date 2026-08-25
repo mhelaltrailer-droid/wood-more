@@ -1,8 +1,10 @@
 import '../core/shop_drawing_constants.dart';
 import 'expense_statement_model.dart';
 
-/// نموذج المستخدم - مهندس موقع أو مدير المشروعات
-class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير المشروعات';
+/// نموذج المستخدم - مهندس موقع أو مدير المشروعات أو Projects Manager
+class UserModel {
+  static const String siteEngineerManagerRoleLabel = 'مدير المشروعات';
+  static const String projectsManagerRoleLabel = 'Projects Manager';
   static const String generalSupervisorRoleLabel = 'مشرف عام';
   static const String documentControllerRoleLabel = 'Document Controller';
   static const String technicalOfficeRoleLabel = 'المكتب الفني';
@@ -10,10 +12,13 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   static const String opCoordinatorRoleLabel = 'Op-Coordinator';
   static const String primaryAppAdminEmail = 'mouhammedhelal@gmail.com';
 
+  /// قيمة الدور في قاعدة البيانات.
+  static const String roleProjectsManager = 'projects_manager';
+
   final int id;
   final String name;
   final String email;
-  final String role; // 'site_engineer' | 'site_engineer_manager' | 'general_supervisor' | 'operation_manager' | 'app_admin' | 'accountant' | 'document_controller' | 'technical_office' | 'top_management' | 'op_coordinator'
+  final String role; // incl. projects_manager
 
   const UserModel({
     required this.id,
@@ -29,13 +34,19 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   bool get isTopManagement => role == shopDrawingRoleTopManagement;
   bool get isOperationManager => role == 'operation_manager';
   bool get isOpCoordinator => role == 'op_coordinator';
+  bool get isSiteEngineerManager => role == 'site_engineer_manager';
+  bool get isProjectsManager => role == roleProjectsManager;
+
+  /// حالياً نفس صلاحيات مدير المشروعات — للتوسعة لاحقاً على Projects Manager فقط.
+  bool get hasSiteEngineerManagerPrivileges =>
+      isSiteEngineerManager || isProjectsManager;
 
   /// أيقونة Meetings + جرس إشعارات الاجتماعات في الشاشة الرئيسية.
   /// للأدمن: المسؤول الرئيسي فقط (mouhammedhelal@gmail.com).
   bool get canAccessMeetings =>
       isOpCoordinator ||
       isOperationManager ||
-      role == 'site_engineer_manager' ||
+      hasSiteEngineerManagerPrivileges ||
       isTechnicalOffice ||
       isPrimaryAppAdmin;
 
@@ -46,8 +57,10 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
 
   /// حذف ملف أو اجتماع بالكامل — المسؤول الرئيسي فقط.
   bool get canDeleteMeetings => isPrimaryAppAdmin;
+  /// مدير مشروعات Shop-Drawing: البريد المحدد، أو دور Projects Manager بالكامل.
   bool get isShopDrawingProjectManager =>
-      role == 'site_engineer_manager' && isShopDrawingPmEmail(email);
+      isProjectsManager ||
+      (isSiteEngineerManager && isShopDrawingPmEmail(email));
 
   /// رفع سجلات MS-SD (Document Controller فقط).
   bool get canUploadMsSd => isDocumentController;
@@ -84,7 +97,7 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   bool get canViewUploadedDocuments =>
       isManager || isAdmin || isDocumentController;
   bool get isManager =>
-      role == 'site_engineer_manager' ||
+      hasSiteEngineerManagerPrivileges ||
       role == 'general_supervisor' ||
       role == 'operation_manager' ||
       role == 'app_admin';
@@ -92,7 +105,7 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   /// زر الإشعارات في الشاشة الرئيسية (بدون طلبات السحب لـ مشرف عام).
   bool get canUseNotifications =>
       role == 'site_engineer' ||
-      role == 'site_engineer_manager' ||
+      hasSiteEngineerManagerPrivileges ||
       role == 'general_supervisor' ||
       role == 'operation_manager' ||
       role == 'app_admin';
@@ -101,11 +114,11 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
 
   /// إدارة أرصدة المستخدمين (إضافة/سحب) — المحاسب ومدير المشروعات.
   bool get canManageUserBalances =>
-      isAccountant || role == 'site_engineer_manager';
+      isAccountant || hasSiteEngineerManagerPrivileges;
 
   /// موافقة / رفض طلبات سحب الخامات (مدير المشروعات أو مدير العمليات).
   bool get canActOnWithdrawalRequests =>
-      role == 'site_engineer_manager' || role == 'operation_manager';
+      hasSiteEngineerManagerPrivileges || role == 'operation_manager';
 
   /// رفع نسخ التطبيق (APK) وإدارة الإصدارات — البريد الأساسي فقط.
   bool get canManageAppVersions =>
@@ -164,7 +177,7 @@ class UserModel {  static const String siteEngineerManagerRoleLabel = 'مدير 
   bool get canViewReportsSysFullAccess =>
       role == 'app_admin' ||
       role == 'operation_manager' ||
-      role == 'site_engineer_manager' ||
+      hasSiteEngineerManagerPrivileges ||
       role == 'general_supervisor' ||
       role == 'document_controller';
 

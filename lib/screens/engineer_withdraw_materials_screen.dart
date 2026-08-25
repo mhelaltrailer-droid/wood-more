@@ -22,7 +22,7 @@ import '../utils/disbursement_note_pdf.dart';
 import 'home_screen.dart';
 import 'withdrawal_balance_review_screen.dart';
 
-/// المخزن (سحب خامات) — لمهندس الموقع: عرض الخامات المتاحة لكل مكان فرعي وسحبها مرة واحدة مع أذن صرف وتسليم
+/// المخزن (سحب خامات) — لمهندس الموقع: عرض الخامات المتاحة لكل مكان فرعي وسحبها مرة واحدة مع أذن الصرف &التسليم
 class EngineerWithdrawMaterialsScreen extends StatefulWidget {
   final UserModel user;
 
@@ -577,7 +577,6 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     required int withdrawalRequestId,
   }) async {
     List<String> disbursementImages = [];
-    List<String> deliveryImages = [];
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -590,7 +589,10 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('إرفاق أذن الصرف (صورة أو صورتين كحد أقصى)', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'إرفاق أذن الصرف &التسليم (صورة أو صورتين كحد أقصى)',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -622,40 +624,11 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
                     )),
                   ),
                 const SizedBox(height: 16),
-                const Text('إرفاق أذن التسليم (صورة أو صورتين كحد أقصى)', style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.add_photo_alternate),
-                      label: Text(deliveryImages.isEmpty ? 'إرفاق' : 'إضافة أخرى'),
-                      onPressed: deliveryImages.length >= 2
-                          ? null
-                          : () async {
-                              final picked = await _pickImageBase64();
-                              if (picked != null && ctx.mounted) {
-                                setDialog(() => deliveryImages = [...deliveryImages, picked]);
-                              }
-                            },
-                    ),
-                    if (deliveryImages.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      Text('${deliveryImages.length} صورة', style: TextStyle(color: Colors.grey[600])),
-                    ],
-                  ],
-                ),
-                if (deliveryImages.isNotEmpty)
-                  Wrap(
-                    spacing: 4,
-                    children: List.generate(deliveryImages.length, (i) => Chip(
-                      label: Text('${i + 1}'),
-                      deleteIcon: const Icon(Icons.close, size: 18),
-                      onDeleted: () => setDialog(() => deliveryImages = List.from(deliveryImages)..removeAt(i)),
-                    )),
+                if (disbursementImages.isEmpty)
+                  Text(
+                    'أذن الصرف &التسليم إلزامي (صورة أو صورتين كحد أقصى)',
+                    style: TextStyle(fontSize: 12, color: Colors.orange[800]),
                   ),
-                const SizedBox(height: 16),
-                if (disbursementImages.isEmpty || deliveryImages.isEmpty)
-                  Text('أذن الصرف وأذن التسليم إلزاميان (صورة أو صورتين لكل منهما)', style: TextStyle(fontSize: 12, color: Colors.orange[800])),
               ],
             ),
           ),
@@ -663,8 +636,12 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
             FilledButton(
               onPressed: () async {
-                if (disbursementImages.isEmpty || deliveryImages.isEmpty) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('يجب إرفاق أذن الصرف وأذن التسليم (صورة أو صورتين لكل منهما)')));
+                if (disbursementImages.isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                      content: Text('يجب إرفاق أذن الصرف &التسليم (صورة أو صورتين كحد أقصى)'),
+                    ),
+                  );
                   return;
                 }
                 final locationMaterials =
@@ -734,7 +711,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
             userId: widget.user.id,
             userName: widget.user.name,
             disbursementPermitImagesJson: jsonEncode(disbursementImages),
-            deliveryPermitImagesJson: jsonEncode(deliveryImages),
+            deliveryPermitImagesJson: '[]',
             withdrawalRequestId: withdrawalRequestId,
           ),
         ),
@@ -1026,9 +1003,6 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     final disUrls = withdrawal != null
         ? _parseImageJson(withdrawal.disbursementPermitImagesJson)
         : <String>[];
-    final delUrls = withdrawal != null
-        ? _parseImageJson(withdrawal.deliveryPermitImagesJson)
-        : <String>[];
 
     return Container(
       padding: const EdgeInsets.all(10),
@@ -1130,21 +1104,11 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
                   onPressed: withdrawal == null
                       ? null
                       : () => _showPermitImagesDialog(
-                            'أذن الصرف — $label',
+                            'أذن الصرف &التسليم — $label',
                             disUrls,
                           ),
                   icon: const Icon(Icons.receipt_long, size: 18),
-                  label: const Text('عرض أذن الصرف'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: withdrawal == null
-                      ? null
-                      : () => _showPermitImagesDialog(
-                            'أذن التسليم — $label',
-                            delUrls,
-                          ),
-                  icon: const Icon(Icons.local_shipping_outlined, size: 18),
-                  label: const Text('عرض أذن التسليم'),
+                  label: const Text('عرض أذن الصرف &التسليم'),
                 ),
               ],
             ),

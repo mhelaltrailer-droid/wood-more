@@ -55,7 +55,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 41,
+      version: 42,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -464,6 +464,14 @@ class DatabaseService {
           created_at TEXT NOT NULL
         )
       ''');
+    }
+    if (oldVersion < 42) {
+      try {
+        await db.update(
+          'location_withdrawal',
+          {'delivery_permit_images_json': '[]'},
+        );
+      } catch (_) {}
     }
   }
 
@@ -1245,8 +1253,13 @@ class DatabaseService {
     final recipients = await db.query(
       'users',
       columns: ['id', 'role'],
-      where: 'role IN (?, ?, ?)',
-      whereArgs: ['site_engineer_manager', 'operation_manager', 'app_admin'],
+      where: 'role IN (?, ?, ?, ?)',
+      whereArgs: [
+        'site_engineer_manager',
+        'projects_manager',
+        'operation_manager',
+        'app_admin',
+      ],
     );
     if (recipients.isEmpty) return;
     final isCheckIn = record.type == 'check_in';
@@ -2094,7 +2107,7 @@ class DatabaseService {
       'user_name': userName,
       'created_at': nowStr,
       'disbursement_permit_images_json': disbursementPermitImagesJson,
-      'delivery_permit_images_json': deliveryPermitImagesJson,
+      'delivery_permit_images_json': '[]',
     });
     await db.update(
       'withdrawal_requests',
@@ -2126,18 +2139,15 @@ class DatabaseService {
       );
     }
     final hasPermitDocs =
-        (disbursementPermitImagesJson != null &&
+        disbursementPermitImagesJson != null &&
             disbursementPermitImagesJson.trim().isNotEmpty &&
-            disbursementPermitImagesJson.trim() != '[]') ||
-        (deliveryPermitImagesJson != null &&
-            deliveryPermitImagesJson.trim().isNotEmpty &&
-            deliveryPermitImagesJson.trim() != '[]');
+            disbursementPermitImagesJson.trim() != '[]';
     if (hasPermitDocs) {
       await _notifyAppAdmins(
         db,
         title: 'مرفقات سحب خامات',
         body:
-            'قام "$userName" بإرفاق أذون صرف/تسليم مع سحب الخامات — مشروع "${projectName.isEmpty ? 'غير محدد' : projectName}"',
+            'قام "$userName" بإرفاق أذن الصرف &التسليم مع سحب الخامات — مشروع "${projectName.isEmpty ? 'غير محدد' : projectName}"',
         eventType: 'withdrawal_permit_upload',
         actorUserId: userId,
         actorUserName: userName,
@@ -3895,7 +3905,7 @@ class DatabaseService {
     );
     await _wrNotifyRoles(
       db,
-      ['site_engineer_manager'],
+      ['site_engineer_manager', 'projects_manager'],
       title: 'طلب سحب خامات',
       body: bodyN,
       eventType: 'withdrawal_request_new',
@@ -3915,7 +3925,7 @@ class DatabaseService {
     final db = await database;
     final u = await db.query('users', where: 'id = ?', whereArgs: [userId]);
     if (u.isEmpty || u.first['role'] != role) return 0;
-    final clause = role == 'site_engineer_manager'
+    final clause = (role == 'site_engineer_manager' || role == 'projects_manager')
         ? "overall_status = 'pending' AND sem_status = 'pending' AND fulfilled_at IS NULL"
         : role == 'operation_manager'
         ? "overall_status = 'pending' AND om_status = 'pending' AND sem_status = 'approved' AND fulfilled_at IS NULL"
@@ -3934,7 +3944,7 @@ class DatabaseService {
     final db = await database;
     final u = await db.query('users', where: 'id = ?', whereArgs: [userId]);
     if (u.isEmpty || u.first['role'] != role) return [];
-    final where = role == 'site_engineer_manager'
+    final where = (role == 'site_engineer_manager' || role == 'projects_manager')
         ? "wr.sem_responded_at IS NOT NULL OR (wr.overall_status = 'pending' "
               "AND wr.sem_status = 'pending' AND wr.fulfilled_at IS NULL)"
         : role == 'operation_manager'
@@ -3943,7 +3953,7 @@ class DatabaseService {
               "AND wr.fulfilled_at IS NULL)"
         : null;
     if (where == null) return [];
-    final respondedAt = role == 'site_engineer_manager'
+    final respondedAt = (role == 'site_engineer_manager' || role == 'projects_manager')
         ? 'wr.sem_responded_at'
         : 'wr.om_responded_at';
     final rows = await db.rawQuery(
@@ -3969,7 +3979,9 @@ class DatabaseService {
     final actor = await db.query('users', where: 'id = ?', whereArgs: [managerUserId]);
     if (actor.isEmpty) throw Exception('user not found');
     final actorRole = actor.first['role'] as String? ?? '';
-    if (actorRole != 'site_engineer_manager' && actorRole != 'operation_manager') {
+    if (actorRole != 'site_engineer_manager' &&
+        actorRole != 'projects_manager' &&
+        actorRole != 'operation_manager') {
       throw Exception('forbidden');
     }
     final rq = await db.query('withdrawal_requests', where: 'id = ?', whereArgs: [requestId]);
@@ -3991,7 +4003,7 @@ class DatabaseService {
     final engName = (row['engineer_user_name'] as String?) ?? '';
     final actorName = (actor.first['name'] as String?) ?? '';
 
-    if (actorRole == 'site_engineer_manager') {
+    if (actorRole == 'site_engineer_manager' || actorRole == 'projects_manager') {
       if (row['sem_status'] != WithdrawalRequestModel.statusPending) {
         throw Exception('already_responded');
       }

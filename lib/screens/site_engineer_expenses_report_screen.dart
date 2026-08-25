@@ -18,6 +18,7 @@ import 'home_screen.dart';
 const Set<String> _expenseReportRoles = {
   'site_engineer',
   'site_engineer_manager',
+  'projects_manager',
   'general_supervisor',
 };
 

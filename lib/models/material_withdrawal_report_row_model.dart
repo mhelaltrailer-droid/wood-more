@@ -1,5 +1,5 @@
 /// صف تقرير سحب الخامات: مشروع + موقع عمل + مرحلة، مع التمييز بين طلب السحب
-/// وإتمام السحب الفعلي وحالة إرفاق أذون الصرف/التسليم (من الخادم).
+/// وإتمام السحب الفعلي وحالة إرفاق أذن الصرف &التسليم (من الخادم).
 class MaterialWithdrawalReportRowModel {
   final int? projectId;
   final String projectName;
@@ -97,11 +97,11 @@ class MaterialWithdrawalReportRowModel {
     );
   }
 
-  /// نصّ عمود المرفقات: أذن الصرف وأذن التسليم منفصلين.
+  /// نصّ عمود المرفقات: أذن الصرف &التسليم فقط.
   String get attachmentsLabel {
     if (withdrawalId == null) return 'لا يوجد';
     if (attachmentsCount == 0) return 'بدون مرفقات';
-    return 'أذن صرف: $disbursementFilesCount • أذن تسليم: $deliveryFilesCount';
+    return 'أذن الصرف &التسليم: $disbursementFilesCount';
   }
 
   /// من نفّذ السحب فعلياً، أو من طلبه إن لم يكتمل بعد.

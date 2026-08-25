@@ -16,7 +16,7 @@ import '../services/storage_service.dart';
 import '../utils/disbursement_note_pdf.dart';
 import 'home_screen.dart';
 
-/// المخازن — عرض خامات مواقع العمل ومرفقات أذن الصرف/التسليم بعد السحب (بدون إمكانية السحب).
+/// المخازن — عرض خامات مواقع العمل ومرفقات أذن الصرف &التسليم بعد السحب (بدون إمكانية السحب).
 class WarehousesViewScreen extends StatefulWidget {
   final UserModel currentUser;
 
@@ -397,9 +397,6 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
     final disUrls = withdrawal != null
         ? _parseImageJson(withdrawal.disbursementPermitImagesJson)
         : <String>[];
-    final delUrls = withdrawal != null
-        ? _parseImageJson(withdrawal.deliveryPermitImagesJson)
-        : <String>[];
 
     return Container(
       padding: const EdgeInsets.all(10),
@@ -434,7 +431,7 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                'لم يتم سحب هذه المرحلة بعد — أذونات الصرف/التسليم غير متاحة',
+                'لم يتم سحب هذه المرحلة بعد — أذن الصرف &التسليم غير متاح',
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
             ),
@@ -459,21 +456,11 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
                 onPressed: withdrawal == null
                     ? null
                     : () => _showPermitImagesDialog(
-                          'أذن الصرف — $label',
+                          'أذن الصرف &التسليم — $label',
                           disUrls,
                         ),
                 icon: const Icon(Icons.receipt_long, size: 18),
-                label: const Text('عرض أذن الصرف'),
-              ),
-              OutlinedButton.icon(
-                onPressed: withdrawal == null
-                    ? null
-                    : () => _showPermitImagesDialog(
-                          'أذن التسليم — $label',
-                          delUrls,
-                        ),
-                icon: const Icon(Icons.local_shipping_outlined, size: 18),
-                label: const Text('عرض أذن التسليم'),
+                label: const Text('عرض أذن الصرف &التسليم'),
               ),
             ],
           ),
@@ -514,7 +501,7 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'عرض خامات سحب المواقع وأذونات الصرف/التسليم (قراءة فقط)',
+                    'عرض خامات سحب المواقع وأذن الصرف &التسليم (قراءة فقط)',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: Colors.grey.shade800,
