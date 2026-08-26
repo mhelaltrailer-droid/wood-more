@@ -8,6 +8,10 @@ const {
   registerShopDrawingRoutes,
 } = require('./shop_drawing');
 const {
+  ensureInvoicesOwnerTables,
+  registerInvoicesOwnerRoutes,
+} = require('./invoices_owner');
+const {
   ensureProjectsDashboardTables,
   registerProjectsDashboardRoutes,
 } = require('./projects_dashboard');
@@ -1460,6 +1464,7 @@ async function ensureHomeIconsVisibilitySetting() {
         accountant_custody: true,
         accountant_finance: true,
         reports_sys: true,
+        invoices_owner: true,
       },
       site_engineer_manager: {
         attendance_reports: true,
@@ -1488,6 +1493,7 @@ async function ensureHomeIconsVisibilitySetting() {
         manager_custody_expenses: true,
         meetings: true,
         shop_drawing: true,
+        invoices_owner: true,
       },
       general_supervisor: {
         attendance: true,
@@ -1517,6 +1523,7 @@ async function ensureHomeIconsVisibilitySetting() {
         projects_dashboard_plus1: true,
         custody_expenses_view: true,
         meetings: true,
+        invoices_owner: true,
       },
       app_admin: {
         attendance_reports: true,
@@ -1537,6 +1544,7 @@ async function ensureHomeIconsVisibilitySetting() {
         projects_dashboard: true,
         projects_dashboard_plus1: true,
         meetings: true,
+        invoices_owner: true,
       },
       document_controller: {
         ir_mir: true,
@@ -1551,12 +1559,19 @@ async function ensureHomeIconsVisibilitySetting() {
         projects_dashboard: true,
         projects_dashboard_plus1: true,
         meetings: true,
+        invoices_owner: true,
       },
       top_management: {
         shop_drawing: true,
       },
       op_coordinator: {
         meetings: true,
+      },
+      qs: {
+        invoices_owner: true,
+      },
+      finance: {
+        invoices_owner: true,
       },
     };
 
@@ -1852,7 +1867,7 @@ app.put('/users/:id/home-icon-order', async (req, res) => {
 app.put('/home-icons-visibility/:role', async (req, res) => {
   try {
     const role = String(req.params.role || '').trim();
-    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'projects_manager', 'general_supervisor', 'operation_manager', 'app_admin', 'accountant', 'document_controller', 'technical_office', 'top_management', 'op_coordinator']);
+    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'projects_manager', 'general_supervisor', 'operation_manager', 'app_admin', 'accountant', 'document_controller', 'technical_office', 'top_management', 'op_coordinator', 'qs', 'finance']);
     if (!allowedRoles.has(role)) return res.status(400).json({ error: 'invalid role' });
 
     const requesterEmail = String(req.body?.requesterEmail || '').trim().toLowerCase();
@@ -7053,6 +7068,7 @@ app.post('/app-release/upload-finalize', async (req, res) => {
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 registerShopDrawingRoutes(app, pool, { runNotificationSafely });
+registerInvoicesOwnerRoutes(app, pool, { runNotificationSafely });
 registerProjectsDashboardRoutes(app, pool, { notifyFileUpload });
 registerExpenseStatementsRoutes(app, pool, { runNotificationSafely, notifyFileUpload });
 registerAttachmentRoutes(app, pool);
@@ -7271,6 +7287,7 @@ async function runStartupMigrations() {
     () => ensureMeetingsTables(pool),
     ensureAppReleaseTables,
     () => ensureShopDrawingTables(pool),
+    () => ensureInvoicesOwnerTables(pool),
     () => ensureProjectsDashboardTables(pool),
     () => ensureExpenseStatementsTable(pool),
     ensureEngineerCustodyActorColumns,

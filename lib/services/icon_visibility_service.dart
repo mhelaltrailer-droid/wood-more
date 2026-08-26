@@ -19,6 +19,8 @@ class IconVisibilityService {
   static const String roleTechnicalOffice = 'technical_office';
   static const String roleTopManagement = 'top_management';
   static const String roleOpCoordinator = 'op_coordinator';
+  static const String roleQs = 'qs';
+  static const String roleFinance = 'finance';
 
   static const HomeIconItem meetingsIcon = HomeIconItem(
     id: 'meetings',
@@ -84,6 +86,11 @@ class IconVisibilityService {
     label: 'الأرصدة / المصروفات',
   );
 
+  static const HomeIconItem invoicesOwnerIcon = HomeIconItem(
+    id: 'invoices_owner',
+    label: 'Invoices (Owner)',
+  );
+
   static const HomeIconItem managerCustodyExpensesIcon = HomeIconItem(
     id: 'manager_custody_expenses',
     label: 'العهد/تقارير المصروفات',
@@ -130,17 +137,26 @@ class IconVisibilityService {
     roleTechnicalOffice: 'المكتب الفني',
     roleTopManagement: 'Top Managment',
     roleOpCoordinator: 'Op-Coordinator',
+    roleQs: 'QS',
+    roleFinance: 'Finance',
   };
 
   static const Map<String, List<HomeIconItem>> roleIcons = {
     roleOpCoordinator: [
       meetingsIcon,
     ],
+    roleQs: [
+      invoicesOwnerIcon,
+    ],
+    roleFinance: [
+      invoicesOwnerIcon,
+    ],
     roleTechnicalOffice: [
       ..._shopDrawingOnlyHomeIcons,
       HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
       HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
       meetingsIcon,
+      invoicesOwnerIcon,
     ],
     roleTopManagement: _shopDrawingOnlyHomeIcons,
     roleSiteEngineer: [
@@ -162,6 +178,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'accountant_custody', label: 'العهدة'),
       balancesExpensesIcon,
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
+      invoicesOwnerIcon,
     ],
     roleDocumentController: _documentControllerHomeIcons,
     roleSiteEngineerManager: [
@@ -177,6 +194,7 @@ class IconVisibilityService {
       managerCustodyExpensesIcon,
       HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
       meetingsIcon,
+      invoicesOwnerIcon,
     ],
     roleGeneralSupervisor: [
       HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),
@@ -206,6 +224,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
       operationManagerCustodyBalancesExpensesIcon,
       meetingsIcon,
+      invoicesOwnerIcon,
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -231,6 +250,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
       HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
       meetingsIcon,
+      invoicesOwnerIcon,
     ],
   };
 

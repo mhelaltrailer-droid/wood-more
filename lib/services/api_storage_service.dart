@@ -37,6 +37,7 @@ import '../models/material_withdrawal_report_row_model.dart';
 import '../models/uploaded_file_report_row_model.dart';
 import '../models/reports_sys_model.dart';
 import '../models/shop_drawing_model.dart';
+import '../models/invoices_owner_model.dart';
 import '../models/app_release_info_model.dart';
 import '../models/projects_dashboard_note_model.dart';
 import '../models/projects_dashboard_sheet_model.dart';
@@ -2933,6 +2934,192 @@ class ApiStorageService {
     await _put('shop-drawing/module-notifications/$notificationId/read', {
       'userId': userId,
     });
+  }
+
+  Future<int> getInvoicesOwnerPendingCount(int userId) async {
+    final data = await _get('invoices-owner/pending-count?userId=$userId');
+    return (data['count'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<List<InvoicesOwnerModel>> getInvoicesOwnerInbox({
+    required int userId,
+    required String tab,
+  }) async {
+    const path = 'invoices-owner/inbox';
+    final uri = Uri.parse(_path(path)).replace(
+      queryParameters: {
+        'userId': userId.toString(),
+        'tab': tab,
+      },
+    );
+    final r = await _httpGet(uri);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) =>
+              InvoicesOwnerModel.fromMap(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+  }
+
+  Future<InvoicesOwnerModel> getInvoicesOwnerDetail(int invoiceId) async {
+    final path = 'invoices-owner/$invoiceId';
+    final r = await _httpGet(Uri.parse(_path(path)));
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<Map<String, String>> getInvoicesOwnerAttachmentData({
+    required int invoiceId,
+    required int attachmentId,
+  }) async {
+    final path = 'invoices-owner/$invoiceId/attachments/$attachmentId';
+    final r = await _httpGet(Uri.parse(_path(path)));
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    final map = Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+    return {
+      'file_name': (map['file_name'] ?? '').toString(),
+      'mime_type': (map['mime_type'] ?? '').toString(),
+      'data_base64': (map['data_base64'] ?? '').toString(),
+    };
+  }
+
+  Future<InvoicesOwnerModel> createInvoicesOwner({
+    required int userId,
+    int? projectId,
+    String? projectName,
+    String? notes,
+    required List<Map<String, dynamic>> attachments,
+  }) async {
+    final uri = Uri.parse(_path('invoices-owner'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        if (projectId != null) 'projectId': projectId,
+        if (projectName != null && projectName.isNotEmpty)
+          'projectName': projectName,
+        if (notes != null && notes.isNotEmpty) 'notes': notes,
+        'attachments': attachments,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<InvoicesOwnerModel> updateInvoicesOwner({
+    required int invoiceId,
+    required int userId,
+    int? projectId,
+    String? projectName,
+    String? notes,
+    required List<Map<String, dynamic>> attachments,
+  }) async {
+    final uri = Uri.parse(_path('invoices-owner/$invoiceId'));
+    final r = await http.put(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        if (projectId != null) 'projectId': projectId,
+        if (projectName != null && projectName.isNotEmpty)
+          'projectName': projectName,
+        if (notes != null) 'notes': notes,
+        'attachments': attachments,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<InvoicesOwnerModel> approveInvoicesOwner({
+    required int invoiceId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('invoices-owner/$invoiceId/approve'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'userId': userId}),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<InvoicesOwnerModel> returnInvoicesOwner({
+    required int invoiceId,
+    required int userId,
+    required String reason,
+  }) async {
+    final uri = Uri.parse(_path('invoices-owner/$invoiceId/return'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'userId': userId, 'reason': reason}),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getInvoicesOwnerNotifications(
+    int userId,
+  ) async {
+    final list = await _getList('invoices-owner/notifications?userId=$userId');
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<int> getUnreadInvoicesOwnerNotificationsCount(int userId) async {
+    final data = await _get(
+      'invoices-owner/notifications/unread-count?userId=$userId',
+    );
+    return (data['count'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> markInvoicesOwnerNotificationRead({
+    required int notificationId,
+    required int userId,
+  }) async {
+    await _put('invoices-owner/notifications/$notificationId/read', {
+      'userId': userId,
+    });
+  }
+
+  Future<void> deleteInvoicesOwner({
+    required int invoiceId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('invoices-owner/$invoiceId')).replace(
+      queryParameters: {'userId': userId.toString()},
+    );
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  Future<InvoicesOwnerModel> deleteInvoicesOwnerAttachment({
+    required int invoiceId,
+    required int attachmentId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(
+      _path('invoices-owner/$invoiceId/attachments/$attachmentId'),
+    ).replace(queryParameters: {'userId': userId.toString()});
+    final r = await http.delete(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
   }
 
   Future<AppReleaseInfoModel> getAppReleaseLatest(int userId) async {

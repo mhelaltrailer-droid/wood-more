@@ -35,6 +35,7 @@ class _HomeScreenState extends State<HomeScreen>
   int _pendingWithdrawalRequestsCount = 0;
   int _pendingReportsSysCount = 0;
   int _pendingShopDrawingCount = 0;
+  int _pendingInvoicesOwnerCount = 0;
   int _unreadMeetingsNotificationsCount = 0;
   bool _hasAppReleaseUpdate = false;
   Timer? _notificationsPollTimer;
@@ -77,6 +78,7 @@ class _HomeScreenState extends State<HomeScreen>
     _loadPendingWithdrawalActionsCount();
     _loadPendingReportsSysCount();
     _loadPendingShopDrawingCount();
+    _loadPendingInvoicesOwnerCount();
     _loadAppReleaseUpdateBadge();
   }
 
@@ -94,6 +96,7 @@ class _HomeScreenState extends State<HomeScreen>
     _loadPendingWithdrawalActionsCount();
     _loadPendingReportsSysCount();
     _loadPendingShopDrawingCount();
+    _loadPendingInvoicesOwnerCount();
     _loadAppReleaseUpdateBadge();
     _startNotificationsPollingIfManager();
   }
@@ -270,6 +273,27 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Future<void> _loadPendingInvoicesOwnerCount() async {
+    if (!widget.currentUser.canAccessInvoicesOwner) {
+      if (mounted) setState(() => _pendingInvoicesOwnerCount = 0);
+      return;
+    }
+    try {
+      final storage = getStorage();
+      if (storage is! ApiStorageService) {
+        if (mounted) setState(() => _pendingInvoicesOwnerCount = 0);
+        return;
+      }
+      final c =
+          await storage.getInvoicesOwnerPendingCount(widget.currentUser.id);
+      if (!mounted) return;
+      setState(() => _pendingInvoicesOwnerCount = c);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _pendingInvoicesOwnerCount = 0);
+    }
+  }
+
   Future<void> _loadAppReleaseUpdateBadge() async {
     if (!widget.currentUser.canViewAppVersionsIcon) {
       if (mounted) setState(() => _hasAppReleaseUpdate = false);
@@ -312,6 +336,7 @@ class _HomeScreenState extends State<HomeScreen>
         _loadPendingWithdrawalActionsCount();
         _loadPendingReportsSysCount();
         _loadPendingShopDrawingCount();
+        _loadPendingInvoicesOwnerCount();
         _loadAppReleaseUpdateBadge();
       },
     );
@@ -590,9 +615,11 @@ class _HomeScreenState extends State<HomeScreen>
         iconConfig: _iconConfig,
         pendingReportsSysCount: _pendingReportsSysCount,
         pendingShopDrawingCount: _pendingShopDrawingCount,
+        pendingInvoicesOwnerCount: _pendingInvoicesOwnerCount,
         unreadMeetingsCount: _unreadMeetingsNotificationsCount,
         onReportsSysReturn: _loadPendingReportsSysCount,
         onShopDrawingReturn: _loadPendingShopDrawingCount,
+        onInvoicesOwnerReturn: _loadPendingInvoicesOwnerCount,
         onMeetingsReturn: _loadUnreadMeetingsNotificationsCount,
       ),
     );

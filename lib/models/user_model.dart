@@ -10,10 +10,16 @@ class UserModel {
   static const String technicalOfficeRoleLabel = 'المكتب الفني';
   static const String topManagementRoleLabel = 'Top Managment';
   static const String opCoordinatorRoleLabel = 'Op-Coordinator';
+  static const String qsRoleLabel = 'QS';
+  static const String financeRoleLabel = 'Finance';
   static const String primaryAppAdminEmail = 'mouhammedhelal@gmail.com';
+  /// محاسب Invoices (Owner) — Ah.Amin فقط من دور المحاسب.
+  static const String invoicesOwnerAccountantEmail = 'ah-amin';
 
   /// قيمة الدور في قاعدة البيانات.
   static const String roleProjectsManager = 'projects_manager';
+  static const String roleQs = 'qs';
+  static const String roleFinance = 'finance';
 
   final int id;
   final String name;
@@ -34,6 +40,8 @@ class UserModel {
   bool get isTopManagement => role == shopDrawingRoleTopManagement;
   bool get isOperationManager => role == 'operation_manager';
   bool get isOpCoordinator => role == 'op_coordinator';
+  bool get isQs => role == roleQs;
+  bool get isFinance => role == roleFinance;
   bool get isSiteEngineerManager => role == 'site_engineer_manager';
   bool get isProjectsManager => role == roleProjectsManager;
 
@@ -167,6 +175,45 @@ class UserModel {
 
   /// حذف أي بيان صرف — المسؤول الأساسي فقط.
   bool get canDeleteExpenseStatements => isPrimaryAppAdmin;
+
+  /// أيقونة Invoices (Owner) — QS، Finance، المكتب الفني، العمليات، Projects Manager، Ah.Amin، والمسؤول الأساسي.
+  bool get canAccessInvoicesOwner =>
+      isQs ||
+      isFinance ||
+      isTechnicalOffice ||
+      isOperationManager ||
+      isProjectsManager ||
+      canCreateInvoicesOwner ||
+      canManageInvoicesOwner;
+
+  /// إنشاء / إعادة إرسال Invoices (Owner) — Ah.Amin فقط.
+  bool get canCreateInvoicesOwner =>
+      isAccountant &&
+      email.trim().toLowerCase() ==
+          invoicesOwnerAccountantEmail.toLowerCase();
+
+  /// إدارة Invoices (Owner): حذف فاتورة/مرفق — المسؤول الأساسي فقط (اطلاع + حذف).
+  bool get canManageInvoicesOwner => isPrimaryAppAdmin;
+
+  /// التصرف في خطوة الحالة الحالية (اعتماد أو إعادة).
+  bool canActOnInvoicesOwnerStatus(String status) {
+    switch (status.trim()) {
+      case 'returned_to_creator':
+        return canCreateInvoicesOwner;
+      case 'pending_qs':
+        return isQs;
+      case 'pending_technical_office':
+        return isTechnicalOffice;
+      case 'pending_projects_manager':
+        return isProjectsManager;
+      case 'pending_finance':
+        return isFinance;
+      case 'pending_operation_manager':
+        return isOperationManager;
+      default:
+        return false;
+    }
+  }
 
   /// أيقونة Reports-SYS في الواجهة الرئيسية.
   bool get canAccessReportsSysHomeIcon => canParticipateInReportsSys;

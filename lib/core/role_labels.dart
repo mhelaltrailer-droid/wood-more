@@ -23,6 +23,10 @@ String arabicRoleLabel(String role) {
       return UserModel.topManagementRoleLabel;
     case 'op_coordinator':
       return UserModel.opCoordinatorRoleLabel;
+    case 'qs':
+      return UserModel.qsRoleLabel;
+    case 'finance':
+      return UserModel.financeRoleLabel;
     case 'app_admin':
       return 'مسؤول التطبيق';
     default:

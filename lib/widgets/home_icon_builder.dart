@@ -35,6 +35,7 @@ import '../screens/weekly_report_screen.dart';
 import '../screens/projects_dashboard_screen.dart';
 import '../screens/projects_dashboard_plus1_screen.dart';
 import '../screens/meetings_screen.dart';
+import '../screens/invoices_owner_hub_screen.dart';
 import '../services/api_storage_service.dart';
 import '../services/home_icon_order_service.dart';
 import '../services/route_restore.dart';
@@ -50,9 +51,11 @@ class HomeIconBuilder {
     required String iconId,
     int pendingReportsSysCount = 0,
     int pendingShopDrawingCount = 0,
+    int pendingInvoicesOwnerCount = 0,
     int unreadMeetingsCount = 0,
     Future<void> Function()? onReportsSysReturn,
     Future<void> Function()? onShopDrawingReturn,
+    Future<void> Function()? onInvoicesOwnerReturn,
     Future<void> Function()? onMeetingsReturn,
   }) {
     switch (iconId) {
@@ -507,6 +510,26 @@ class HomeIconBuilder {
               ReportsSysHubScreen(currentUser: user),
             );
             await onReportsSysReturn?.call();
+          },
+        );
+      case 'invoices_owner':
+        if (!user.canAccessInvoicesOwner) {
+          return const SizedBox.shrink();
+        }
+        return _lightCard(
+          icon: Icons.attach_money,
+          iconSize: 56,
+          title: 'Invoices (Owner)',
+          subtitle: 'تداول فواتير المالك',
+          padding: 28,
+          badgeCount: pendingInvoicesOwnerCount,
+          onTap: () async {
+            await pushAndSaveRoute(
+              context,
+              'invoices-owner',
+              InvoicesOwnerHubScreen(currentUser: user),
+            );
+            await onInvoicesOwnerReturn?.call();
           },
         );
       default:
