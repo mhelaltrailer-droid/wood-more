@@ -8,7 +8,8 @@ RUN flutter pub get
 
 # Copy source and build for web
 COPY . .
-RUN flutter build web --release
+# --no-tree-shake-icons: يمنع اختفاء أيقونات Material الجديدة على الويب بسبب كاش الخط
+RUN flutter build web --release --no-tree-shake-icons
 
 # Run stage: serve with nginx
 FROM nginx:alpine

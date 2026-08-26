@@ -29,6 +29,7 @@ class InvoicesOwnerDetailScreen extends StatefulWidget {
 class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
   final _storage = getStorage();
   final _returnReasonController = TextEditingController();
+  final _approveNotesController = TextEditingController();
 
   InvoicesOwnerModel? _invoice;
   bool _loading = true;
@@ -44,6 +45,7 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
   @override
   void dispose() {
     _returnReasonController.dispose();
+    _approveNotesController.dispose();
     super.dispose();
   }
 
@@ -91,9 +93,11 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     if (_storage is! ApiStorageService) return;
     setState(() => _acting = true);
     try {
+      final notes = _approveNotesController.text.trim();
       await _storage.approveInvoicesOwner(
         invoiceId: widget.invoiceId,
         userId: widget.currentUser.id,
+        notes: notes.isEmpty ? null : notes,
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -154,9 +158,9 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('حذف الفاتورة'),
+        title: const Text('حذف المستخلص'),
         content: const Text(
-          'هل تريد حذف هذه الفاتورة بالكامل مع كل المرفقات؟ لا يمكن التراجع.',
+          'هل تريد حذف هذا المستخلص بالكامل مع كل المرفقات؟ لا يمكن التراجع.',
         ),
         actions: [
           TextButton(
@@ -195,7 +199,7 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('حذف المرفق'),
-        content: const Text('حذف هذا الملف من الفاتورة؟'),
+        content: const Text('حذف هذا الملف من المستخلص؟'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -239,7 +243,7 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
         actions: [
           if (_invoice != null && widget.currentUser.canManageInvoicesOwner)
             IconButton(
-              tooltip: 'حذف الفاتورة',
+              tooltip: 'حذف المستخلص',
               onPressed: _acting ? null : _deleteInvoice,
               icon: const Icon(Icons.delete_outline),
             ),
@@ -278,7 +282,7 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
             subtitle: Text('${d.statusLabelAr} — ${fmt.format(d.updatedAt)}'),
           ),
         ),
-        if (d.notes != null && d.notes!.trim().isNotEmpty) ...[
+        if (d.stageNotesForDisplay.isNotEmpty) ...[
           const SizedBox(height: 12),
           Card(
             child: Padding(
@@ -287,11 +291,33 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'الملاحظات',
+                    'ملاحظات المراحل',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  Text(d.notes!),
+                  ...d.stageNotesForDisplay.map((n) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            n.title,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(n.body),
+                          Text(
+                            fmt.format(n.at),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
                 ],
               ),
             ),
@@ -359,6 +385,15 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
         ],
         if (canAct) ...[
           const SizedBox(height: 16),
+          TextField(
+            controller: _approveNotesController,
+            decoration: const InputDecoration(
+              labelText: 'ملاحظات الاعتماد (اختياري)',
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 3,
+          ),
+          const SizedBox(height: 12),
           FilledButton(
             onPressed: _acting ? null : _approve,
             style: FilledButton.styleFrom(

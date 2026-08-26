@@ -3043,17 +3043,37 @@ class ApiStorageService {
   Future<InvoicesOwnerModel> approveInvoicesOwner({
     required int invoiceId,
     required int userId,
+    String? notes,
   }) async {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId/approve'));
+    final body = <String, dynamic>{'userId': userId};
+    final trimmed = notes?.trim();
+    if (trimmed != null && trimmed.isNotEmpty) {
+      body['notes'] = trimmed;
+    }
     final r = await http.post(
       uri,
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'userId': userId}),
+      body: jsonEncode(body),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
     return InvoicesOwnerModel.fromMap(
       Map<String, dynamic>.from(jsonDecode(r.body) as Map),
     );
+  }
+
+  Future<List<InvoicesOwnerActivityLogItem>> getInvoicesOwnerActivityLog(
+    int userId,
+  ) async {
+    final list =
+        await _getList('invoices-owner/activity-log?userId=$userId');
+    return list
+        .map(
+          (e) => InvoicesOwnerActivityLogItem.fromMap(
+            Map<String, dynamic>.from(e),
+          ),
+        )
+        .toList();
   }
 
   Future<InvoicesOwnerModel> returnInvoicesOwner({

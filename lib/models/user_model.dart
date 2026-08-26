@@ -192,8 +192,12 @@ class UserModel {
       email.trim().toLowerCase() ==
           invoicesOwnerAccountantEmail.toLowerCase();
 
-  /// إدارة Invoices (Owner): حذف فاتورة/مرفق — المسؤول الأساسي فقط (اطلاع + حذف).
+  /// إدارة Invoices (Owner): حذف مستخلص/مرفق — المسؤول الأساسي فقط (اطلاع + حذف).
   bool get canManageInvoicesOwner => isPrimaryAppAdmin;
+
+  /// سجل تداول Invoices (Owner) — المسؤول الأساسي + مدير العمليات.
+  bool get canViewInvoicesOwnerActivityLog =>
+      isPrimaryAppAdmin || isOperationManager;
 
   /// التصرف في خطوة الحالة الحالية (اعتماد أو إعادة).
   bool canActOnInvoicesOwnerStatus(String status) {

@@ -40,6 +40,7 @@ import '../services/api_storage_service.dart';
 import '../services/home_icon_order_service.dart';
 import '../services/route_restore.dart';
 import '../services/storage_service.dart';
+import 'invoices_owner_icon.dart';
 import 'meetings_icon.dart';
 
 class HomeIconBuilder {
@@ -517,10 +518,10 @@ class HomeIconBuilder {
           return const SizedBox.shrink();
         }
         return _lightCard(
-          icon: Icons.attach_money,
+          iconWidget: const InvoicesOwnerIcon(size: 56),
           iconSize: 56,
           title: 'Invoices (Owner)',
-          subtitle: 'تداول فواتير المالك',
+          subtitle: 'تداول مستخلصات المالك',
           padding: 28,
           badgeCount: pendingInvoicesOwnerCount,
           onTap: () async {

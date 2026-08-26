@@ -39,6 +39,7 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
   bool _loading = true;
   String? _error;
   final Map<String, List<InvoicesOwnerModel>> _lists = {};
+  List<InvoicesOwnerActivityLogItem> _activityLog = const [];
   List<Map<String, dynamic>> _notifications = const [];
   int _unread = 0;
   Timer? _pollTimer;
@@ -46,11 +47,13 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
   List<_TabDef> get _tabs {
     final user = widget.currentUser;
     if (user.canManageInvoicesOwner) {
-      return const [
-        _TabDef('all', 'الكل'),
-        _TabDef('pending', 'قيد التداول'),
-        _TabDef('approved', 'معتمدة'),
-        _TabDef('notifications', 'إشعارات'),
+      return [
+        const _TabDef('all', 'الكل'),
+        const _TabDef('pending', 'قيد التداول'),
+        const _TabDef('approved', 'معتمدة'),
+        if (user.canViewInvoicesOwnerActivityLog)
+          const _TabDef('activity', 'سجل التداول'),
+        const _TabDef('notifications', 'إشعارات'),
       ];
     }
     if (user.canCreateInvoicesOwner) {
@@ -61,10 +64,12 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
         _TabDef('notifications', 'إشعارات'),
       ];
     }
-    return const [
-      _TabDef('pending', 'بانتظار إجرائي'),
-      _TabDef('approved', 'معتمدة'),
-      _TabDef('notifications', 'إشعارات'),
+    return [
+      const _TabDef('pending', 'بانتظار إجرائي'),
+      const _TabDef('approved', 'معتمدة'),
+      if (user.canViewInvoicesOwnerActivityLog)
+        const _TabDef('activity', 'سجل التداول'),
+      const _TabDef('notifications', 'إشعارات'),
     ];
   }
 
@@ -112,6 +117,10 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
       await _loadNotifications();
       return;
     }
+    if (tabKey == 'activity') {
+      await _loadActivityLog();
+      return;
+    }
     if (_storage is! ApiStorageService) {
       setState(() {
         _error = 'يتطلب اتصال API';
@@ -127,6 +136,23 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
       if (!mounted) return;
       setState(() {
         _lists[tabKey] = items;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '$e');
+    }
+  }
+
+  Future<void> _loadActivityLog() async {
+    if (_storage is! ApiStorageService) return;
+    if (!widget.currentUser.canViewInvoicesOwnerActivityLog) return;
+    try {
+      final items =
+          await _storage.getInvoicesOwnerActivityLog(widget.currentUser.id);
+      if (!mounted) return;
+      setState(() {
+        _activityLog = items;
         _error = null;
       });
     } catch (e) {
@@ -262,7 +288,9 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
           : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _error != null && !_lists.values.any((l) => l.isNotEmpty)
+          : _error != null &&
+                  !_lists.values.any((l) => l.isNotEmpty) &&
+                  _activityLog.isEmpty
               ? Center(
                   child: Text(_error!, style: const TextStyle(color: Colors.red)),
                 )
@@ -271,6 +299,9 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
                   children: tabs.map((t) {
                     if (t.key == 'notifications') {
                       return _buildNotificationsTab();
+                    }
+                    if (t.key == 'activity') {
+                      return _buildActivityTab(fmt);
                     }
                     return _buildListTab(
                       items: _lists[t.key] ?? const [],
@@ -325,6 +356,65 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
               trailing: d.attachments.isNotEmpty
                   ? Text('${d.attachments.length} ملف')
                   : null,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildActivityTab(DateFormat fmt) {
+    if (_activityLog.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _loadActivityLog,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(height: 120),
+            Center(child: Text('لا توجد حركات بعد')),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _loadActivityLog,
+      child: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: _activityLog.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        itemBuilder: (context, index) {
+          final a = _activityLog[index];
+          return Card(
+            child: ListTile(
+              onTap: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => InvoicesOwnerDetailScreen(
+                      currentUser: widget.currentUser,
+                      invoiceId: a.invoiceId,
+                    ),
+                  ),
+                );
+                await _loadActivityLog();
+              },
+              title: Text(
+                a.projectName,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${a.actorUserName}: ${a.actionLabelAr}'),
+                  Text(
+                    'الحالة الحالية: ${a.invoiceStatusLabelAr}',
+                    style: TextStyle(color: Colors.grey.shade700),
+                  ),
+                  if (a.comment != null && a.comment!.trim().isNotEmpty)
+                    Text(a.comment!),
+                  Text(fmt.format(a.createdAt)),
+                ],
+              ),
+              trailing: Text('#${a.invoiceId}'),
             ),
           );
         },

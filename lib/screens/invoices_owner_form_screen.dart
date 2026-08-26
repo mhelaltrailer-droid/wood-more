@@ -319,7 +319,7 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
             TextFormField(
               controller: _notesController,
               decoration: const InputDecoration(
-                labelText: 'ملاحظات',
+                labelText: 'ملاحظات المنشئ (اختياري)',
                 border: OutlineInputBorder(),
               ),
               maxLines: 3,

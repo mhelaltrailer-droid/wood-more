@@ -91,6 +91,86 @@ class InvoicesOwnerActionModel {
   }
 }
 
+/// عنصر في سجل التداول العام لوحدة Invoices (Owner).
+class InvoicesOwnerActivityLogItem {
+  final int id;
+  final int invoiceId;
+  final int actorUserId;
+  final String actorUserName;
+  final String action;
+  final String? comment;
+  final DateTime createdAt;
+  final String projectName;
+  final String invoiceStatus;
+
+  const InvoicesOwnerActivityLogItem({
+    required this.id,
+    required this.invoiceId,
+    required this.actorUserId,
+    required this.actorUserName,
+    required this.action,
+    this.comment,
+    required this.createdAt,
+    required this.projectName,
+    required this.invoiceStatus,
+  });
+
+  factory InvoicesOwnerActivityLogItem.fromMap(Map<String, dynamic> map) {
+    int asInt(dynamic v) =>
+        int.tryParse(v?.toString() ?? '') ?? (v is int ? v : 0);
+    return InvoicesOwnerActivityLogItem(
+      id: asInt(map['id']),
+      invoiceId: asInt(map['invoice_id']),
+      actorUserId: asInt(map['actor_user_id']),
+      actorUserName: (map['actor_user_name'] ?? '').toString(),
+      action: (map['action'] ?? '').toString(),
+      comment: map['comment']?.toString(),
+      createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ??
+          DateTime.now(),
+      projectName: (map['project_name'] ?? '').toString(),
+      invoiceStatus: (map['invoice_status'] ?? '').toString(),
+    );
+  }
+
+  String get actionLabelAr {
+    switch (action) {
+      case 'created':
+        return 'إنشاء وإرسال';
+      case 'resubmit':
+        return 'إعادة إرسال بعد التعديل';
+      case 'approve':
+        return 'اعتماد';
+      case 'return':
+        return 'إعادة + مراجعة';
+      case 'delete_attachment':
+        return 'حذف مرفق';
+      default:
+        return action;
+    }
+  }
+
+  String get invoiceStatusLabelAr {
+    switch (invoiceStatus) {
+      case invoicesOwnerStatusPendingQs:
+        return 'بانتظار QS';
+      case invoicesOwnerStatusPendingTo:
+        return 'بانتظار المكتب الفني';
+      case invoicesOwnerStatusPendingPm:
+        return 'بانتظار Projects Manager';
+      case invoicesOwnerStatusPendingFinance:
+        return 'بانتظار Finance';
+      case invoicesOwnerStatusPendingOm:
+        return 'بانتظار مدير العمليات';
+      case invoicesOwnerStatusReturnedCreator:
+        return 'معاد للمنشئ';
+      case invoicesOwnerStatusApproved:
+        return 'معتمد';
+      default:
+        return invoiceStatus;
+    }
+  }
+}
+
 class InvoicesOwnerModel {
   final int id;
   final int? projectId;
@@ -125,6 +205,30 @@ class InvoicesOwnerModel {
     this.attachments = const [],
     this.actions = const [],
   });
+
+  /// ملاحظات المراحل للعرض التراكمي (منشئ + معتمدون).
+  List<({String title, String body, DateTime at})> get stageNotesForDisplay {
+    final out = <({String title, String body, DateTime at})>[];
+    final creatorNotes = notes?.trim() ?? '';
+    if (creatorNotes.isNotEmpty) {
+      out.add((
+        title: 'ملاحظات المنشئ ($createdByUserName)',
+        body: creatorNotes,
+        at: createdAt,
+      ));
+    }
+    for (final a in actions) {
+      if (a.action != 'approve') continue;
+      final c = a.comment?.trim() ?? '';
+      if (c.isEmpty) continue;
+      out.add((
+        title: 'ملاحظات ${a.actorUserName}',
+        body: c,
+        at: a.createdAt,
+      ));
+    }
+    return out;
+  }
 
   factory InvoicesOwnerModel.fromMap(Map<String, dynamic> map) {
     DateTime parseDate(dynamic v) =>

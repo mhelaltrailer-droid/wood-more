@@ -106,6 +106,16 @@ function ioIsPrimaryAdmin(user) {
   return String(user.email || '').trim().toLowerCase() === IO_PRIMARY_ADMIN_EMAIL;
 }
 
+function ioIsOperationManager(user) {
+  if (!user) return false;
+  return String(user.role || '').trim() === 'operation_manager';
+}
+
+/** سجل التداول: المسؤول الأساسي + مدير العمليات فقط. */
+function ioCanViewActivityLog(user) {
+  return ioIsPrimaryAdmin(user) || ioIsOperationManager(user);
+}
+
 function ioCanAccessModule(user) {
   if (!user) return false;
   if (ioIsCreatorUser(user) || ioIsPrimaryAdmin(user)) return true;
@@ -342,7 +352,7 @@ async function ioDeleteAttachments(pool, invoiceId) {
 
 function ioNotificationBody(actorName, verb, projectName, whenIso) {
   const when = ioFormatArDateTime(whenIso);
-  return `قام ${actorName} ب${verb} فاتورة «${projectName}» — يوم ${when}`;
+  return `قام ${actorName} ب${verb} مستخلص «${projectName}» — يوم ${when}`;
 }
 
 function ioPendingStatusForRole(role) {
@@ -506,6 +516,41 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
     }
   });
 
+  app.get('/invoices-owner/activity-log', async (req, res) => {
+    try {
+      const userId = parseInt(String(req.query.userId || ''), 10);
+      if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
+      const user = await ioGetUser(pool, userId);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!ioCanViewActivityLog(user)) return res.status(403).json({ error: 'forbidden' });
+
+      const r = await pool.query(
+        `SELECT a.id, a.invoice_id, a.actor_user_id, a.actor_user_name,
+                a.action, a.comment, a.created_at,
+                i.project_name, i.status AS invoice_status
+         FROM invoices_owner_actions a
+         INNER JOIN invoices_owner i ON i.id = a.invoice_id
+         ORDER BY a.created_at DESC, a.id DESC
+         LIMIT 500`,
+      );
+      res.json(
+        r.rows.map((row) => ({
+          id: parseInt(row.id, 10),
+          invoice_id: parseInt(row.invoice_id, 10),
+          actor_user_id: parseInt(row.actor_user_id, 10),
+          actor_user_name: row.actor_user_name,
+          action: row.action,
+          comment: row.comment || null,
+          created_at: row.created_at,
+          project_name: row.project_name || '',
+          invoice_status: row.invoice_status || '',
+        })),
+      );
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
   app.get('/invoices-owner/:id', async (req, res) => {
     try {
       const id = parseInt(String(req.params.id || ''), 10);
@@ -588,6 +633,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         actorUserId: userId,
         actorUserName: actor.name,
         action: 'created',
+        comment: notes || null,
         createdAt: now,
       });
 
@@ -660,6 +706,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         actorUserId: userId,
         actorUserName: actor.name,
         action: 'resubmit',
+        comment: notes || null,
         createdAt: now,
       });
 
@@ -682,6 +729,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const id = parseInt(String(req.params.id || ''), 10);
       const b = req.body || {};
       const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      const approveNotes = String(b.notes ?? b.comment ?? '').trim();
       if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
 
       const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [id]);
@@ -733,6 +781,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         actorUserId: userId,
         actorUserName: actor.name,
         action: 'approve',
+        comment: approveNotes || null,
         createdAt: now,
       });
 
