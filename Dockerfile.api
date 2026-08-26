@@ -4,7 +4,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev
-COPY backend/server.js backend/egypt_local_time.js backend/shop_drawing.js backend/projects_dashboard.js backend/expense_statements.js backend/attachments.js backend/withdrawal_files_reports.js backend/meetings.js ./
+COPY backend/server.js backend/egypt_local_time.js backend/shop_drawing.js backend/invoices_owner.js backend/projects_dashboard.js backend/expense_statements.js backend/attachments.js backend/withdrawal_files_reports.js backend/meetings.js ./
 COPY backend/scripts/lib ./scripts/lib
 COPY backend/scripts/seed_z1_emaar_f_project_locations.sql ./scripts/seed_z1_emaar_f_project_locations.sql
 EXPOSE 3000
