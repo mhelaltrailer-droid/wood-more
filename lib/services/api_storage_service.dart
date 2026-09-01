@@ -2975,8 +2975,10 @@ class ApiStorageService {
   Future<Map<String, String>> getInvoicesOwnerAttachmentData({
     required int invoiceId,
     required int attachmentId,
+    required int userId,
   }) async {
-    final path = 'invoices-owner/$invoiceId/attachments/$attachmentId';
+    final path =
+        'invoices-owner/$invoiceId/attachments/$attachmentId?userId=$userId';
     final r = await _httpGet(Uri.parse(_path(path)));
     if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
     final map = Map<String, dynamic>.from(jsonDecode(r.body) as Map);
@@ -2985,6 +2987,61 @@ class ApiStorageService {
       'mime_type': (map['mime_type'] ?? '').toString(),
       'data_base64': (map['data_base64'] ?? '').toString(),
     };
+  }
+
+  Future<InvoicesOwnerModel> addInvoicesOwnerAttachment({
+    required int invoiceId,
+    required int userId,
+    required String fileName,
+    required String mimeType,
+    required String dataBase64,
+    required int sizeBytes,
+  }) async {
+    final uri = Uri.parse(_path('invoices-owner/$invoiceId/attachments'));
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'file_name': fileName,
+        'mime_type': mimeType,
+        'data_base64': dataBase64,
+        'size_bytes': sizeBytes,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<InvoicesOwnerModel> replaceInvoicesOwnerAttachment({
+    required int invoiceId,
+    required int attachmentId,
+    required int userId,
+    required String fileName,
+    required String mimeType,
+    required String dataBase64,
+    required int sizeBytes,
+  }) async {
+    final uri = Uri.parse(
+      _path('invoices-owner/$invoiceId/attachments/$attachmentId/replace'),
+    );
+    final r = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'file_name': fileName,
+        'mime_type': mimeType,
+        'data_base64': dataBase64,
+        'size_bytes': sizeBytes,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
   }
 
   Future<InvoicesOwnerModel> createInvoicesOwner({

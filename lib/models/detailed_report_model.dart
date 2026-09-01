@@ -42,6 +42,22 @@ bool isManualWorkLocationsAttachment(DetailedReportAttachment a) =>
 bool isReportMetadataAttachment(DetailedReportAttachment a) =>
     isExecutedTodaySummaryAttachment(a) || isManualWorkLocationsAttachment(a);
 
+/// ملفات المستخدم الحقيقية فقط (بدون مرفقات البيانات الداخلية + صور المصروفات).
+int countDetailedReportUserFiles({
+  required List<DetailedReportAttachment> attachments,
+  List<ExpenseItem> expenses = const [],
+}) {
+  var count = attachments
+      .where((a) => a.data.trim().isNotEmpty && !isReportMetadataAttachment(a))
+      .length;
+  for (final e in expenses) {
+    if (e.imagePath != null && e.imagePath!.trim().isNotEmpty) {
+      count++;
+    }
+  }
+  return count;
+}
+
 String? decodeExecutedTodaySummaryData(String data) {
   final d = data.trim();
   if (d.isEmpty) return null;

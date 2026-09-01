@@ -3586,7 +3586,11 @@ class DatabaseService {
         actorUserName: report.userName,
         projectName: report.projectName,
       );
-      if (report.attachments.isNotEmpty) {
+      if (countDetailedReportUserFiles(
+            attachments: report.attachments,
+            expenses: report.expenses,
+          ) >
+          0) {
         await _notifyAppAdmins(
           db,
           title: 'رفع مرفقات مع خطة العمل',

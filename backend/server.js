@@ -3790,9 +3790,7 @@ app.post('/detailed-reports', async (req, res) => {
       const current = bal.rows.length ? parseFloat(bal.rows[0].balance) : 0;
       await pool.query('INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2', [b.userId, current - totalExpense]);
     }
-    const hasAttachments =
-      (Array.isArray(b.attachments) && b.attachments.length > 0) ||
-      (attachmentsJson != null && String(attachmentsJson).trim() !== '');
+    const hasAttachments = countDetailedReportFiles(b) > 0;
     await notifyAppAdminsWorkPlanSaved(pool, {
       userId: b.userId,
       userName: b.userName,
@@ -4031,9 +4029,7 @@ app.put('/detailed-reports/:id', async (req, res) => {
         );
       }
       await pool.query('COMMIT');
-      const hasAttachments =
-        (Array.isArray(b.attachments) && b.attachments.length > 0) ||
-        (attachmentsJson != null && String(attachmentsJson).trim() !== '');
+      const hasAttachments = countDetailedReportFiles(b) > 0;
       await notifyAppAdminsWorkPlanSaved(pool, {
         userId: b.userId,
         userName: b.userName,

@@ -85,6 +85,10 @@ class InvoicesOwnerActionModel {
         return 'إعادة + مراجعة';
       case 'delete_attachment':
         return 'حذف مرفق';
+      case 'add_attachment':
+        return 'إضافة مرفق';
+      case 'replace_attachment':
+        return 'استبدال مرفق';
       default:
         return action;
     }
@@ -144,6 +148,10 @@ class InvoicesOwnerActivityLogItem {
         return 'إعادة + مراجعة';
       case 'delete_attachment':
         return 'حذف مرفق';
+      case 'add_attachment':
+        return 'إضافة مرفق';
+      case 'replace_attachment':
+        return 'استبدال مرفق';
       default:
         return action;
     }

@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -199,7 +202,9 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('حذف المرفق'),
-        content: const Text('حذف هذا الملف من المستخلص؟'),
+        content: const Text(
+          'حذف هذا الملف نهائياً من قاعدة البيانات؟ لا يمكن التراجع.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -219,6 +224,131 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
         invoiceId: widget.invoiceId,
         attachmentId: attachmentId,
         userId: widget.currentUser.id,
+      );
+      if (!mounted) return;
+      setState(() => _invoice = updated);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  bool _isAllowedFile(String name, String? mime) {
+    final n = name.toLowerCase();
+    final m = (mime ?? '').toLowerCase();
+    final isPdf = m == 'application/pdf' || n.endsWith('.pdf');
+    final isExcel = m.contains('excel') ||
+        m.contains('spreadsheet') ||
+        n.endsWith('.xls') ||
+        n.endsWith('.xlsx') ||
+        n.endsWith('.xlsm');
+    return isPdf || isExcel;
+  }
+
+  String _mimeFromExtension(String? extension) {
+    switch (extension?.toLowerCase()) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'xls':
+        return 'application/vnd.ms-excel';
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'xlsm':
+        return 'application/vnd.ms-excel.sheet.macroenabled.12';
+      default:
+        return 'application/octet-stream';
+    }
+  }
+
+  Future<Map<String, dynamic>?> _pickSingleAttachmentFile() async {
+    final result = await FilePicker.pickFiles(
+      allowMultiple: false,
+      type: FileType.custom,
+      allowedExtensions: const ['pdf', 'xls', 'xlsx', 'xlsm'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return null;
+    final f = result.files.first;
+    final bytes = f.bytes;
+    if (bytes == null) return null;
+    if (bytes.length > invoicesOwnerMaxAttachmentBytes) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('الملف ${f.name} أكبر من 5 ميجا'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return null;
+    }
+    final mime = _mimeFromExtension(f.extension);
+    if (!_isAllowedFile(f.name, mime)) return null;
+    return {
+      'file_name': f.name,
+      'mime_type': mime,
+      'data_base64': base64Encode(bytes),
+      'size_bytes': bytes.length,
+    };
+  }
+
+  Future<void> _addAttachment() async {
+    if (_storage is! ApiStorageService) return;
+    final d = _invoice;
+    if (d == null) return;
+    if (d.attachments.length >= invoicesOwnerMaxAttachments) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('الحد الأقصى $invoicesOwnerMaxAttachments ملفات'),
+        ),
+      );
+      return;
+    }
+    final file = await _pickSingleAttachmentFile();
+    if (file == null) return;
+    setState(() => _acting = true);
+    try {
+      final updated = await _storage.addInvoicesOwnerAttachment(
+        invoiceId: widget.invoiceId,
+        userId: widget.currentUser.id,
+        fileName: file['file_name'] as String,
+        mimeType: file['mime_type'] as String,
+        dataBase64: file['data_base64'] as String,
+        sizeBytes: file['size_bytes'] as int,
+      );
+      if (!mounted) return;
+      setState(() => _invoice = updated);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  Future<void> _replaceAttachment(int index) async {
+    if (_storage is! ApiStorageService) return;
+    final d = _invoice;
+    if (d == null || index < 0 || index >= d.attachments.length) return;
+    final attachment = d.attachments[index];
+    final file = await _pickSingleAttachmentFile();
+    if (file == null) return;
+    setState(() => _acting = true);
+    try {
+      final updated = await _storage.replaceInvoicesOwnerAttachment(
+        invoiceId: widget.invoiceId,
+        attachmentId: attachment.id,
+        userId: widget.currentUser.id,
+        fileName: file['file_name'] as String,
+        mimeType: file['mime_type'] as String,
+        dataBase64: file['data_base64'] as String,
+        sizeBytes: file['size_bytes'] as int,
       );
       if (!mounted) return;
       setState(() => _invoice = updated);
@@ -269,6 +399,15 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
         d.status == invoicesOwnerStatusReturnedCreator &&
         d.createdByUserId == user.id;
     final canManage = user.canManageInvoicesOwner;
+    final canAssigneeAttachments = user.canManageInvoicesOwnerAttachmentsAsAssignee(
+      status: d.status,
+      currentAssigneeUserId: d.currentAssigneeUserId,
+    );
+    final canDownloadAttachments = user.canDownloadInvoicesOwnerAttachments(
+      status: d.status,
+      currentAssigneeUserId: d.currentAssigneeUserId,
+    );
+    final canRemoveAttachment = canManage || canAssigneeAttachments;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -349,25 +488,60 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
           '${d.currentAssigneeUserName != null ? ' — المسند: ${d.currentAssigneeUserName}' : ''}',
           style: TextStyle(color: Colors.grey.shade700),
         ),
-        if (d.attachments.isNotEmpty) ...[
+        if (d.attachments.isNotEmpty || canAssigneeAttachments) ...[
           const SizedBox(height: 12),
-          ReportsSysAttachmentsPanel(
-            reportId: d.id,
-            attachments: _asReportsSysAttachments(d.attachments),
-            loadAttachment: _storage is ApiStorageService
-                ? (attachmentId) => _storage.getInvoicesOwnerAttachmentData(
-                      invoiceId: d.id,
-                      attachmentId: attachmentId,
-                    )
-                : null,
-            readOnly: true,
-            onRemove: canManage
-                ? (index) {
-                    if (index < 0 || index >= d.attachments.length) return;
-                    _deleteAttachment(d.attachments[index].id);
-                  }
-                : null,
-          ),
+          if (d.attachments.isNotEmpty)
+            ReportsSysAttachmentsPanel(
+              reportId: d.id,
+              attachments: _asReportsSysAttachments(d.attachments),
+              loadAttachment: _storage is ApiStorageService && canDownloadAttachments
+                  ? (attachmentId) => _storage.getInvoicesOwnerAttachmentData(
+                        invoiceId: d.id,
+                        attachmentId: attachmentId,
+                        userId: widget.currentUser.id,
+                      )
+                  : null,
+              allowDownload: canDownloadAttachments,
+              readOnly: !canRemoveAttachment,
+              onRemove: canRemoveAttachment
+                  ? (index) {
+                      if (index < 0 || index >= d.attachments.length) return;
+                      _deleteAttachment(d.attachments[index].id);
+                    }
+                  : null,
+              onReplace: canAssigneeAttachments
+                  ? (index) => _replaceAttachment(index)
+                  : null,
+            )
+          else
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'المرفقات',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'لا مرفقات حالياً',
+                      style: TextStyle(color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (canAssigneeAttachments &&
+              d.attachments.length < invoicesOwnerMaxAttachments) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _acting ? null : _addAttachment,
+              icon: const Icon(Icons.add),
+              label: const Text('إضافة مرفق'),
+            ),
+          ],
         ],
         const SizedBox(height: 16),
         InvoicesOwnerTimeline(actions: d.actions),

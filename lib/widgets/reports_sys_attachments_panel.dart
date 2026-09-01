@@ -41,7 +41,9 @@ class ReportsSysAttachmentsPanel extends StatefulWidget {
   final List<ReportsSysAttachmentModel> attachments;
   final ReportsSysAttachmentLoader? loadAttachment;
   final void Function(int index)? onRemove;
+  final void Function(int index)? onReplace;
   final bool readOnly;
+  final bool allowDownload;
 
   const ReportsSysAttachmentsPanel({
     super.key,
@@ -49,7 +51,9 @@ class ReportsSysAttachmentsPanel extends StatefulWidget {
     required this.attachments,
     this.loadAttachment,
     this.onRemove,
+    this.onReplace,
     this.readOnly = true,
+    this.allowDownload = true,
   });
 
   @override
@@ -97,6 +101,7 @@ class _ReportsSysAttachmentsPanelState extends State<ReportsSysAttachmentsPanel>
   }
 
   Future<void> _downloadAttachment(ReportsSysAttachmentModel att) async {
+    if (!widget.allowDownload) return;
     if (_downloadingId == att.id) return;
     setState(() => _downloadingId = att.id);
     try {
@@ -141,7 +146,7 @@ class _ReportsSysAttachmentsPanelState extends State<ReportsSysAttachmentsPanel>
         images: images,
         initialIndex: idx,
         loadBytes: _loadBytes,
-        onDownload: _downloadAttachment,
+        onDownload: widget.allowDownload ? _downloadAttachment : null,
       ),
     );
   }
@@ -153,6 +158,7 @@ class _ReportsSysAttachmentsPanelState extends State<ReportsSysAttachmentsPanel>
       await _openImageGallery(images, index < 0 ? 0 : index);
       return;
     }
+    if (!widget.allowDownload) return;
     await _downloadAttachment(att);
   }
 
@@ -310,7 +316,8 @@ class _ReportsSysAttachmentsPanelState extends State<ReportsSysAttachmentsPanel>
                             ),
                             IconButton(
                               tooltip: 'تحميل',
-                              onPressed: _downloadingId == att.id
+                              onPressed: !widget.allowDownload ||
+                                      _downloadingId == att.id
                                   ? null
                                   : () => _downloadAttachment(att),
                               icon: _downloadingId == att.id
@@ -321,10 +328,24 @@ class _ReportsSysAttachmentsPanelState extends State<ReportsSysAttachmentsPanel>
                                     )
                                   : Icon(
                                       Icons.download_outlined,
-                                      color: const Color(0xFF1B5E20),
+                                      color: widget.allowDownload
+                                          ? const Color(0xFF1B5E20)
+                                          : Colors.grey.shade400,
                                       size: 22,
                                     ),
                             ),
+                            if (widget.onReplace != null) ...[
+                              const SizedBox(width: 4),
+                              IconButton(
+                                tooltip: 'استبدال',
+                                onPressed: () => widget.onReplace!(globalIndex),
+                                icon: Icon(
+                                  Icons.swap_horiz,
+                                  color: Colors.blue.shade700,
+                                  size: 22,
+                                ),
+                              ),
+                            ],
                             if (widget.onRemove != null) ...[
                               const SizedBox(width: 4),
                               IconButton(
@@ -471,13 +492,13 @@ class _ReportsSysImageGalleryDialog extends StatefulWidget {
   final List<ReportsSysAttachmentModel> images;
   final int initialIndex;
   final Future<Uint8List?> Function(ReportsSysAttachmentModel) loadBytes;
-  final Future<void> Function(ReportsSysAttachmentModel) onDownload;
+  final Future<void> Function(ReportsSysAttachmentModel)? onDownload;
 
   const _ReportsSysImageGalleryDialog({
     required this.images,
     required this.initialIndex,
     required this.loadBytes,
-    required this.onDownload,
+    this.onDownload,
   });
 
   @override
@@ -555,11 +576,12 @@ class _ReportsSysImageGalleryDialogState
                       ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'تحميل',
-                    onPressed: () => widget.onDownload(att),
-                    icon: const Icon(Icons.download_outlined, color: Colors.white),
-                  ),
+                  if (widget.onDownload != null)
+                    IconButton(
+                      tooltip: 'تحميل',
+                      onPressed: () => widget.onDownload!(att),
+                      icon: const Icon(Icons.download_outlined, color: Colors.white),
+                    ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close, color: Colors.white),

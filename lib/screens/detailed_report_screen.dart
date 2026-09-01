@@ -410,6 +410,10 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     setState(() {
       _selectedProject = selectedProject;
       _selectedSupervisor = selectedSupervisor;
+      _noWorkPlanMode = report.noWorkPlan;
+      if (report.noWorkPlan) {
+        _selectedSupervisor = null;
+      }
       _plannedExecutionDate = DateTime(
         report.reportDatetime.year,
         report.reportDatetime.month,
@@ -775,6 +779,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     }
     setState(() {
       _noWorkPlanMode = true;
+      _selectedSupervisor = null;
       _summaryController.clear();
       _workSiteRows = [
         WorkSiteBlockRow(
@@ -936,7 +941,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       projectName: _isOtherProject
           ? 'أخرى (${_otherProjectNameController.text.trim()})'
           : _selectedProject!.name,
-      supervisorId: _selectedSupervisor?.id,
+      supervisorId: _noWorkPlanMode ? null : _selectedSupervisor?.id,
       createdAt: widget.initialReport?.createdAt,
       summary: summaryForSave,
       executedTodaySummary: widget.showExecutedTodaySummaryField &&
@@ -2395,31 +2400,33 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                   ),
                 ),
               ],
-              const SizedBox(height: 24),
-              DropdownButtonFormField<SupervisorModel>(
-                value: _selectedSupervisor,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'اسم المشرف',
-                  border: OutlineInputBorder(),
-                ),
-                items: [
-                  const DropdownMenuItem<SupervisorModel>(
-                    value: null,
-                    child: Text('— اختر المشرف —'),
+              if (!_noWorkPlanMode) ...[
+                const SizedBox(height: 24),
+                DropdownButtonFormField<SupervisorModel>(
+                  value: _selectedSupervisor,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'اسم المشرف',
+                    border: OutlineInputBorder(),
                   ),
-                  ..._supervisors.map(
-                    (s) => DropdownMenuItem(
-                      value: s,
-                      child: Text(s.name, overflow: TextOverflow.ellipsis),
+                  items: [
+                    const DropdownMenuItem<SupervisorModel>(
+                      value: null,
+                      child: Text('— اختر المشرف —'),
                     ),
-                  ),
-                ],
-                onChanged: _isReadOnlyNow
-                    ? null
-                    : (v) => setState(() => _selectedSupervisor = v),
-              ),
-              const SizedBox(height: 24),
+                    ..._supervisors.map(
+                      (s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(s.name, overflow: TextOverflow.ellipsis),
+                      ),
+                    ),
+                  ],
+                  onChanged: _isReadOnlyNow
+                      ? null
+                      : (v) => setState(() => _selectedSupervisor = v),
+                ),
+                const SizedBox(height: 24),
+              ],
               if (widget.showExecutedTodaySummaryField) ...[
                 TextFormField(
                   controller: _executedTodaySummaryController,

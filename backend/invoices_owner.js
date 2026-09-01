@@ -190,6 +190,36 @@ function ioCanActOnStatus(user, status, row) {
   return true;
 }
 
+function ioIsCurrentAssignee(user, row) {
+  if (!user || !row) return false;
+  const assigneeId = row.current_assignee_user_id != null
+    ? parseInt(row.current_assignee_user_id, 10)
+    : null;
+  if (assigneeId == null || Number.isNaN(assigneeId)) return false;
+  return assigneeId === parseInt(user.id, 10);
+}
+
+/** تنزيل/تعديل المرفقات: المسند إليه فقط قبل الاعتماد والتسليم للمرحلة التالية. */
+function ioCanManageAttachmentsAsAssignee(user, row) {
+  if (!user || !row) return false;
+  const status = String(row.status || '').trim();
+  if (status === IO_STATUS.APPROVED || status === IO_STATUS.RETURNED_CREATOR) {
+    return false;
+  }
+  if (!ioIsCurrentAssignee(user, row)) return false;
+  return ioCanActOnStatus(user, status, row);
+}
+
+function ioCanDownloadAttachments(user, row) {
+  return ioCanManageAttachmentsAsAssignee(user, row);
+}
+
+function ioCanDeleteAttachment(user, row) {
+  if (!user || !row) return false;
+  if (ioIsPrimaryAdmin(user)) return true;
+  return ioCanManageAttachmentsAsAssignee(user, row);
+}
+
 async function ioInsertAction(pool, fields) {
   const now = fields.createdAt || new Date().toISOString();
   await pool.query(
@@ -312,20 +342,34 @@ function ioIsAllowedFile(mime, name) {
   return isPdf || isExcel;
 }
 
+function ioValidateSingleAttachment(a) {
+  const mime = String(a.mime_type ?? a.mimeType ?? '');
+  const name = String(a.file_name ?? a.fileName ?? '');
+  const size = parseInt(String(a.size_bytes ?? a.sizeBytes ?? '0'), 10);
+  if (!ioIsAllowedFile(mime, name)) return { error: 'invalid_file_type' };
+  if (size <= 0 || size > IO_MAX_ATTACHMENT_BYTES) return { error: 'file_too_large' };
+  const data = String(a.data_base64 ?? a.dataBase64 ?? '').trim();
+  if (!data) return { error: 'attachment_data_required' };
+  return { ok: true, name, mime, size, data };
+}
+
 function ioValidateAttachments(attachments) {
   if (!Array.isArray(attachments)) return { error: 'invalid_attachments' };
   if (attachments.length === 0) return { error: 'attachments_required' };
   if (attachments.length > IO_MAX_ATTACHMENTS) return { error: 'too_many_attachments' };
   for (const a of attachments) {
-    const mime = String(a.mime_type ?? a.mimeType ?? '');
-    const name = String(a.file_name ?? a.fileName ?? '');
-    const size = parseInt(String(a.size_bytes ?? a.sizeBytes ?? '0'), 10);
-    if (!ioIsAllowedFile(mime, name)) return { error: 'invalid_file_type' };
-    if (size <= 0 || size > IO_MAX_ATTACHMENT_BYTES) return { error: 'file_too_large' };
-    const data = String(a.data_base64 ?? a.dataBase64 ?? '').trim();
-    if (!data) return { error: 'attachment_data_required' };
+    const check = ioValidateSingleAttachment(a);
+    if (check.error) return check;
   }
   return { ok: true };
+}
+
+async function ioCountAttachments(pool, invoiceId) {
+  const r = await pool.query(
+    'SELECT COUNT(*)::int AS count FROM invoices_owner_attachments WHERE invoice_id = $1',
+    [invoiceId],
+  );
+  return r.rows[0]?.count ?? 0;
 }
 
 async function ioInsertAttachments(pool, invoiceId, attachments, now) {
@@ -567,8 +611,15 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
     try {
       const invoiceId = parseInt(String(req.params.id || ''), 10);
       const attachmentId = parseInt(String(req.params.attachmentId || ''), 10);
-      if (Number.isNaN(invoiceId) || Number.isNaN(attachmentId)) {
+      const userId = parseInt(String(req.query.userId || ''), 10);
+      if (Number.isNaN(invoiceId) || Number.isNaN(attachmentId) || Number.isNaN(userId)) {
         return res.status(400).json({ error: 'invalid' });
+      }
+      const actor = await ioGetUser(pool, userId);
+      const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [invoiceId]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      if (!ioCanDownloadAttachments(actor, rq.rows[0])) {
+        return res.status(403).json({ error: 'forbidden' });
       }
       const r = await pool.query(
         `SELECT file_name, mime_type, data_base64 FROM invoices_owner_attachments
@@ -581,6 +632,104 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         mime_type: r.rows[0].mime_type,
         data_base64: r.rows[0].data_base64,
       });
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.post('/invoices-owner/:id/attachments', async (req, res) => {
+    try {
+      const invoiceId = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(invoiceId) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'invalid' });
+      }
+      const actor = await ioGetUser(pool, userId);
+      const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [invoiceId]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      if (!ioCanManageAttachmentsAsAssignee(actor, rq.rows[0])) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const attCheck = ioValidateSingleAttachment(b);
+      if (attCheck.error) return res.status(400).json({ error: attCheck.error });
+      const count = await ioCountAttachments(pool, invoiceId);
+      if (count >= IO_MAX_ATTACHMENTS) {
+        return res.status(400).json({ error: 'too_many_attachments' });
+      }
+      const now = new Date().toISOString();
+      await pool.query(
+        `INSERT INTO invoices_owner_attachments (
+          invoice_id, file_name, mime_type, data_base64, size_bytes, created_at
+        ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [invoiceId, attCheck.name, attCheck.mime, attCheck.data, attCheck.size, now],
+      );
+      await pool.query(
+        `UPDATE invoices_owner SET updated_at = $1 WHERE id = $2`,
+        [now, invoiceId],
+      );
+      await ioInsertAction(pool, {
+        invoiceId,
+        actorUserId: userId,
+        actorUserName: actor.name,
+        action: 'add_attachment',
+        comment: attCheck.name,
+        createdAt: now,
+      });
+      res.json(await ioLoadDetail(pool, invoiceId));
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.post('/invoices-owner/:id/attachments/:attachmentId/replace', async (req, res) => {
+    try {
+      const invoiceId = parseInt(String(req.params.id || ''), 10);
+      const attachmentId = parseInt(String(req.params.attachmentId || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(invoiceId) || Number.isNaN(attachmentId) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'invalid' });
+      }
+      const actor = await ioGetUser(pool, userId);
+      const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [invoiceId]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      if (!ioCanManageAttachmentsAsAssignee(actor, rq.rows[0])) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const existing = await pool.query(
+        `SELECT id, file_name FROM invoices_owner_attachments
+         WHERE id = $1 AND invoice_id = $2`,
+        [attachmentId, invoiceId],
+      );
+      if (existing.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      const oldName = String(existing.rows[0].file_name || '');
+      const attCheck = ioValidateSingleAttachment(b);
+      if (attCheck.error) return res.status(400).json({ error: attCheck.error });
+      const now = new Date().toISOString();
+      await pool.query(
+        `DELETE FROM invoices_owner_attachments WHERE id = $1 AND invoice_id = $2`,
+        [attachmentId, invoiceId],
+      );
+      await pool.query(
+        `INSERT INTO invoices_owner_attachments (
+          invoice_id, file_name, mime_type, data_base64, size_bytes, created_at
+        ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [invoiceId, attCheck.name, attCheck.mime, attCheck.data, attCheck.size, now],
+      );
+      await pool.query(
+        `UPDATE invoices_owner SET updated_at = $1 WHERE id = $2`,
+        [now, invoiceId],
+      );
+      await ioInsertAction(pool, {
+        invoiceId,
+        actorUserId: userId,
+        actorUserName: actor.name,
+        action: 'replace_attachment',
+        comment: `${oldName} → ${attCheck.name}`,
+        createdAt: now,
+      });
+      res.json(await ioLoadDetail(pool, invoiceId));
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }
@@ -891,17 +1040,22 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(400).json({ error: 'invalid' });
       }
       const actor = await ioGetUser(pool, userId);
-      if (!ioIsPrimaryAdmin(actor)) return res.status(403).json({ error: 'forbidden' });
+      const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [invoiceId]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      if (!ioCanDeleteAttachment(actor, rq.rows[0])) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
 
       const del = await pool.query(
         `DELETE FROM invoices_owner_attachments
          WHERE id = $1 AND invoice_id = $2
-         RETURNING id`,
+         RETURNING id, file_name`,
         [attachmentId, invoiceId],
       );
       if (del.rows.length === 0) return res.status(404).json({ error: 'not found' });
 
       const now = new Date().toISOString();
+      const deletedName = String(del.rows[0].file_name || '');
       await pool.query(
         `UPDATE invoices_owner SET updated_at = $1 WHERE id = $2`,
         [now, invoiceId],
@@ -911,7 +1065,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         actorUserId: userId,
         actorUserName: actor.name,
         action: 'delete_attachment',
-        comment: `attachment#${attachmentId}`,
+        comment: deletedName,
         createdAt: now,
       });
 
@@ -950,4 +1104,8 @@ module.exports = {
   IO_STATUS,
   IO_MAX_ATTACHMENTS,
   IO_MAX_ATTACHMENT_BYTES,
+  ioCanManageAttachmentsAsAssignee,
+  ioCanDownloadAttachments,
+  ioCanDeleteAttachment,
+  ioIsCurrentAssignee,
 };

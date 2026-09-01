@@ -1,3 +1,4 @@
+import '../core/invoices_owner_constants.dart';
 import '../core/shop_drawing_constants.dart';
 import 'expense_statement_model.dart';
 
@@ -218,6 +219,38 @@ class UserModel {
         return false;
     }
   }
+
+  bool isInvoicesOwnerCurrentAssignee({
+    required int? currentAssigneeUserId,
+  }) =>
+      currentAssigneeUserId != null && currentAssigneeUserId == id;
+
+  /// تنزيل المرفقات — المسند إليه فقط قبل الاعتماد.
+  bool canDownloadInvoicesOwnerAttachments({
+    required String status,
+    required int? currentAssigneeUserId,
+  }) {
+    if (status == invoicesOwnerStatusApproved ||
+        status == invoicesOwnerStatusReturnedCreator) {
+      return false;
+    }
+    if (!isInvoicesOwnerCurrentAssignee(
+      currentAssigneeUserId: currentAssigneeUserId,
+    )) {
+      return false;
+    }
+    return canActOnInvoicesOwnerStatus(status);
+  }
+
+  /// إضافة/حذف/استبدال المرفقات — المسند إليه فقط قبل الاعتماد.
+  bool canManageInvoicesOwnerAttachmentsAsAssignee({
+    required String status,
+    required int? currentAssigneeUserId,
+  }) =>
+      canDownloadInvoicesOwnerAttachments(
+        status: status,
+        currentAssigneeUserId: currentAssigneeUserId,
+      );
 
   /// أيقونة Reports-SYS في الواجهة الرئيسية.
   bool get canAccessReportsSysHomeIcon => canParticipateInReportsSys;
