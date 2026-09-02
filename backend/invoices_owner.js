@@ -1,7 +1,12 @@
 const { formatArDateTimeEgypt } = require('./egypt_local_time');
 
-const IO_CREATOR_EMAIL = 'ah-amin';
 const IO_PRIMARY_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
+/** منشئو Invoices (Owner) — بالبريد كما في قاعدة البيانات. */
+const IO_CREATOR_EMAILS = new Set([
+  'ah-amin',
+  'qs-user',
+  'ali',
+]);
 const IO_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const IO_MAX_ATTACHMENTS = 4;
 
@@ -93,12 +98,67 @@ async function ensureInvoicesOwnerTables(pool) {
   }
 }
 
+function ioNormEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
 function ioIsCreatorEmail(email) {
-  return String(email || '').trim().toLowerCase() === IO_CREATOR_EMAIL;
+  return IO_CREATOR_EMAILS.has(ioNormEmail(email));
 }
 
 function ioIsCreatorUser(user) {
   return !!user && ioIsCreatorEmail(user.email);
+}
+
+function ioIsAhAminCreator(user) {
+  return !!user && ioNormEmail(user.email) === 'ah-amin';
+}
+
+/** أدوار خطوات الاعتماد (غير المنشئ Ah.Amin). */
+function ioIsInvoicesOwnerFlowApprover(user) {
+  if (!user) return false;
+  const role = String(user.role || '').trim();
+  return (
+    role === 'qs' ||
+    role === 'technical_office' ||
+    role === 'projects_manager' ||
+    role === 'finance' ||
+    role === 'operation_manager'
+  );
+}
+
+/** بعد الإنشاء/إعادة الإرسال: تخطي خطوة المنشئ والذهاب للتالي. */
+async function ioResolveInitialStepAfterCreatorSubmit(pool, actor) {
+  const email = ioNormEmail(actor.email);
+  let status;
+  if (email === 'ah-amin') {
+    status = IO_STATUS.PENDING_QS;
+  } else if (email === 'qs-user' || email === 'ali') {
+    status = IO_STATUS.PENDING_TO;
+  } else {
+    return { error: 'forbidden' };
+  }
+  const assignee = await ioResolveAssigneeForStatus(pool, status, {
+    created_by_user_id: actor.id,
+  });
+  if (!assignee || assignee.id == null) {
+    return { error: 'assignee_not_configured' };
+  }
+  return {
+    status,
+    assigneeId: parseInt(assignee.id, 10),
+    assigneeName: assignee.name || '',
+  };
+}
+
+/** Ah.Amin يرى طلباته فقط؛ غيره يرى حسب صلاحياته. */
+function ioCanViewInvoice(user, row) {
+  if (!user || !row) return false;
+  if (ioIsPrimaryAdmin(user)) return true;
+  if (ioIsAhAminCreator(user)) {
+    return parseInt(row.created_by_user_id, 10) === parseInt(user.id, 10);
+  }
+  return ioCanAccessModule(user);
 }
 
 function ioIsPrimaryAdmin(user) {
@@ -415,23 +475,29 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       if (!user) return res.status(404).json({ error: 'user not found' });
       if (!ioCanAccessModule(user)) return res.json({ count: 0 });
 
-      let sql;
-      let params;
+      let count = 0;
       if (ioIsCreatorUser(user)) {
-        sql = `SELECT COUNT(*)::int AS count FROM invoices_owner
-               WHERE created_by_user_id = $1 AND status = $2`;
-        params = [userId, IO_STATUS.RETURNED_CREATOR];
-      } else if (ioIsPrimaryAdmin(user)) {
-        // اطلاع فقط — لا عدّاد إجراءات معلّقة
-        return res.json({ count: 0 });
-      } else {
-        const status = ioPendingStatusForRole(String(user.role || ''));
-        if (!status) return res.json({ count: 0 });
-        sql = `SELECT COUNT(*)::int AS count FROM invoices_owner WHERE status = $1`;
-        params = [status];
+        const returned = await pool.query(
+          `SELECT COUNT(*)::int AS count FROM invoices_owner
+           WHERE created_by_user_id = $1 AND status = $2`,
+          [userId, IO_STATUS.RETURNED_CREATOR],
+        );
+        count += returned.rows[0]?.count ?? 0;
       }
-      const r = await pool.query(sql, params);
-      res.json({ count: r.rows[0]?.count ?? 0 });
+      if (ioIsPrimaryAdmin(user)) {
+        return res.json({ count: 0 });
+      }
+      if (ioIsInvoicesOwnerFlowApprover(user)) {
+        const status = ioPendingStatusForRole(String(user.role || ''));
+        if (status) {
+          const pending = await pool.query(
+            `SELECT COUNT(*)::int AS count FROM invoices_owner WHERE status = $1`,
+            [status],
+          );
+          count += pending.rows[0]?.count ?? 0;
+        }
+      }
+      res.json({ count });
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }
@@ -451,11 +517,10 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       let params;
 
       if (tab === 'pending') {
-        if (ioIsCreatorUser(user)) {
-          sql = `SELECT * FROM invoices_owner
-                 WHERE created_by_user_id = $1 AND status = $2`;
-          params = [userId, IO_STATUS.RETURNED_CREATOR];
-        } else if (ioIsPrimaryAdmin(user)) {
+        if (ioIsAhAminCreator(user)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        if (ioIsPrimaryAdmin(user)) {
           sql = `SELECT * FROM invoices_owner WHERE status <> $1`;
           params = [IO_STATUS.APPROVED];
         } else {
@@ -464,6 +529,11 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
           sql = `SELECT * FROM invoices_owner WHERE status = $1`;
           params = [status];
         }
+      } else if (tab === 'returned') {
+        if (!ioIsCreatorUser(user)) return res.status(403).json({ error: 'forbidden' });
+        sql = `SELECT * FROM invoices_owner
+               WHERE created_by_user_id = $1 AND status = $2`;
+        params = [userId, IO_STATUS.RETURNED_CREATOR];
       } else if (tab === 'sent') {
         if (!ioIsCreatorUser(user)) return res.status(403).json({ error: 'forbidden' });
         sql = `SELECT * FROM invoices_owner
@@ -471,8 +541,14 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
                  AND status NOT IN ($2, $3)`;
         params = [userId, IO_STATUS.RETURNED_CREATOR, IO_STATUS.APPROVED];
       } else if (tab === 'approved') {
-        sql = `SELECT * FROM invoices_owner WHERE status = $1`;
-        params = [IO_STATUS.APPROVED];
+        if (ioIsAhAminCreator(user)) {
+          sql = `SELECT * FROM invoices_owner
+                 WHERE status = $1 AND created_by_user_id = $2`;
+          params = [IO_STATUS.APPROVED, userId];
+        } else {
+          sql = `SELECT * FROM invoices_owner WHERE status = $1`;
+          params = [IO_STATUS.APPROVED];
+        }
       } else if (tab === 'all') {
         sql = `SELECT * FROM invoices_owner WHERE 1=1`;
         params = [];
@@ -500,10 +576,16 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const user = await ioGetUser(pool, userId);
       if (!ioCanAccessModule(user)) return res.status(403).json({ error: 'forbidden' });
       const r = await pool.query(
-        `SELECT * FROM invoices_owner_notifications
-         WHERE recipient_user_id = $1
-         ORDER BY created_at DESC`,
-        [userId],
+        `SELECT n.* FROM invoices_owner_notifications n
+         LEFT JOIN invoices_owner i ON i.id = n.invoice_id
+         WHERE n.recipient_user_id = $1
+           AND (
+             $2::boolean = FALSE
+             OR n.invoice_id IS NULL
+             OR i.created_by_user_id = $3
+           )
+         ORDER BY n.created_at DESC`,
+        [userId, ioIsAhAminCreator(user), userId],
       );
       res.json(
         r.rows.map((row) => ({
@@ -529,9 +611,16 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const user = await ioGetUser(pool, userId);
       if (!ioCanAccessModule(user)) return res.json({ count: 0 });
       const r = await pool.query(
-        `SELECT COUNT(*)::int AS count FROM invoices_owner_notifications
-         WHERE recipient_user_id = $1 AND is_read = FALSE`,
-        [userId],
+        `SELECT COUNT(*)::int AS count
+         FROM invoices_owner_notifications n
+         LEFT JOIN invoices_owner i ON i.id = n.invoice_id
+         WHERE n.recipient_user_id = $1 AND n.is_read = FALSE
+           AND (
+             $2::boolean = FALSE
+             OR n.invoice_id IS NULL
+             OR i.created_by_user_id = $3
+           )`,
+        [userId, ioIsAhAminCreator(user), userId],
       );
       res.json({ count: parseInt(r.rows[0]?.count || '0', 10) });
     } catch (e) {
@@ -598,9 +687,17 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
   app.get('/invoices-owner/:id', async (req, res) => {
     try {
       const id = parseInt(String(req.params.id || ''), 10);
+      const userId = parseInt(String(req.query.userId || ''), 10);
       if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
       const detail = await ioLoadDetail(pool, id);
       if (!detail) return res.status(404).json({ error: 'not found' });
+      if (!Number.isNaN(userId)) {
+        const user = await ioGetUser(pool, userId);
+        const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [id]);
+        if (!user || !ioCanViewInvoice(user, rq.rows[0])) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+      }
       res.json(detail);
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
@@ -745,8 +842,11 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
-      const qs = await ioGetUserByRole(pool, 'qs');
-      if (!qs) return res.status(400).json({ error: 'qs_not_configured' });
+      const initialStep = await ioResolveInitialStepAfterCreatorSubmit(pool, actor);
+      if (initialStep.error) {
+        const code = initialStep.error === 'forbidden' ? 403 : 400;
+        return res.status(code).json({ error: initialStep.error });
+      }
 
       const project = await ioResolveProject(pool, b);
       if (project.error) return res.status(400).json({ error: project.error });
@@ -767,11 +867,11 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
           project.project_id,
           project.project_name,
           notes || null,
-          IO_STATUS.PENDING_QS,
+          initialStep.status,
           userId,
           actor.name,
-          parseInt(qs.id, 10),
-          qs.name,
+          initialStep.assigneeId,
+          initialStep.assigneeName,
           now,
         ],
       );
@@ -788,7 +888,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
 
       const title = 'Invoices (Owner) — طلب جديد';
       const body = ioNotificationBody(actor.name, 'رفع', project.project_name, now);
-      await ioNotifyUser(pool, runNotificationSafely, parseInt(qs.id, 10), {
+      await ioNotifyUser(pool, runNotificationSafely, initialStep.assigneeId, {
         title,
         body,
         invoiceId,
@@ -821,8 +921,11 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       if (!actor || !ioIsCreatorUser(actor)) {
         return res.status(403).json({ error: 'forbidden' });
       }
-      const qs = await ioGetUserByRole(pool, 'qs');
-      if (!qs) return res.status(400).json({ error: 'qs_not_configured' });
+      const initialStep = await ioResolveInitialStepAfterCreatorSubmit(pool, actor);
+      if (initialStep.error) {
+        const code = initialStep.error === 'forbidden' ? 403 : 400;
+        return res.status(code).json({ error: initialStep.error });
+      }
 
       const project = await ioResolveProject(pool, b);
       if (project.error) return res.status(400).json({ error: project.error });
@@ -841,9 +944,9 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
           project.project_id,
           project.project_name,
           notes || null,
-          IO_STATUS.PENDING_QS,
-          parseInt(qs.id, 10),
-          qs.name,
+          initialStep.status,
+          initialStep.assigneeId,
+          initialStep.assigneeName,
           now,
           id,
         ],
@@ -861,7 +964,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
 
       const title = 'Invoices (Owner) — إعادة إرسال';
       const body = ioNotificationBody(actor.name, 'إعادة إرسال', project.project_name, now);
-      await ioNotifyUser(pool, runNotificationSafely, parseInt(qs.id, 10), {
+      await ioNotifyUser(pool, runNotificationSafely, initialStep.assigneeId, {
         title,
         body,
         invoiceId: id,
@@ -1099,7 +1202,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
 module.exports = {
   ensureInvoicesOwnerTables,
   registerInvoicesOwnerRoutes,
-  IO_CREATOR_EMAIL,
+  IO_CREATOR_EMAILS,
   IO_PRIMARY_ADMIN_EMAIL,
   IO_STATUS,
   IO_MAX_ATTACHMENTS,

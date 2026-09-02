@@ -61,7 +61,10 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
       if (_storage is! ApiStorageService) {
         throw Exception('Invoices (Owner) يتطلب اتصال API');
       }
-      final invoice = await _storage.getInvoicesOwnerDetail(widget.invoiceId);
+      final invoice = await _storage.getInvoicesOwnerDetail(
+        widget.invoiceId,
+        userId: widget.currentUser.id,
+      );
       if (!mounted) return;
       setState(() {
         _invoice = invoice;

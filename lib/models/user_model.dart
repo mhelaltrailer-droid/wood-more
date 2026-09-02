@@ -187,11 +187,19 @@ class UserModel {
       canCreateInvoicesOwner ||
       canManageInvoicesOwner;
 
-  /// إنشاء / إعادة إرسال Invoices (Owner) — Ah.Amin فقط.
-  bool get canCreateInvoicesOwner =>
-      isAccountant &&
-      email.trim().toLowerCase() ==
-          invoicesOwnerAccountantEmail.toLowerCase();
+  /// إنشاء / إعادة إرسال Invoices (Owner) — بالبريد: ah-amin، QS-User، Ali.
+  bool get canCreateInvoicesOwner => isInvoicesOwnerCreatorEmail(email);
+
+  /// Ah.Amin يرى طلباته فقط ولا يشارك في اعتماد خطوات التداول.
+  bool get isInvoicesOwnerAhAminOnlyViewer => isInvoicesOwnerAhAminEmail(email);
+
+  /// اعتماد/إرجاع في خطوات التداول (QS، المكتب الفني، PM، Finance، OM).
+  bool get canActAsInvoicesOwnerApprover =>
+      isQs ||
+      isTechnicalOffice ||
+      isProjectsManager ||
+      isFinance ||
+      isOperationManager;
 
   /// إدارة Invoices (Owner): حذف مستخلص/مرفق — المسؤول الأساسي فقط (اطلاع + حذف).
   bool get canManageInvoicesOwner => isPrimaryAppAdmin;

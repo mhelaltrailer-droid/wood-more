@@ -56,9 +56,20 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
         const _TabDef('notifications', 'إشعارات'),
       ];
     }
+    if (user.canCreateInvoicesOwner && user.canActAsInvoicesOwnerApprover) {
+      return [
+        const _TabDef('pending', 'بانتظار إجرائي'),
+        const _TabDef('returned', 'معادة للتعديل'),
+        const _TabDef('sent', 'مرسلة'),
+        const _TabDef('approved', 'معتمدة'),
+        if (user.canViewInvoicesOwnerActivityLog)
+          const _TabDef('activity', 'سجل التداول'),
+        const _TabDef('notifications', 'إشعارات'),
+      ];
+    }
     if (user.canCreateInvoicesOwner) {
       return const [
-        _TabDef('pending', 'معادة للتعديل'),
+        _TabDef('returned', 'معادة للتعديل'),
         _TabDef('sent', 'مرسلة'),
         _TabDef('approved', 'معتمدة'),
         _TabDef('notifications', 'إشعارات'),

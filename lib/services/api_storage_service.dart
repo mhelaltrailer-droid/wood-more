@@ -2963,8 +2963,11 @@ class ApiStorageService {
         .toList();
   }
 
-  Future<InvoicesOwnerModel> getInvoicesOwnerDetail(int invoiceId) async {
-    final path = 'invoices-owner/$invoiceId';
+  Future<InvoicesOwnerModel> getInvoicesOwnerDetail(
+    int invoiceId, {
+    required int userId,
+  }) async {
+    final path = 'invoices-owner/$invoiceId?userId=$userId';
     final r = await _httpGet(Uri.parse(_path(path)));
     if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
     return InvoicesOwnerModel.fromMap(

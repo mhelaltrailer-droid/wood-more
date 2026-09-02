@@ -1,5 +1,8 @@
 /// ثوابت وحدة Invoices (Owner).
 const String invoicesOwnerCreatorEmail = 'ah-amin';
+const String invoicesOwnerQsCreatorEmailQsUser = 'QS-User';
+const String invoicesOwnerQsCreatorEmailAli = 'Ali';
+
 const int invoicesOwnerMaxAttachmentBytes = 5 * 1024 * 1024;
 const int invoicesOwnerMaxAttachments = 4;
 
@@ -17,5 +20,14 @@ const String invoicesOwnerStatusPendingOm = 'pending_operation_manager';
 const String invoicesOwnerStatusReturnedCreator = 'returned_to_creator';
 const String invoicesOwnerStatusApproved = 'approved';
 
+const Set<String> _invoicesOwnerCreatorEmails = {
+  'ah-amin',
+  'qs-user',
+  'ali',
+};
+
 bool isInvoicesOwnerCreatorEmail(String email) =>
+    _invoicesOwnerCreatorEmails.contains(email.trim().toLowerCase());
+
+bool isInvoicesOwnerAhAminEmail(String email) =>
     email.trim().toLowerCase() == invoicesOwnerCreatorEmail.toLowerCase();
