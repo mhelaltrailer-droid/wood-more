@@ -2112,6 +2112,59 @@ app.post('/disbursement-notes/next-number', async (req, res) => {
 });
 
 /**
+ * جداول قد تحتوي project_id بدون FK رسمي على projects.
+ * تُحدَّث عند الدمج/التنظيف حتى لا تبقى مراجع يتيمة.
+ */
+const PROJECT_SOFT_REF_TABLES = [
+  'attendance_records',
+  'notifications',
+  'activity_logs',
+];
+
+async function reassignProjectSoftRefs(client, fromId, toId, toName, summary = {}) {
+  for (const table of PROJECT_SOFT_REF_TABLES) {
+    const exists = await client.query(
+      `SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = $1`,
+      [table],
+    );
+    if (exists.rows.length === 0) continue;
+
+    const cols = await client.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = $1
+         AND column_name IN ('project_id', 'project_name')`,
+      [table],
+    );
+    const names = new Set(cols.rows.map((r) => r.column_name));
+    if (!names.has('project_id')) continue;
+
+    const countBefore = await client.query(
+      `SELECT COUNT(*)::int AS n FROM ${table} WHERE project_id = $1`,
+      [fromId],
+    );
+    const n = countBefore.rows[0].n;
+    if (n === 0) continue;
+
+    if (names.has('project_name')) {
+      await client.query(
+        `UPDATE ${table}
+         SET project_id = $1, project_name = $2
+         WHERE project_id = $3`,
+        [toId, toName, fromId],
+      );
+    } else {
+      await client.query(
+        `UPDATE ${table} SET project_id = $1 WHERE project_id = $2`,
+        [toId, fromId],
+      );
+    }
+    summary[table] = (summary[table] || 0) + n;
+  }
+  return summary;
+}
+
+/**
  * حذف مشروع.
  * اختياري: ?reassignTo=<id> ينقل كل صفوف project_id من المشروع المحذوف إلى الهدف
  * (مع تحديث project_name إن وُجد) ثم يحذف المشروع المكرر.
@@ -2190,6 +2243,8 @@ app.delete('/projects/:id', async (req, res) => {
         }
         summary[bare] = n;
       }
+
+      await reassignProjectSoftRefs(client, fromId, reassignTo, toName, summary);
     }
 
     await client.query('DELETE FROM project_stock WHERE project_id = $1', [fromId]);
@@ -2202,6 +2257,38 @@ app.delete('/projects/:id', async (req, res) => {
     await client.query('DELETE FROM projects WHERE id = $1', [fromId]);
     await client.query('COMMIT');
     res.json({ ok: true, reassigned: summary });
+  } catch (e) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    res.status(500).json({ error: String(e.message) });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * إعادة ربط مراجع يتيمة (مثل attendance بدون FK) من مشروع محذوف/قديم إلى مشروع قائم.
+ * Body: { fromProjectId, toProjectId }
+ */
+app.post('/projects/reassign-orphans', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const fromId = parseInt(String(req.body?.fromProjectId ?? req.body?.from_project_id ?? ''), 10);
+    const toId = parseInt(String(req.body?.toProjectId ?? req.body?.to_project_id ?? ''), 10);
+    if (Number.isNaN(fromId) || Number.isNaN(toId)) {
+      return res.status(400).json({ error: 'fromProjectId and toProjectId required' });
+    }
+    if (fromId === toId) return res.status(400).json({ error: 'same_ids' });
+
+    const to = await client.query('SELECT id, name FROM projects WHERE id = $1', [toId]);
+    if (to.rows.length === 0) return res.status(404).json({ error: 'target_not_found' });
+    const toName = String(to.rows[0].name || '');
+
+    await client.query('BEGIN');
+    const summary = await reassignProjectSoftRefs(client, fromId, toId, toName, {});
+    await client.query('COMMIT');
+    res.json({ ok: true, reassigned: summary, toProjectName: toName });
   } catch (e) {
     try {
       await client.query('ROLLBACK');
