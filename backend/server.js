@@ -2111,15 +2111,104 @@ app.post('/disbursement-notes/next-number', async (req, res) => {
   }
 });
 
+/**
+ * حذف مشروع.
+ * اختياري: ?reassignTo=<id> ينقل كل صفوف project_id من المشروع المحذوف إلى الهدف
+ * (مع تحديث project_name إن وُجد) ثم يحذف المشروع المكرر.
+ */
 app.delete('/projects/:id', async (req, res) => {
+  const client = await pool.connect();
   try {
-    await pool.query('DELETE FROM project_stock WHERE project_id = $1', [req.params.id]);
-    await pool.query('DELETE FROM project_locations WHERE project_id = $1', [req.params.id]);
-    await pool.query('DELETE FROM zones WHERE project_id = $1', [req.params.id]);
-    await pool.query('DELETE FROM projects WHERE id = $1', [req.params.id]);
-    res.json({ ok: true });
+    const fromId = parseInt(String(req.params.id), 10);
+    if (Number.isNaN(fromId)) return res.status(400).json({ error: 'invalid id' });
+    const reassignRaw = req.query.reassignTo ?? req.body?.reassignTo;
+    const reassignTo =
+      reassignRaw != null && String(reassignRaw).trim() !== ''
+        ? parseInt(String(reassignRaw), 10)
+        : null;
+    if (reassignRaw != null && String(reassignRaw).trim() !== '' && Number.isNaN(reassignTo)) {
+      return res.status(400).json({ error: 'invalid reassignTo' });
+    }
+    if (reassignTo != null && reassignTo === fromId) {
+      return res.status(400).json({ error: 'reassignTo_same_as_source' });
+    }
+
+    await client.query('BEGIN');
+    const from = await client.query('SELECT id, name FROM projects WHERE id = $1', [fromId]);
+    if (from.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'not found' });
+    }
+
+    const summary = {};
+    if (reassignTo != null) {
+      const to = await client.query('SELECT id, name FROM projects WHERE id = $1', [reassignTo]);
+      if (to.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'reassign_target_not_found' });
+      }
+      const toName = String(to.rows[0].name || '');
+
+      const fks = await client.query(`
+        SELECT c.conrelid::regclass::text AS table_name, a.attname AS column_name
+        FROM pg_constraint c
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+        WHERE c.contype = 'f'
+          AND c.confrelid = 'public.projects'::regclass
+          AND array_length(c.conkey, 1) = 1
+        ORDER BY 1, 2
+      `);
+
+      for (const row of fks.rows) {
+        if (row.column_name !== 'project_id') continue;
+        const table = String(row.table_name);
+        const bare = table.replace(/^public\./, '');
+        const countBefore = await client.query(
+          `SELECT COUNT(*)::int AS n FROM ${table} WHERE project_id = $1`,
+          [fromId],
+        );
+        const n = countBefore.rows[0].n;
+        if (n === 0) continue;
+
+        const hasName = await client.query(
+          `SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'project_name'`,
+          [bare],
+        );
+        if (hasName.rows.length) {
+          await client.query(
+            `UPDATE ${table}
+             SET project_id = $1, project_name = $2
+             WHERE project_id = $3`,
+            [reassignTo, toName, fromId],
+          );
+        } else {
+          await client.query(
+            `UPDATE ${table} SET project_id = $1 WHERE project_id = $2`,
+            [reassignTo, fromId],
+          );
+        }
+        summary[bare] = n;
+      }
+    }
+
+    await client.query('DELETE FROM project_stock WHERE project_id = $1', [fromId]);
+    await client.query(
+      `DELETE FROM project_stock_ledger WHERE project_id = $1`,
+      [fromId],
+    ).catch(() => {});
+    await client.query('DELETE FROM project_locations WHERE project_id = $1', [fromId]);
+    await client.query('DELETE FROM zones WHERE project_id = $1', [fromId]);
+    await client.query('DELETE FROM projects WHERE id = $1', [fromId]);
+    await client.query('COMMIT');
+    res.json({ ok: true, reassigned: summary });
   } catch (e) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
     res.status(500).json({ error: String(e.message) });
+  } finally {
+    client.release();
   }
 });
 
