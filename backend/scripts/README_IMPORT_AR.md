@@ -15,7 +15,10 @@ cd backend
 npm install
 ```
 
-ضع **`DATABASE_URL`** في **`backend/.env`** عند استخدام **`--execute`** (انسخه من **Render** ليكون **نفس** قاعدة Neon التي يستخدمها التطبيق).
+ضع **`DATABASE_URL`** في **`backend/.env`** عند استخدام **`--execute`** على Neon،
+وأضف أيضاً **`--confirm-production`** (حماية من التنفيذ غير المقصود على الإنتاج).
+
+للتطوير اليومي: شغّل API على Postgres المحلي (`npm run start:local`) واترك Neon للإنتاج على Render فقط.
 
 ## أمثلة
 
@@ -36,7 +39,7 @@ node scripts/import_project_locations_from_xlsx.js ^
   --file="C:\Users\home\Downloads\DDD.xlsx" ^
   --sheet="Z1_EMAAR_F" ^
   --project="Z1_EMAAR_F" ^
-  --execute
+  --execute --confirm-production
 ```
 
 `--execute` ينشئ صف المشروع في **`projects`** إن لم يكن موجوداً، ثم يُدرج **`project_locations`**.

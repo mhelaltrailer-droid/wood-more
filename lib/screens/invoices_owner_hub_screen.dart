@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/invoices_owner_constants.dart';
+import '../core/polling_intervals.dart';
 import '../models/invoices_owner_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
@@ -98,7 +99,7 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
     });
     _loadAll();
     _pollTimer =
-        Timer.periodic(const Duration(seconds: 25), (_) => _refreshSilently());
+        Timer.periodic(AppPollingIntervals.openHubScreens, (_) => _refreshSilently());
   }
 
   @override

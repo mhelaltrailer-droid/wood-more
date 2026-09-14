@@ -6,6 +6,7 @@ import '../services/storage_service.dart';
 import '../services/api_storage_service.dart';
 import '../services/icon_visibility_service.dart';
 import '../core/route_observer.dart';
+import '../core/polling_intervals.dart';
 import 'login_screen.dart';
 import 'notifications_screen.dart';
 import 'shop_darwing_notifications_screen.dart';
@@ -324,7 +325,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
     _notificationsPollTimer?.cancel();
     _notificationsPollTimer = Timer.periodic(
-      const Duration(seconds: 25),
+      AppPollingIntervals.homeBadges,
       (_) {
         if (_canUseNotifications) _loadUnreadNotificationsCount();
         if (_canUseShopDarwingNotification) {

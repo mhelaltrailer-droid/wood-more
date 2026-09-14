@@ -1977,6 +1977,16 @@ class ApiStorageService {
         .toList();
   }
 
+  /// جلب مرفق IR/MIR واحد مع محتوى الملف (عند الفتح فقط).
+  Future<IrMirUploadModel> getIrMirUpload(int id) async {
+    final r = await http.get(Uri.parse(_path('ir-mir/uploads/$id')));
+    if (r.statusCode == 404) throw Exception('المرفق غير موجود');
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return IrMirUploadModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
   Future<int> addIrMirUpload({
     required int projectId,
     required int userId,
@@ -2044,6 +2054,15 @@ class ApiStorageService {
           (e) => MsSdRecordModel.fromMap(Map<String, dynamic>.from(e as Map)),
         )
         .toList();
+  }
+
+  Future<MsSdAttachmentModel> getMsSdAttachment(int id) async {
+    final r = await http.get(Uri.parse(_path('ms-sd/attachments/$id')));
+    if (r.statusCode == 404) throw Exception('المرفق غير موجود');
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return MsSdAttachmentModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
   }
 
   Future<int> addMsSdRecord({
@@ -2157,6 +2176,15 @@ class ApiStorageService {
           (e) => MosItpRecordModel.fromMap(Map<String, dynamic>.from(e as Map)),
         )
         .toList();
+  }
+
+  Future<MosItpAttachmentModel> getMosItpAttachment(int id) async {
+    final r = await http.get(Uri.parse(_path('mos-itp/attachments/$id')));
+    if (r.statusCode == 404) throw Exception('المرفق غير موجود');
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return MosItpAttachmentModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
   }
 
   Future<int> addMosItpRecord({

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../core/polling_intervals.dart';
 import '../models/location_material_model.dart';
 import '../models/pending_postpone_fine_action_model.dart';
 import '../models/user_model.dart';
@@ -47,7 +48,7 @@ class _ManagerWithdrawalRequestsScreenState
   void initState() {
     super.initState();
     _load();
-    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) => _refreshSilently());
+    _pollTimer = Timer.periodic(AppPollingIntervals.openHubScreens, (_) => _refreshSilently());
   }
 
   @override

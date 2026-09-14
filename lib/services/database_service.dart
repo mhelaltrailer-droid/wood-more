@@ -3096,11 +3096,39 @@ class DatabaseService {
     }
     final maps = await db.query(
       'ir_mir_uploads',
+      columns: const [
+        'id',
+        'project_id',
+        'user_id',
+        'user_name',
+        'kind',
+        'mir_name',
+        'location_id',
+        'phase',
+        'file_name',
+        'file_mime',
+        'notes',
+        'created_at',
+      ],
       where: where.join(' AND '),
       whereArgs: args,
       orderBy: 'created_at DESC, id DESC',
     );
-    return maps.map((m) => IrMirUploadModel.fromMap(m)).toList();
+    return maps
+        .map((m) => IrMirUploadModel.fromMap({...m, 'file_data': ''}))
+        .toList();
+  }
+
+  Future<IrMirUploadModel> getIrMirUpload(int id) async {
+    final db = await database;
+    final maps = await db.query(
+      'ir_mir_uploads',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (maps.isEmpty) throw Exception('المرفق غير موجود');
+    return IrMirUploadModel.fromMap(maps.first);
   }
 
   Future<int> addIrMirUpload({
@@ -3186,12 +3214,19 @@ class DatabaseService {
       final recordId = rec['id'] as int;
       final attMaps = await db.query(
         'ms_sd_attachments',
+        columns: const [
+          'id',
+          'record_id',
+          'file_name',
+          'file_mime',
+          'created_at',
+        ],
         where: 'record_id = ?',
         whereArgs: [recordId],
         orderBy: 'id ASC',
       );
       final attachments = attMaps
-          .map((m) => MsSdAttachmentModel.fromMap(m))
+          .map((m) => MsSdAttachmentModel.fromMap({...m, 'file_data': ''}))
           .toList();
       out.add(
         MsSdRecordModel(
@@ -3210,6 +3245,18 @@ class DatabaseService {
       );
     }
     return out;
+  }
+
+  Future<MsSdAttachmentModel> getMsSdAttachment(int id) async {
+    final db = await database;
+    final maps = await db.query(
+      'ms_sd_attachments',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (maps.isEmpty) throw Exception('المرفق غير موجود');
+    return MsSdAttachmentModel.fromMap(maps.first);
   }
 
   Future<int> addMsSdRecord({
@@ -3359,12 +3406,19 @@ class DatabaseService {
       final recordId = rec['id'] as int;
       final attMaps = await db.query(
         'mos_itp_attachments',
+        columns: const [
+          'id',
+          'record_id',
+          'file_name',
+          'file_mime',
+          'created_at',
+        ],
         where: 'record_id = ?',
         whereArgs: [recordId],
         orderBy: 'id ASC',
       );
       final attachments = attMaps
-          .map((m) => MosItpAttachmentModel.fromMap(m))
+          .map((m) => MosItpAttachmentModel.fromMap({...m, 'file_data': ''}))
           .toList();
       out.add(
         MosItpRecordModel(
@@ -3383,6 +3437,18 @@ class DatabaseService {
       );
     }
     return out;
+  }
+
+  Future<MosItpAttachmentModel> getMosItpAttachment(int id) async {
+    final db = await database;
+    final maps = await db.query(
+      'mos_itp_attachments',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (maps.isEmpty) throw Exception('المرفق غير موجود');
+    return MosItpAttachmentModel.fromMap(maps.first);
   }
 
   Future<int> addMosItpRecord({

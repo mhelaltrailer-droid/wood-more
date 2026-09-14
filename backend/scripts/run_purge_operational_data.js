@@ -2,7 +2,8 @@
  * حذف بيانات تشغيلية من Postgres (Neon أو محلي) عبر DATABASE_URL.
  * الاستخدام من مجلد backend: node scripts/run_purge_operational_data.js
  */
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+require('dotenv').config();
+const { assertNeonConfirmed } = require('./lib/db_target_guard');
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
@@ -12,6 +13,7 @@ if (!url) {
   console.error('DATABASE_URL غير موجود في backend/.env');
   process.exit(1);
 }
+assertNeonConfirmed({ action: 'purge operational data' });
 
 const ssl =
   url.includes('neon.tech') || url.includes('sslmode=require')

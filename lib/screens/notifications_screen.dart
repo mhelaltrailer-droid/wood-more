@@ -5,6 +5,7 @@ import '../models/notification_item_model.dart';
 import '../models/withdrawal_request_model.dart';
 import '../services/storage_service.dart';
 import '../services/api_storage_service.dart';
+import '../core/polling_intervals.dart';
 import '../utils/notification_delete_ui.dart';
 import '../utils/notification_time_display.dart';
 import 'engineer_withdraw_materials_screen.dart';
@@ -42,7 +43,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     _scrollController.addListener(_onScroll);
     _loadNotifications();
     _pollTimer = Timer.periodic(
-      const Duration(seconds: 25),
+      AppPollingIntervals.notificationLists,
       (_) => _refreshSilently(),
     );
   }

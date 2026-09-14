@@ -2438,13 +2438,35 @@ class WebStorageService {
         (m) => (m['phase']?.toString().trim().toLowerCase() ?? '') == p,
       );
     }
-    final out = rows.map(IrMirUploadModel.fromMap).toList();
+    final out = rows.map((m) {
+      final copy = Map<String, dynamic>.from(m);
+      final rawData = copy['file_data']?.toString() ?? '';
+      final sizeBytes = rawData.isEmpty
+          ? null
+          : ((rawData.length * 3) / 4).floor();
+      copy['file_data'] = '';
+      copy['size_bytes'] = sizeBytes;
+      return IrMirUploadModel.fromMap(copy);
+    }).toList();
     out.sort((a, b) {
       final c = b.createdAt.compareTo(a.createdAt);
       if (c != 0) return c;
       return b.id.compareTo(a.id);
     });
     return out;
+  }
+
+  Future<IrMirUploadModel> getIrMirUpload(int id) async {
+    final prefs = await _prefs;
+    final raw = prefs.getString(_irMirUploadsKey) ?? '[]';
+    final list = jsonDecode(raw) as List<dynamic>;
+    for (final e in list) {
+      final m = Map<String, dynamic>.from(e as Map);
+      final rowId = m['id'];
+      final parsed = rowId is int ? rowId : int.tryParse(rowId?.toString() ?? '');
+      if (parsed == id) return IrMirUploadModel.fromMap(m);
+    }
+    throw Exception('المرفق غير موجود');
   }
 
   Future<int> addIrMirUpload({
@@ -2567,8 +2589,38 @@ class WebStorageService {
         map.remove('created_at');
         map.remove('createdAt');
       }
+      final rawAtt = map['attachments'];
+      if (rawAtt is List) {
+        map['attachments'] = rawAtt.map((e) {
+          if (e is! Map) return e;
+          final a = Map<String, dynamic>.from(e);
+          final data = a['file_data']?.toString() ?? a['fileData']?.toString() ?? '';
+          a['file_data'] = '';
+          a['fileData'] = '';
+          if (data.isNotEmpty) {
+            a['size_bytes'] = ((data.length * 3) / 4).floor();
+          }
+          return a;
+        }).toList();
+      }
       return MsSdRecordModel.fromMap(map);
     }).toList();
+  }
+
+  Future<MsSdAttachmentModel> getMsSdAttachment(int id) async {
+    final prefs = await _prefs;
+    for (final rec in _readMsSdRecordsRaw(prefs)) {
+      final rawAtt = rec['attachments'];
+      if (rawAtt is! List) continue;
+      for (final e in rawAtt) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        final rowId = m['id'];
+        final parsed = rowId is int ? rowId : int.tryParse(rowId?.toString() ?? '');
+        if (parsed == id) return MsSdAttachmentModel.fromMap(m);
+      }
+    }
+    throw Exception('المرفق غير موجود');
   }
 
   Future<int> addMsSdRecord({
@@ -2767,8 +2819,38 @@ class WebStorageService {
         map.remove('created_at');
         map.remove('createdAt');
       }
+      final rawAtt = map['attachments'];
+      if (rawAtt is List) {
+        map['attachments'] = rawAtt.map((e) {
+          if (e is! Map) return e;
+          final a = Map<String, dynamic>.from(e);
+          final data = a['file_data']?.toString() ?? a['fileData']?.toString() ?? '';
+          a['file_data'] = '';
+          a['fileData'] = '';
+          if (data.isNotEmpty) {
+            a['size_bytes'] = ((data.length * 3) / 4).floor();
+          }
+          return a;
+        }).toList();
+      }
       return MosItpRecordModel.fromMap(map);
     }).toList();
+  }
+
+  Future<MosItpAttachmentModel> getMosItpAttachment(int id) async {
+    final prefs = await _prefs;
+    for (final rec in _readMosItpRecordsRaw(prefs)) {
+      final rawAtt = rec['attachments'];
+      if (rawAtt is! List) continue;
+      for (final e in rawAtt) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        final rowId = m['id'];
+        final parsed = rowId is int ? rowId : int.tryParse(rowId?.toString() ?? '');
+        if (parsed == id) return MosItpAttachmentModel.fromMap(m);
+      }
+    }
+    throw Exception('المرفق غير موجود');
   }
 
   Future<int> addMosItpRecord({

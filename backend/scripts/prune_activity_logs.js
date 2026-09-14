@@ -18,7 +18,10 @@
  *   --vacuum-only   لا تحذف؛ نفّذ VACUUM FULL فقط لاستعادة المساحة الميتة.
  */
 require('dotenv').config();
+const { assertNeonConfirmed } = require('./lib/db_target_guard');
 const { Pool } = require('pg');
+
+assertNeonConfirmed({ action: 'prune activity_logs' });
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--yes');

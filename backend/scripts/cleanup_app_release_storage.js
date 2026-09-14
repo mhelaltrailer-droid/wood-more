@@ -20,7 +20,10 @@
  *   --no-vacuum         تخطَّ خطوة VACUUM FULL.
  */
 require('dotenv').config();
+const { assertNeonConfirmed } = require('./lib/db_target_guard');
 const { Pool } = require('pg');
+
+assertNeonConfirmed({ action: 'cleanup app release storage' });
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--yes');

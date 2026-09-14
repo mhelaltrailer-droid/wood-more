@@ -4,7 +4,9 @@ class MsSdAttachmentModel {
   final int recordId;
   final String fileName;
   final String fileMime;
+  /// فارغ في قوائم الـ API الخفيفة — يُجلب عند الفتح.
   final String fileData;
+  final int? sizeBytes;
   final DateTime? createdAt;
 
   const MsSdAttachmentModel({
@@ -12,9 +14,12 @@ class MsSdAttachmentModel {
     required this.recordId,
     required this.fileName,
     required this.fileMime,
-    required this.fileData,
+    this.fileData = '',
+    this.sizeBytes,
     this.createdAt,
   });
+
+  bool get hasFilePayload => fileData.trim().isNotEmpty;
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -22,12 +27,17 @@ class MsSdAttachmentModel {
         'file_name': fileName,
         'file_mime': fileMime,
         'file_data': fileData,
+        'size_bytes': sizeBytes,
         if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
       };
 
   factory MsSdAttachmentModel.fromMap(Map<String, dynamic> m) {
     int pInt(dynamic v) =>
         v is int ? v : int.tryParse(v?.toString() ?? '') ?? 0;
+    int? pIntOpt(dynamic v) {
+      if (v == null) return null;
+      return v is int ? v : int.tryParse(v.toString());
+    }
     final ca = m['created_at'] ?? m['createdAt'];
     return MsSdAttachmentModel(
       id: pInt(m['id']),
@@ -35,9 +45,8 @@ class MsSdAttachmentModel {
       fileName: (m['file_name'] ?? m['fileName'] ?? '').toString(),
       fileMime: (m['file_mime'] ?? m['fileMime'] ?? '').toString(),
       fileData: (m['file_data'] ?? m['fileData'] ?? '').toString(),
-      createdAt: ca != null
-          ? DateTime.tryParse(ca.toString())
-          : null,
+      sizeBytes: pIntOpt(m['size_bytes'] ?? m['sizeBytes']),
+      createdAt: ca != null ? DateTime.tryParse(ca.toString()) : null,
     );
   }
 }
@@ -112,8 +121,7 @@ class MsSdRecordModel {
       kind: (m['kind'] ?? '').toString(),
       recordName: (m['record_name'] ?? m['recordName'] ?? '').toString(),
       notes: m['notes']?.toString(),
-      createdAt:
-          ca != null ? DateTime.tryParse(ca.toString()) : null,
+      createdAt: ca != null ? DateTime.tryParse(ca.toString()) : null,
       attachments: atts,
     );
   }

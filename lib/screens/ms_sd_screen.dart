@@ -484,7 +484,10 @@ class _MsSdScreenState extends State<MsSdScreen> {
 
   Future<void> _openAttachment(MsSdAttachmentModel att) async {
     try {
-      var data = att.fileData;
+      final full = att.hasFilePayload
+          ? att
+          : await _db.getMsSdAttachment(att.id) as MsSdAttachmentModel;
+      var data = full.fileData;
       Uint8List bytes;
       if (data.startsWith('data:')) {
         final comma = data.indexOf(',');
@@ -495,8 +498,8 @@ class _MsSdScreenState extends State<MsSdScreen> {
       }
       final err = await openStoredAttachment(
         bytes: bytes,
-        fileName: att.fileName,
-        dataUrl: att.fileData,
+        fileName: full.fileName,
+        dataUrl: full.fileData,
       );
       if (err != null && mounted) _showError(err);
     } catch (e) {

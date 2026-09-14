@@ -4,6 +4,7 @@ import '../models/user_model.dart';
 import '../models/shop_darwing_notification_model.dart';
 import '../services/storage_service.dart';
 import '../services/api_storage_service.dart';
+import '../core/polling_intervals.dart';
 import '../utils/notification_delete_ui.dart';
 import '../utils/notification_time_display.dart';
 import '../widgets/shop_darwing_notification_app_bar_icon.dart';
@@ -31,7 +32,7 @@ class _ShopDarwingNotificationsScreenState
     super.initState();
     _loadNotifications();
     _pollTimer = Timer.periodic(
-      const Duration(seconds: 25),
+      AppPollingIntervals.notificationLists,
       (_) => _refreshSilently(),
     );
   }

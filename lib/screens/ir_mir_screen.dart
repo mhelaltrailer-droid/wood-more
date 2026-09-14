@@ -537,6 +537,12 @@ class _IrMirScreenState extends State<IrMirScreen> {
     }
   }
 
+  Future<IrMirUploadModel> _ensureFilePayload(IrMirUploadModel u) async {
+    if (u.hasFilePayload) return u;
+    final full = await _db.getIrMirUpload(u.id);
+    return full as IrMirUploadModel;
+  }
+
   void _showImagePreview(IrMirUploadModel u, Uint8List bytes) {
     showDialog<void>(
       context: context,
@@ -557,7 +563,7 @@ class _IrMirScreenState extends State<IrMirScreen> {
             IconButton(
               tooltip: 'فتح خارج التطبيق',
               icon: const Icon(Icons.open_in_new),
-              onPressed: () => _openAttachment(u),
+              onPressed: () => _openAttachment(u, forceExternal: true),
             ),
             IconButton(
               tooltip: 'إغلاق',
@@ -616,78 +622,64 @@ class _IrMirScreenState extends State<IrMirScreen> {
   }
 
   Widget _uploadCard(IrMirUploadModel u) {
-    final imageBytes =
-        _isImageAttachment(u) ? _bytesFromDataUrl(u.fileData) : null;
+    final isImage = _isImageAttachment(u);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (imageBytes != null)
-            Material(
-              color: Colors.grey.shade200,
-              child: InkWell(
-                onTap: () => _showImagePreview(u, imageBytes),
-                child: AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: Image.memory(
-                    imageBytes,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                    errorBuilder: (_, _, _) => const Center(
-                      child: Icon(Icons.broken_image, size: 48),
-                    ),
-                  ),
-                ),
+      child: ListTile(
+        leading: Icon(
+          isImage ? Icons.image_outlined : Icons.attach_file,
+          color: const Color(0xFF1B5E20),
+        ),
+        title: Text(u.fileName, textDirection: TextDirection.ltr),
+        subtitle: Text(
+          '${u.userName} — ${u.createdAt.toString().substring(0, 16)}\n'
+          '${u.kind == IrMirUploadModel.kindMir ? (u.mirName ?? '') : IrMirUploadModel.phaseLabelAr(u.phase ?? '')}'
+          '${isImage ? '\nاضغط للمعاينة' : ''}',
+        ),
+        onTap: () => _openAttachment(u),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.currentUser.canDeleteIrMirAttachments)
+              IconButton(
+                tooltip: 'حذف المرفق',
+                icon: Icon(Icons.delete_outline, color: Colors.red.shade700),
+                onPressed: () => _confirmDeleteUpload(u),
               ),
+            IconButton(
+              tooltip: 'فتح خارج التطبيق',
+              icon: const Icon(Icons.open_in_new),
+              onPressed: () => _openAttachment(u, forceExternal: true),
             ),
-          ListTile(
-            title: Text(u.fileName, textDirection: TextDirection.ltr),
-            subtitle: Text(
-              '${u.userName} — ${u.createdAt.toString().substring(0, 16)}\n'
-              '${u.kind == IrMirUploadModel.kindMir ? (u.mirName ?? '') : IrMirUploadModel.phaseLabelAr(u.phase ?? '')}'
-              '${imageBytes != null ? '\nاضغط على الصورة للمعاينة والتكبير' : ''}',
-            ),
-            onTap: imageBytes != null
-                ? () => _showImagePreview(u, imageBytes)
-                : () => _openAttachment(u),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (widget.currentUser.canDeleteIrMirAttachments)
-                  IconButton(
-                    tooltip: 'حذف المرفق',
-                    icon: Icon(Icons.delete_outline, color: Colors.red.shade700),
-                    onPressed: () => _confirmDeleteUpload(u),
-                  ),
-                IconButton(
-                  tooltip: 'فتح خارج التطبيق',
-                  icon: const Icon(Icons.open_in_new),
-                  onPressed: () => _openAttachment(u),
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Future<void> _openAttachment(IrMirUploadModel u) async {
-    final bytes = _bytesFromDataUrl(u.fileData);
-    if (bytes == null || bytes.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تعذر فتح الملف: بيانات الملف غير صالحة')),
-      );
-      return;
-    }
+  Future<void> _openAttachment(
+    IrMirUploadModel u, {
+    bool forceExternal = false,
+  }) async {
     try {
+      final full = await _ensureFilePayload(u);
+      final bytes = _bytesFromDataUrl(full.fileData);
+      if (bytes == null || bytes.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذر فتح الملف: بيانات الملف غير صالحة')),
+        );
+        return;
+      }
+      if (!forceExternal && _isImageAttachment(full) && mounted) {
+        _showImagePreview(full, bytes);
+        return;
+      }
       final err = await openStoredAttachment(
         bytes: bytes,
-        fileName: u.fileName,
-        dataUrl: u.fileData,
+        fileName: full.fileName,
+        dataUrl: full.fileData,
       );
       if (err != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

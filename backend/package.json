@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:local": "node start-local.js",
     "import:locations": "node scripts/import_project_locations_from_xlsx.js"
   },
   "dependencies": {

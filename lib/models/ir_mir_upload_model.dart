@@ -12,8 +12,10 @@ class IrMirUploadModel {
   final String? phase;
   final String fileName;
   final String fileMime;
-  /// data URL أو نص الملف كما خُزن
+  /// data URL أو نص الملف كما خُزن. فارغ في قوائم الـ API الخفيفة.
   final String fileData;
+  /// حجم تقريبي بالبايت (من القائمة بدون جلب المحتوى).
+  final int? sizeBytes;
   final String? notes;
   final DateTime createdAt;
 
@@ -28,10 +30,13 @@ class IrMirUploadModel {
     this.phase,
     required this.fileName,
     required this.fileMime,
-    required this.fileData,
+    this.fileData = '',
+    this.sizeBytes,
     this.notes,
     required this.createdAt,
   });
+
+  bool get hasFilePayload => fileData.trim().isNotEmpty;
 
   static const String kindMir = 'mir';
   static const String kindIr = 'ir';
@@ -71,6 +76,7 @@ class IrMirUploadModel {
         'file_name': fileName,
         'file_mime': fileMime,
         'file_data': fileData,
+        'size_bytes': sizeBytes,
         'notes': notes,
         'created_at': createdAt.toIso8601String(),
       };
@@ -96,6 +102,7 @@ class IrMirUploadModel {
       fileName: (m['file_name'] ?? m['fileName'] ?? '').toString(),
       fileMime: (m['file_mime'] ?? m['fileMime'] ?? '').toString(),
       fileData: (m['file_data'] ?? m['fileData'] ?? '').toString(),
+      sizeBytes: pIntOpt(m['size_bytes'] ?? m['sizeBytes']),
       notes: m['notes']?.toString(),
       createdAt: DateTime.tryParse(
             (m['created_at'] ?? m['createdAt'] ?? '').toString(),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../core/shop_drawing_constants.dart';
+import '../core/polling_intervals.dart';
 import '../models/shop_darwing_notification_model.dart';
 import '../models/shop_drawing_model.dart';
 import '../models/user_model.dart';
@@ -98,7 +99,7 @@ class _ShopDrawingHubScreenState extends State<ShopDrawingHubScreen>
       _loadTab(_tabs[_tabController.index].key);
     });
     _loadAll();
-    _pollTimer = Timer.periodic(const Duration(seconds: 25), (_) => _refreshSilently());
+    _pollTimer = Timer.periodic(AppPollingIntervals.openHubScreens, (_) => _refreshSilently());
   }
 
   @override

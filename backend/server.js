@@ -30,10 +30,13 @@ const {
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const { noiseGuard } = require('./noise_guard');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '120mb' }));
+// احجب بوتات/ماسحات مبكراً — بدون لمس Neon.
+app.use(noiseGuard);
 const PRIMARY_APP_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 const SEM_LIKE_ROLES = ['site_engineer_manager', 'projects_manager'];
 function isSemLikeRole(role) {
@@ -1320,21 +1323,89 @@ function normalizeDatabaseUrl(raw) {
   }
 }
 
-const databaseUrl = normalizeDatabaseUrl(process.env.DATABASE_URL);
-const pool = databaseUrl
-  ? new Pool({
+const databaseUrlRaw = process.env.DATABASE_URL;
+const forceLocalDb =
+  String(process.env.FORCE_LOCAL_DB || '').trim() === '1' ||
+  String(process.env.WOOD_MORE_USE_LOCAL_DB || '').trim() === '1';
+if (forceLocalDb && databaseUrlRaw) {
+  console.warn(
+    'FORCE_LOCAL_DB=1: ignoring DATABASE_URL — using local PG* settings (saves Neon CU-hours).',
+  );
+}
+const databaseUrl = forceLocalDb ? '' : normalizeDatabaseUrl(databaseUrlRaw);
+// Pool tuned for Neon Scale to Zero:
+// - close idle clients quickly so the compute can suspend
+// - small max fits Free-plan connection limits
+// - longer connect timeout tolerates cold start after suspend
+const poolConfig = databaseUrl
+  ? {
       connectionString: databaseUrl,
       ssl: databaseUrl.includes('sslmode=require') || databaseUrl.includes('neon.tech')
         ? { rejectUnauthorized: false }
         : false,
-    })
-  : new Pool({
+      max: 5,
+      min: 0,
+      idleTimeoutMillis: 20_000,
+      connectionTimeoutMillis: 20_000,
+    }
+  : {
       host: process.env.PGHOST || 'localhost',
       port: parseInt(process.env.PGPORT || '5432', 10),
       database: process.env.PGDATABASE || 'wood_more',
       user: process.env.PGUSER || 'wood_more',
       password: process.env.PGPASSWORD || 'wood_more',
+      max: 5,
+      min: 0,
+      idleTimeoutMillis: 20_000,
+      connectionTimeoutMillis: 10_000,
+    };
+const pool = new Pool(poolConfig);
+
+// After Neon suspends, idle sockets may error; let the pool replace them on next query.
+pool.on('error', (err) => {
+  console.warn('pg pool error (will reconnect on next query):', err.message);
+});
+
+async function shutdownPool(signal) {
+  console.log(`${signal}: closing pg pool…`);
+  try {
+    await pool.end();
+  } catch (e) {
+    console.warn('pg pool end:', e.message);
+  }
+  process.exit(0);
+}
+process.once('SIGTERM', () => {
+  void shutdownPool('SIGTERM');
+});
+process.once('SIGINT', () => {
+  void shutdownPool('SIGINT');
+});
+
+// لا تشغّل migrations عند كل cold start من بوت/health.
+// تُنفَّذ مرة واحدة عند أول طلب API حقيقي فقط.
+let _dbReadyPromise = null;
+async function ensureDbReady() {
+  if (!_dbReadyPromise) {
+    _dbReadyPromise = runStartupMigrations().catch((e) => {
+      _dbReadyPromise = null;
+      throw e;
     });
+  }
+  await _dbReadyPromise;
+}
+
+app.use(async (req, res, next) => {
+  const p = String(req.path || '');
+  if (p === '/healthz' || p === '/') return next();
+  try {
+    await ensureDbReady();
+    next();
+  } catch (e) {
+    console.warn('ensureDbReady failed:', e && e.message ? e.message : e);
+    res.status(503).json({ error: 'database_unavailable' });
+  }
+});
 
 // One-time migration: add password column if missing (e.g. Docker volume created before it existed)
 async function ensurePasswordColumn() {
@@ -2725,9 +2796,11 @@ app.get('/ir-mir/uploads', async (req, res) => {
         : null;
     const phase = req.query.phase != null ? String(req.query.phase).trim().toLowerCase() : null;
 
+    // قائمة خفيفة: بدون file_data (base64) — البايتات تُجلب عند فتح مرفق واحد.
     let sql =
       `SELECT id, project_id, user_id, user_name, kind, mir_name, location_id, phase,
-              file_name, file_mime, file_data, notes, created_at
+              file_name, file_mime, notes, created_at,
+              (length(file_data) * 3 / 4)::bigint AS size_bytes
        FROM ir_mir_uploads WHERE project_id = $1`;
     const params = [projectId];
     let i = 2;
@@ -2765,11 +2838,46 @@ app.get('/ir-mir/uploads', async (req, res) => {
         phase: row.phase,
         file_name: row.file_name,
         file_mime: row.file_mime,
-        file_data: row.file_data,
+        file_data: '',
+        size_bytes: row.size_bytes != null ? parseInt(row.size_bytes, 10) : null,
         notes: row.notes,
         created_at: row.created_at,
       })),
     );
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/ir-mir/uploads/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+    const r = await pool.query(
+      `SELECT id, project_id, user_id, user_name, kind, mir_name, location_id, phase,
+              file_name, file_mime, file_data, notes, created_at,
+              (length(file_data) * 3 / 4)::bigint AS size_bytes
+       FROM ir_mir_uploads WHERE id = $1`,
+      [id],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const row = r.rows[0];
+    res.json({
+      id: parseInt(row.id, 10),
+      project_id: parseInt(row.project_id, 10),
+      user_id: parseInt(row.user_id, 10),
+      user_name: row.user_name,
+      kind: row.kind,
+      mir_name: row.mir_name,
+      location_id: row.location_id != null ? parseInt(row.location_id, 10) : null,
+      phase: row.phase,
+      file_name: row.file_name,
+      file_mime: row.file_mime,
+      file_data: row.file_data,
+      size_bytes: row.size_bytes != null ? parseInt(row.size_bytes, 10) : null,
+      notes: row.notes,
+      created_at: row.created_at,
+    });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -2911,7 +3019,7 @@ app.delete('/ir-mir/uploads/:id', async (req, res) => {
   }
 });
 
-async function _mapMsSdRecordRow(row, attachments, includeAudit) {
+async function _mapMsSdRecordRow(row, attachments, includeAudit, { includeFileData = true } = {}) {
   const out = {
     id: parseInt(row.id, 10),
     project_id: parseInt(row.project_id, 10),
@@ -2923,7 +3031,13 @@ async function _mapMsSdRecordRow(row, attachments, includeAudit) {
       record_id: parseInt(a.record_id, 10),
       file_name: a.file_name,
       file_mime: a.file_mime,
-      file_data: a.file_data,
+      file_data: includeFileData ? a.file_data : '',
+      size_bytes:
+        a.size_bytes != null
+          ? parseInt(a.size_bytes, 10)
+          : a.data_len != null
+            ? Math.floor((parseInt(a.data_len, 10) * 3) / 4)
+            : null,
       created_at: a.created_at,
     })),
   };
@@ -2958,13 +3072,40 @@ app.get('/ms-sd/records', async (req, res) => {
     const out = [];
     for (const row of recs.rows) {
       const att = await pool.query(
-        `SELECT id, record_id, file_name, file_mime, file_data, created_at
+        `SELECT id, record_id, file_name, file_mime, created_at,
+                length(file_data) AS data_len
          FROM ms_sd_attachments WHERE record_id = $1 ORDER BY id ASC`,
         [row.id],
       );
-      out.push(await _mapMsSdRecordRow(row, att.rows, includeAudit));
+      out.push(await _mapMsSdRecordRow(row, att.rows, includeAudit, { includeFileData: false }));
     }
     res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/ms-sd/attachments/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+    const r = await pool.query(
+      `SELECT id, record_id, file_name, file_mime, file_data, created_at,
+              (length(file_data) * 3 / 4)::bigint AS size_bytes
+       FROM ms_sd_attachments WHERE id = $1`,
+      [id],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const a = r.rows[0];
+    res.json({
+      id: parseInt(a.id, 10),
+      record_id: parseInt(a.record_id, 10),
+      file_name: a.file_name,
+      file_mime: a.file_mime,
+      file_data: a.file_data,
+      size_bytes: a.size_bytes != null ? parseInt(a.size_bytes, 10) : null,
+      created_at: a.created_at,
+    });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -3177,7 +3318,7 @@ app.delete('/ms-sd/records/:id', async (req, res) => {
   }
 });
 
-async function _mapMosItpRecordRow(row, attachments, includeAudit) {
+async function _mapMosItpRecordRow(row, attachments, includeAudit, { includeFileData = true } = {}) {
   const out = {
     id: parseInt(row.id, 10),
     project_id: parseInt(row.project_id, 10),
@@ -3189,7 +3330,13 @@ async function _mapMosItpRecordRow(row, attachments, includeAudit) {
       record_id: parseInt(a.record_id, 10),
       file_name: a.file_name,
       file_mime: a.file_mime,
-      file_data: a.file_data,
+      file_data: includeFileData ? a.file_data : '',
+      size_bytes:
+        a.size_bytes != null
+          ? parseInt(a.size_bytes, 10)
+          : a.data_len != null
+            ? Math.floor((parseInt(a.data_len, 10) * 3) / 4)
+            : null,
       created_at: a.created_at,
     })),
   };
@@ -3224,13 +3371,40 @@ app.get('/mos-itp/records', async (req, res) => {
     const out = [];
     for (const row of recs.rows) {
       const att = await pool.query(
-        `SELECT id, record_id, file_name, file_mime, file_data, created_at
+        `SELECT id, record_id, file_name, file_mime, created_at,
+                length(file_data) AS data_len
          FROM mos_itp_attachments WHERE record_id = $1 ORDER BY id ASC`,
         [row.id],
       );
-      out.push(await _mapMosItpRecordRow(row, att.rows, includeAudit));
+      out.push(await _mapMosItpRecordRow(row, att.rows, includeAudit, { includeFileData: false }));
     }
     res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+app.get('/mos-itp/attachments/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+    const r = await pool.query(
+      `SELECT id, record_id, file_name, file_mime, file_data, created_at,
+              (length(file_data) * 3 / 4)::bigint AS size_bytes
+       FROM mos_itp_attachments WHERE id = $1`,
+      [id],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const a = r.rows[0];
+    res.json({
+      id: parseInt(a.id, 10),
+      record_id: parseInt(a.record_id, 10),
+      file_name: a.file_name,
+      file_mime: a.file_mime,
+      file_data: a.file_data,
+      size_bytes: a.size_bytes != null ? parseInt(a.size_bytes, 10) : null,
+      created_at: a.created_at,
+    });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -7486,7 +7660,16 @@ async function runStartupMigrations() {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Wood & More API listening on ${PORT}`);
-  runStartupMigrations().catch((e) => {
-    console.warn('Startup migrations failed:', e && e.message ? e.message : e);
-  });
+  const bootMigrate =
+    String(process.env.RUN_STARTUP_MIGRATIONS_ON_BOOT || '').trim() === '1';
+  if (bootMigrate) {
+    console.log('RUN_STARTUP_MIGRATIONS_ON_BOOT=1: running DB ensures immediately.');
+    ensureDbReady().catch((e) => {
+      console.warn('Startup migrations failed:', e && e.message ? e.message : e);
+    });
+  } else {
+    console.log(
+      'DB migrations deferred until first real API request (saves Neon CU-hours from bot/health wakes).',
+    );
+  }
 });

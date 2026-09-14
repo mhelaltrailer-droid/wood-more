@@ -484,7 +484,10 @@ class _MosItpScreenState extends State<MosItpScreen> {
 
   Future<void> _openAttachment(MosItpAttachmentModel att) async {
     try {
-      var data = att.fileData;
+      final full = att.hasFilePayload
+          ? att
+          : await _db.getMosItpAttachment(att.id) as MosItpAttachmentModel;
+      var data = full.fileData;
       Uint8List bytes;
       if (data.startsWith('data:')) {
         final comma = data.indexOf(',');
@@ -495,8 +498,8 @@ class _MosItpScreenState extends State<MosItpScreen> {
       }
       final err = await openStoredAttachment(
         bytes: bytes,
-        fileName: att.fileName,
-        dataUrl: att.fileData,
+        fileName: full.fileName,
+        dataUrl: full.fileData,
       );
       if (err != null && mounted) _showError(err);
     } catch (e) {

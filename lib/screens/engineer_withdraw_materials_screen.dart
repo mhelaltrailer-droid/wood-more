@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 
+import '../core/polling_intervals.dart';
 import '../models/user_model.dart';
 import '../models/project_model.dart';
 import '../models/project_location_model.dart';
@@ -66,7 +67,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadProjects();
-    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+    _pollTimer = Timer.periodic(AppPollingIntervals.openHubScreens, (_) {
       if (_selectedProject != null && mounted) {
         _refreshWithdrawalRequestsOnly();
       }

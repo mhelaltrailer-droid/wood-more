@@ -12,9 +12,10 @@
  *     node scripts/import_project_locations_from_xlsx.js ^
  *       --file="C:\path\DDD.xlsx" --sheet="Z1_EMAAR_F" --project="Z1_EMAAR_F" --out="scripts/out.sql"
  *
- *   تنفيذ على Neon (يتطلب DATABASE_URL في backend/.env):
+ *   تنفيذ على Neon (يتطلب DATABASE_URL + تأكيد):
  *     node scripts/import_project_locations_from_xlsx.js ^
- *       --file="..." --sheet="Z1_EMAAR_F" --project="Z1_EMAAR_F" --execute
+ *       --file="..." --sheet="Z1_EMAAR_F" --project="Z1_EMAAR_F" ^
+ *       --execute --confirm-production
  *
  * --execute يضمن إنشاء المشروع في projects إن لم يكن موجوداً (اسم مطابق لـ --project).
  */
@@ -23,6 +24,7 @@ const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
 const { Pool } = require('pg');
+const { assertNeonConfirmed } = require('./lib/db_target_guard');
 const {
   parseRowsToStructure,
   buildLocationsSeedSql,
@@ -130,6 +132,7 @@ function main() {
 
   if (args.execute) {
     return (async () => {
+      assertNeonConfirmed({ action: 'import project locations (--execute)' });
       const pool = createPool();
       try {
         await ensureProject(pool, args.project);
