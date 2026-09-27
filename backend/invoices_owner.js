@@ -92,16 +92,25 @@ async function ensureInvoicesOwnerTables(pool) {
       CREATE INDEX IF NOT EXISTS idx_invoices_owner_creator_status
       ON invoices_owner (created_by_user_id, status)
     `).catch(() => {});
-    await pool
-      .query(
+    try {
+      await pool.query(
         `ALTER TABLE invoices_owner
          ADD COLUMN IF NOT EXISTS om_checklist_json TEXT`,
-      )
-      .catch(() => {});
+      );
+    } catch (e) {
+      console.warn('ensureInvoicesOwnerTables om_checklist_json:', e.message);
+    }
     console.log('ensureInvoicesOwnerTables: ok');
   } catch (e) {
     console.warn('ensureInvoicesOwnerTables:', e.message);
   }
+}
+
+async function ioEnsureOmChecklistColumn(pool) {
+  await pool.query(
+    `ALTER TABLE invoices_owner
+     ADD COLUMN IF NOT EXISTS om_checklist_json TEXT`,
+  );
 }
 
 const IO_OM_CHECKLIST_KEYS = [
@@ -1069,6 +1078,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       }
 
       if (omChecklistJson != null) {
+        await ioEnsureOmChecklistColumn(pool);
         await pool.query(
           `UPDATE invoices_owner SET
            status=$1, return_reason=NULL,
