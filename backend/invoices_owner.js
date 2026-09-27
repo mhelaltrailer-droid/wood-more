@@ -92,9 +92,49 @@ async function ensureInvoicesOwnerTables(pool) {
       CREATE INDEX IF NOT EXISTS idx_invoices_owner_creator_status
       ON invoices_owner (created_by_user_id, status)
     `).catch(() => {});
+    await pool
+      .query(
+        `ALTER TABLE invoices_owner
+         ADD COLUMN IF NOT EXISTS om_checklist_json TEXT`,
+      )
+      .catch(() => {});
     console.log('ensureInvoicesOwnerTables: ok');
   } catch (e) {
     console.warn('ensureInvoicesOwnerTables:', e.message);
+  }
+}
+
+const IO_OM_CHECKLIST_KEYS = [
+  'prepare_progress',
+  'review_progress',
+  'prepare_invoice_ir_mir_ms',
+  'review_invoice_execution',
+  'finance_review',
+];
+
+function ioNormalizeOmChecklist(raw) {
+  const src =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? raw
+      : {};
+  const out = {};
+  for (const key of IO_OM_CHECKLIST_KEYS) {
+    const v = src[key];
+    out[key] = v === true || v === 1 || v === '1' || v === 'true';
+  }
+  return out;
+}
+
+function ioParseOmChecklistJson(raw) {
+  if (raw == null || raw === '') return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return ioNormalizeOmChecklist(raw);
+  }
+  try {
+    const parsed = JSON.parse(String(raw));
+    return ioNormalizeOmChecklist(parsed);
+  } catch (_) {
+    return {};
   }
 }
 
@@ -163,6 +203,7 @@ function ioCanViewInvoice(user, row) {
 
 function ioIsPrimaryAdmin(user) {
   if (!user) return false;
+  if (user._viewAsActive) return false;
   return String(user.email || '').trim().toLowerCase() === IO_PRIMARY_ADMIN_EMAIL;
 }
 
@@ -198,9 +239,10 @@ function ioRoleForStatus(status) {
   return step ? step.role : null;
 }
 
-async function ioGetUser(pool, userId) {
+async function ioGetUser(pool, userId, req) {
   const r = await pool.query('SELECT id, name, email, role FROM users WHERE id = $1', [userId]);
-  return r.rows[0] || null;
+  const { applyViewAsToUser } = require('./view_as');
+  return applyViewAsToUser(r.rows[0] || null, req);
 }
 
 async function ioGetUserByRole(pool, role) {
@@ -327,6 +369,7 @@ function ioMapRow(row, attachments = [], actions = []) {
     created_at: row.created_at,
     updated_at: row.updated_at,
     approved_at: row.approved_at || null,
+    om_checklist: ioParseOmChecklistJson(row.om_checklist_json),
     attachments,
     actions,
   };
@@ -471,7 +514,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
     try {
       const userId = parseInt(String(req.query.userId || ''), 10);
       if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
-      const user = await ioGetUser(pool, userId);
+      const user = await ioGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
       if (!ioCanAccessModule(user)) return res.json({ count: 0 });
 
@@ -508,7 +551,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const userId = parseInt(String(req.query.userId || ''), 10);
       const tab = String(req.query.tab || 'pending').trim().toLowerCase();
       if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
-      const user = await ioGetUser(pool, userId);
+      const user = await ioGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
       if (!ioCanAccessModule(user)) return res.status(403).json({ error: 'forbidden' });
 
@@ -573,7 +616,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
     try {
       const userId = parseInt(String(req.query.userId || ''), 10);
       if (!Number.isInteger(userId)) return res.status(400).json({ error: 'userId required' });
-      const user = await ioGetUser(pool, userId);
+      const user = await ioGetUser(pool, userId, req);
       if (!ioCanAccessModule(user)) return res.status(403).json({ error: 'forbidden' });
       const r = await pool.query(
         `SELECT n.* FROM invoices_owner_notifications n
@@ -608,7 +651,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
     try {
       const userId = parseInt(String(req.query.userId || ''), 10);
       if (!Number.isInteger(userId)) return res.status(400).json({ error: 'userId required' });
-      const user = await ioGetUser(pool, userId);
+      const user = await ioGetUser(pool, userId, req);
       if (!ioCanAccessModule(user)) return res.json({ count: 0 });
       const r = await pool.query(
         `SELECT COUNT(*)::int AS count
@@ -635,7 +678,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       if (!Number.isInteger(notificationId) || !Number.isInteger(userId)) {
         return res.status(400).json({ error: 'invalid' });
       }
-      const user = await ioGetUser(pool, userId);
+      const user = await ioGetUser(pool, userId, req);
       if (!ioCanAccessModule(user)) return res.status(403).json({ error: 'forbidden' });
       await pool.query(
         `UPDATE invoices_owner_notifications
@@ -653,7 +696,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
     try {
       const userId = parseInt(String(req.query.userId || ''), 10);
       if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
-      const user = await ioGetUser(pool, userId);
+      const user = await ioGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
       if (!ioCanViewActivityLog(user)) return res.status(403).json({ error: 'forbidden' });
 
@@ -692,7 +735,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const detail = await ioLoadDetail(pool, id);
       if (!detail) return res.status(404).json({ error: 'not found' });
       if (!Number.isNaN(userId)) {
-        const user = await ioGetUser(pool, userId);
+        const user = await ioGetUser(pool, userId, req);
         const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [id]);
         if (!user || !ioCanViewInvoice(user, rq.rows[0])) {
           return res.status(403).json({ error: 'forbidden' });
@@ -712,7 +755,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       if (Number.isNaN(invoiceId) || Number.isNaN(attachmentId) || Number.isNaN(userId)) {
         return res.status(400).json({ error: 'invalid' });
       }
-      const actor = await ioGetUser(pool, userId);
+      const actor = await ioGetUser(pool, userId, req);
       const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [invoiceId]);
       if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
       if (!ioCanDownloadAttachments(actor, rq.rows[0])) {
@@ -742,7 +785,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       if (Number.isNaN(invoiceId) || Number.isNaN(userId)) {
         return res.status(400).json({ error: 'invalid' });
       }
-      const actor = await ioGetUser(pool, userId);
+      const actor = await ioGetUser(pool, userId, req);
       const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [invoiceId]);
       if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
       if (!ioCanManageAttachmentsAsAssignee(actor, rq.rows[0])) {
@@ -788,7 +831,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       if (Number.isNaN(invoiceId) || Number.isNaN(attachmentId) || Number.isNaN(userId)) {
         return res.status(400).json({ error: 'invalid' });
       }
-      const actor = await ioGetUser(pool, userId);
+      const actor = await ioGetUser(pool, userId, req);
       const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [invoiceId]);
       if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
       if (!ioCanManageAttachmentsAsAssignee(actor, rq.rows[0])) {
@@ -837,7 +880,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const b = req.body || {};
       const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
       if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
-      const actor = await ioGetUser(pool, userId);
+      const actor = await ioGetUser(pool, userId, req);
       if (!actor || !ioIsCreatorUser(actor)) {
         return res.status(403).json({ error: 'forbidden' });
       }
@@ -917,7 +960,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(400).json({ error: 'not_editable' });
       }
 
-      const actor = await ioGetUser(pool, userId);
+      const actor = await ioGetUser(pool, userId, req);
       if (!actor || !ioIsCreatorUser(actor)) {
         return res.status(403).json({ error: 'forbidden' });
       }
@@ -987,7 +1030,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [id]);
       if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
       const row = rq.rows[0];
-      const actor = await ioGetUser(pool, userId);
+      const actor = await ioGetUser(pool, userId, req);
       if (!ioCanActOnStatus(actor, row.status, row)) {
         return res.status(403).json({ error: 'forbidden' });
       }
@@ -1006,10 +1049,15 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       let assigneeId = null;
       let assigneeName = null;
       let approvedAt = null;
+      let omChecklistJson = null;
 
       if (idx === IO_FLOW.length - 1) {
         nextStatus = IO_STATUS.APPROVED;
         approvedAt = now;
+        // قائمة مراجعة OM تُحفظ فقط مع الاعتماد النهائي.
+        omChecklistJson = JSON.stringify(
+          ioNormalizeOmChecklist(b.omChecklist ?? b.om_checklist ?? {}),
+        );
       } else {
         nextStatus = IO_FLOW[idx + 1].status;
         const assignee = await ioResolveAssigneeForStatus(pool, nextStatus, row);
@@ -1020,14 +1068,34 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         assigneeName = assignee.name;
       }
 
-      await pool.query(
-        `UPDATE invoices_owner SET
-         status=$1, return_reason=NULL,
-         current_assignee_user_id=$2, current_assignee_user_name=$3,
-         approved_at=COALESCE($4, approved_at), updated_at=$5
-         WHERE id=$6`,
-        [nextStatus, assigneeId, assigneeName, approvedAt, now, id],
-      );
+      if (omChecklistJson != null) {
+        await pool.query(
+          `UPDATE invoices_owner SET
+           status=$1, return_reason=NULL,
+           current_assignee_user_id=$2, current_assignee_user_name=$3,
+           approved_at=COALESCE($4, approved_at), updated_at=$5,
+           om_checklist_json=$6
+           WHERE id=$7`,
+          [
+            nextStatus,
+            assigneeId,
+            assigneeName,
+            approvedAt,
+            now,
+            omChecklistJson,
+            id,
+          ],
+        );
+      } else {
+        await pool.query(
+          `UPDATE invoices_owner SET
+           status=$1, return_reason=NULL,
+           current_assignee_user_id=$2, current_assignee_user_name=$3,
+           approved_at=COALESCE($4, approved_at), updated_at=$5
+           WHERE id=$6`,
+          [nextStatus, assigneeId, assigneeName, approvedAt, now, id],
+        );
+      }
       await ioInsertAction(pool, {
         invoiceId: id,
         actorUserId: userId,
@@ -1078,7 +1146,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [id]);
       if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
       const row = rq.rows[0];
-      const actor = await ioGetUser(pool, userId);
+      const actor = await ioGetUser(pool, userId, req);
       if (!ioCanActOnStatus(actor, row.status, row)) {
         return res.status(403).json({ error: 'forbidden' });
       }
@@ -1142,7 +1210,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       if (Number.isNaN(invoiceId) || Number.isNaN(attachmentId) || Number.isNaN(userId)) {
         return res.status(400).json({ error: 'invalid' });
       }
-      const actor = await ioGetUser(pool, userId);
+      const actor = await ioGetUser(pool, userId, req);
       const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [invoiceId]);
       if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
       if (!ioCanDeleteAttachment(actor, rq.rows[0])) {
@@ -1185,7 +1253,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       if (Number.isNaN(id) || Number.isNaN(userId)) {
         return res.status(400).json({ error: 'invalid' });
       }
-      const actor = await ioGetUser(pool, userId);
+      const actor = await ioGetUser(pool, userId, req);
       if (!ioIsPrimaryAdmin(actor)) return res.status(403).json({ error: 'forbidden' });
 
       const rq = await pool.query('SELECT id FROM invoices_owner WHERE id = $1', [id]);

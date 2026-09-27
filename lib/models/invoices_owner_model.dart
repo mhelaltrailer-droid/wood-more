@@ -193,6 +193,8 @@ class InvoicesOwnerModel {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? approvedAt;
+  /// قائمة مراجعة OM المحفوظة مع الاعتماد النهائي (مفاتيح → نعم/لا).
+  final Map<String, bool> omChecklist;
   final List<InvoicesOwnerAttachmentModel> attachments;
   final List<InvoicesOwnerActionModel> actions;
 
@@ -210,10 +212,12 @@ class InvoicesOwnerModel {
     required this.createdAt,
     required this.updatedAt,
     this.approvedAt,
+    this.omChecklist = const {},
     this.attachments = const [],
     this.actions = const [],
   });
 
+  bool get hasOmChecklistSaved => omChecklist.isNotEmpty;
   /// ملاحظات المراحل للعرض التراكمي (منشئ + معتمدون).
   List<({String title, String body, DateTime at})> get stageNotesForDisplay {
     final out = <({String title, String body, DateTime at})>[];
@@ -249,6 +253,14 @@ class InvoicesOwnerModel {
 
     final attachmentsRaw = map['attachments'];
     final actionsRaw = map['actions'];
+    final omChecklistParsed = <String, bool>{};
+    final rawCl = map['om_checklist'] ?? map['omChecklist'];
+    if (rawCl is Map) {
+      for (final e in rawCl.entries) {
+        omChecklistParsed[e.key.toString()] =
+            e.value == true || e.value == 1 || '${e.value}' == 'true';
+      }
+    }
 
     return InvoicesOwnerModel(
       id: map['id'] as int,
@@ -265,6 +277,7 @@ class InvoicesOwnerModel {
       createdAt: parseDate(map['created_at']),
       updatedAt: parseDate(map['updated_at']),
       approvedAt: parseDateOrNull(map['approved_at']),
+      omChecklist: omChecklistParsed,
       attachments: attachmentsRaw is List
           ? attachmentsRaw
               .map(

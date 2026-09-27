@@ -25,14 +25,50 @@ class UserModel {
   final int id;
   final String name;
   final String email;
-  final String role; // incl. projects_manager
+  /// الدور الحقيقي في قاعدة البيانات (لا يتغير مع View as).
+  final String dbRole;
+  /// عند تعيينه للمسؤول الأساسي: يُعامل كأنه هذا الدور (أيقونات/صلاحيات).
+  /// `null` = وضع المسؤول الأساسي الكامل.
+  final String? viewAsRole;
 
   const UserModel({
     required this.id,
     required this.name,
     required this.email,
-    required this.role,
-  });
+    required String role,
+    this.viewAsRole,
+  }) : dbRole = role;
+
+  /// الدور الفعّال للصلاحيات والأيقونات (View as إن وُجد، وإلا dbRole).
+  String get role {
+    final v = viewAsRole?.trim();
+    if (v != null && v.isNotEmpty) return v;
+    return dbRole;
+  }
+
+  /// هل المسؤول الأساسي في وضع View as لدور آخر؟
+  bool get isViewingAsOtherRole {
+    final v = viewAsRole?.trim();
+    return v != null && v.isNotEmpty;
+  }
+
+  /// هل يحق لهذا الحساب استخدام قائمة View as؟
+  bool get canUseViewAsRole =>
+      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+
+  UserModel withViewAsRole(String? role) {
+    final v = role?.trim();
+    if (v == null || v.isEmpty || v == 'app_admin') {
+      return UserModel(id: id, name: name, email: email, role: dbRole);
+    }
+    return UserModel(
+      id: id,
+      name: name,
+      email: email,
+      role: dbRole,
+      viewAsRole: v,
+    );
+  }
 
   bool get isSiteEngineer => role == 'site_engineer';
   bool get isDocumentController => role == 'document_controller';
@@ -82,8 +118,7 @@ class UserModel {
       isGeneralSupervisor;
 
   /// تعديل/حذف سجلات MS-SD بعد الحفظ — المسؤول المحدد فقط.
-  bool get canManageMsSdRecords =>
-      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+  bool get canManageMsSdRecords => isPrimaryAppAdmin;
 
   /// رفع سجلات MoS-ITP (Document Controller فقط).
   bool get canUploadMosItp => isDocumentController;
@@ -96,8 +131,7 @@ class UserModel {
       isGeneralSupervisor;
 
   /// تعديل/حذف سجلات MoS-ITP بعد الحفظ — المسؤول المحدد فقط.
-  bool get canManageMosItpRecords =>
-      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+  bool get canManageMosItpRecords => isPrimaryAppAdmin;
 
   /// رفع مرفقات IR / MIR (مهندس موقع أو Document Controller).
   bool get canUploadIrMir => isSiteEngineer || isDocumentController;
@@ -130,40 +164,33 @@ class UserModel {
       hasSiteEngineerManagerPrivileges || role == 'operation_manager';
 
   /// رفع نسخ التطبيق (APK) وإدارة الإصدارات — البريد الأساسي فقط.
-  bool get canManageAppVersions =>
-      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+  bool get canManageAppVersions => isPrimaryAppAdmin;
 
   /// عرض أيقونة Versions — مؤقتاً لدور app_admin فقط (مخفية عن باقي الأدوار).
-  bool get canViewAppVersionsIcon => isAdmin;
+  bool get canViewAppVersionsIcon => isAdmin && !isViewingAsOtherRole;
 
   /// إدارة إلغاء سحب الخامات من المخزن (لوحة التحكم): مسؤول التطبيق بهذا البريد فقط.
-  bool get canManageWarehouseWithdrawalReset =>
-      isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+  bool get canManageWarehouseWithdrawalReset => isPrimaryAppAdmin && isAdmin;
 
   /// عرض سجل حركة النظام لمسؤول التطبيق المحدد فقط.
-  bool get canViewActivityLogs =>
-      isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+  bool get canViewActivityLogs => isPrimaryAppAdmin && isAdmin;
 
   /// حذف/تعديل أي خطة عمل اليوم أو الغد (تقارير مفصّلة) — لهذا البريد فقط.
-  bool get canManageAnySiteWorkPlan =>
-      email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+  bool get canManageAnySiteWorkPlan => isPrimaryAppAdmin;
 
   /// التحكم في إظهار/إخفاء أيقونات الواجهة — لهذا البريد فقط.
-  bool get canManageIconsControl =>
-      email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+  bool get canManageIconsControl => isPrimaryAppAdmin;
 
   /// تقارير التأجيل/الغرامات: مدير العمليات، أو مسؤول التطبيق بهذا البريد فقط.
   bool get canAccessPostponeFinesReports =>
-      role == 'operation_manager' ||
-      (isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com');
+      role == 'operation_manager' || isPrimaryAppAdmin;
 
   /// حذف مرفقات IR / MIR — مسؤول التطبيق بهذا البريد فقط.
-  bool get canDeleteIrMirAttachments =>
-      isAdmin && email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
+  bool get canDeleteIrMirAttachments => isPrimaryAppAdmin && isAdmin;
 
   /// تقرير بنود صرف العهدة/المصروفات + حذف البنود — مسؤول التطبيق بهذا البريد فقط.
   bool get canManageSiteEngineerExpensesReport =>
-      isAdmin && email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+      isPrimaryAppAdmin && isAdmin;
 
   /// اعتماد/رفض بيانات صرف مهندسي المواقع — البريد المعتمد أو Projects Manager.
   bool get canApproveExpenseStatements =>
@@ -299,11 +326,12 @@ class UserModel {
   bool get canViewShopDrawingReadOnly => isTopManagement;
 
   /// إدارة Shop-Drawing & PO (حذف بأي مرحلة، عرض كامل…) — مسؤول التطبيق المحدد فقط.
-  bool get canManageShopDrawingApproved =>
-      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+  bool get canManageShopDrawingApproved => isPrimaryAppAdmin;
 
+  /// المسؤول الأساسي بصلاحياته الكاملة — تُلغى أثناء View as لدور آخر.
   bool get isPrimaryAppAdmin =>
-      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase();
+      email.trim().toLowerCase() == primaryAppAdminEmail.toLowerCase() &&
+      !isViewingAsOtherRole;
 
   /// Projects Dashboard — المكتب الفني، مدير العمليات، والمسؤول الأساسي.
   bool get canAccessProjectsDashboard =>
@@ -339,7 +367,7 @@ class UserModel {
       'id': id,
       'name': name,
       'email': email,
-      'role': role,
+      'role': dbRole,
     };
   }
 

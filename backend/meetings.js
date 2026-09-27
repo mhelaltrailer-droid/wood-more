@@ -36,19 +36,20 @@ function previousMeetingFileType(fileType) {
   return i > 0 ? MEETING_FILE_TYPES[i - 1] : null;
 }
 
-async function getMeetingsUser(pool, userId) {
+async function getMeetingsUser(pool, userId, req) {
   const id = parseInt(userId, 10);
   if (!Number.isFinite(id)) return null;
   const r = await pool.query(
     'SELECT id, name, email, role FROM users WHERE id = $1',
     [id],
   );
-  return r.rows[0] || null;
+  const { applyViewAsToUser } = require('./view_as');
+  return applyViewAsToUser(r.rows[0] || null, req);
 }
 
 function isPrimaryAppAdmin(user) {
-  return !!user &&
-    String(user.email || '').trim().toLowerCase() === PRIMARY_APP_ADMIN_EMAIL;
+  if (!user || user._viewAsActive) return false;
+  return String(user.email || '').trim().toLowerCase() === PRIMARY_APP_ADMIN_EMAIL;
 }
 
 function canAccessMeetings(user) {

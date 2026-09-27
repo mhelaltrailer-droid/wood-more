@@ -182,9 +182,10 @@ function shopDrawingParseContentFlags(body) {
   };
 }
 
-async function shopDrawingGetUser(pool, userId) {
+async function shopDrawingGetUser(pool, userId, req) {
   const r = await pool.query('SELECT id, name, email, role FROM users WHERE id = $1', [userId]);
-  return r.rows[0] || null;
+  const { applyViewAsToUser } = require('./view_as');
+  return applyViewAsToUser(r.rows[0] || null, req);
 }
 
 async function shopDrawingGetPmUser(pool) {
@@ -217,6 +218,9 @@ async function shopDrawingGetBellRecipientIds(pool) {
 
 function shopDrawingIsBellUser(user) {
   if (!user) return false;
+  if (user._viewAsActive) {
+    return String(user.role || '') === 'operation_manager';
+  }
   const email = String(user.email || '').trim().toLowerCase();
   return (
     String(user.role || '') === 'operation_manager' ||
@@ -497,7 +501,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
   const { runNotificationSafely } = deps;
 
   async function assertBellUser(userId) {
-    const user = await shopDrawingGetUser(pool, userId);
+    const user = await shopDrawingGetUser(pool, userId, req);
     if (!shopDrawingIsBellUser(user)) {
       const err = new Error('forbidden');
       err.status = 403;
@@ -507,7 +511,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
   }
 
   async function assertModuleNotificationUser(userId) {
-    const user = await shopDrawingGetUser(pool, userId);
+    const user = await shopDrawingGetUser(pool, userId, req);
     if (!shopDrawingIsModuleNotificationUser(user)) {
       const err = new Error('forbidden');
       err.status = 403;
@@ -520,7 +524,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
     try {
       const userId = parseInt(String(req.query.userId || ''), 10);
       if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
-      const user = await shopDrawingGetUser(pool, userId);
+      const user = await shopDrawingGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
 
       let sql;
@@ -537,7 +541,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
       } else if (String(user.role) === 'operation_manager') {
         sql = `SELECT COUNT(*)::int AS count FROM shop_drawings WHERE status = 'pending_om'`;
         params = [];
-      } else if (email === SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase()) {
+      } else if (email === SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase() && !user._viewAsActive) {
         sql = `SELECT COUNT(*)::int AS count FROM shop_drawings WHERE status = 'pending_om'`;
         params = [];
       } else {
@@ -561,7 +565,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
         req.query.documentType ?? req.query.document_type,
       );
       if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
-      const user = await shopDrawingGetUser(pool, userId);
+      const user = await shopDrawingGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
 
       const email = String(user.email || '').trim().toLowerCase();
@@ -578,7 +582,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
           sql = `SELECT * FROM shop_drawings
                  WHERE status = 'pending_pm'`;
           params = [];
-        } else if (role === 'operation_manager' || email === SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase()) {
+        } else if (role === 'operation_manager' || email === SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase() && !user._viewAsActive) {
           sql = `SELECT * FROM shop_drawings WHERE status = 'pending_om'`;
           params = [];
         } else {
@@ -595,7 +599,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
           role === 'top_management' ||
           shopDrawingIsPmActor(user) ||
           role === 'operation_manager' ||
-          email === SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase();
+          email === SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase() && !user._viewAsActive;
         if (!canView) return res.status(403).json({ error: 'forbidden' });
         sql = `SELECT * FROM shop_drawings WHERE status = 'approved'`;
         params = [];
@@ -603,7 +607,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
         const canViewAll =
           role === 'operation_manager' ||
           role === 'top_management' ||
-          email === SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase();
+          email === SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase() && !user._viewAsActive;
         if (!canViewAll) return res.status(403).json({ error: 'forbidden' });
         sql = `SELECT * FROM shop_drawings WHERE 1=1`;
         params = [];
@@ -749,7 +753,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
       const b = req.body || {};
       const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
       if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
-      const actor = await shopDrawingGetUser(pool, userId);
+      const actor = await shopDrawingGetUser(pool, userId, req);
       if (!actor || String(actor.role) !== 'technical_office') {
         return res.status(403).json({ error: 'forbidden' });
       }
@@ -848,7 +852,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
         return res.status(400).json({ error: 'not_editable' });
       }
 
-      const actor = await shopDrawingGetUser(pool, userId);
+      const actor = await shopDrawingGetUser(pool, userId, req);
       const pm = await shopDrawingGetPmUser(pool);
       if (!pm) return res.status(400).json({ error: 'pm_not_configured' });
 
@@ -929,7 +933,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
       const userId = parseInt(String(req.body?.userId ?? req.body?.user_id ?? ''), 10);
       if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
 
-      const actor = await shopDrawingGetUser(pool, userId);
+      const actor = await shopDrawingGetUser(pool, userId, req);
       if (!actor || !shopDrawingIsPmActor(actor)) {
         return res.status(403).json({ error: 'forbidden' });
       }
@@ -996,7 +1000,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
       if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
       if (!reason) return res.status(400).json({ error: 'reason_required' });
 
-      const actor = await shopDrawingGetUser(pool, userId);
+      const actor = await shopDrawingGetUser(pool, userId, req);
       if (!actor || !shopDrawingIsPmActor(actor)) {
         return res.status(403).json({ error: 'forbidden' });
       }
@@ -1053,7 +1057,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
       const userId = parseInt(String(req.body?.userId ?? req.body?.user_id ?? ''), 10);
       if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
 
-      const actor = await shopDrawingGetUser(pool, userId);
+      const actor = await shopDrawingGetUser(pool, userId, req);
       if (!actor || String(actor.role) !== 'operation_manager') {
         return res.status(403).json({ error: 'forbidden' });
       }
@@ -1118,7 +1122,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
         return res.status(400).json({ error: 'invalid' });
       }
 
-      const actor = await shopDrawingGetUser(pool, userId);
+      const actor = await shopDrawingGetUser(pool, userId, req);
       if (!actor || String(actor.role) !== 'operation_manager') {
         return res.status(403).json({ error: 'forbidden' });
       }
@@ -1148,7 +1152,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
       const userId = parseInt(String(req.query.userId ?? req.body?.userId ?? ''), 10);
       if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
 
-      const actor = await shopDrawingGetUser(pool, userId);
+      const actor = await shopDrawingGetUser(pool, userId, req);
       const email = String(actor?.email || '').trim().toLowerCase();
       if (!actor || email !== SHOP_DRAWING_PRIMARY_ADMIN_EMAIL.toLowerCase()) {
         return res.status(403).json({ error: 'forbidden_delete' });
@@ -1234,7 +1238,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
       if (!Number.isInteger(notificationId) || !Number.isInteger(userId)) {
         return res.status(400).json({ error: 'notification id and userId are required' });
       }
-      const user = await shopDrawingGetUser(pool, userId);
+      const user = await shopDrawingGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
       const r = await pool.query(
         'DELETE FROM shop_darwing_notifications WHERE id = $1 AND recipient_user_id = $2',

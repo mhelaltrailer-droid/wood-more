@@ -16,6 +16,10 @@ import 'manager_withdrawal_requests_screen.dart';
 import 'reorderable_home_screen.dart';
 import '../widgets/shop_darwing_notification_app_bar_icon.dart';
 import '../widgets/meetings_notification_app_bar_icon.dart';
+import '../services/view_as_role_session.dart';
+import '../services/view_as_role_options.dart';
+import '../core/role_labels.dart';
+import '../services/notification_view_as_filter.dart';
 
 /// الصفحة الرئيسية - تختلف حسب دور المستخدم
 class HomeScreen extends StatefulWidget {
@@ -42,13 +46,20 @@ class _HomeScreenState extends State<HomeScreen>
   Timer? _notificationsPollTimer;
   late final AnimationController _wrRotateController;
 
-  bool get _canUseNotifications => widget.currentUser.canUseNotifications;
+  /// المستخدم الفعّال (بعد View as إن وُجد).
+  UserModel get _user {
+    final base = widget.currentUser;
+    if (!base.canUseViewAsRole) return base;
+    return base.withViewAsRole(ViewAsRoleSession.viewAsRole);
+  }
+
+  bool get _canUseNotifications => _user.canUseNotifications;
 
   bool get _canUseShopDarwingNotification =>
-      widget.currentUser.canUseShopDarwingNotification;
+      _user.canUseShopDarwingNotification;
 
   bool get _canUseMeetingsNotification =>
-      widget.currentUser.canUseMeetingsNotification;
+      _user.canUseMeetingsNotification;
 
   @override
   void didChangeDependencies() {
@@ -86,6 +97,14 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    // كل فتح للرئيسية يبدأ بوضع المسؤول الأساسي (لا يُحفظ View as بين الجلسات).
+    if (widget.currentUser.canUseViewAsRole) {
+      ViewAsRoleSession.clear();
+      ViewAsRoleSession.setViewAs(
+        requesterUserId: widget.currentUser.id,
+        role: null,
+      );
+    }
     _wrRotateController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -102,10 +121,30 @@ class _HomeScreenState extends State<HomeScreen>
     _startNotificationsPollingIfManager();
   }
 
+  Future<void> _onViewAsChanged(String value) async {
+    if (!widget.currentUser.canUseViewAsRole) return;
+    ViewAsRoleSession.setViewAs(
+      requesterUserId: widget.currentUser.id,
+      role: value == ViewAsRoleSession.primaryOptionValue ? null : value,
+    );
+    setState(() {});
+    await _loadIconsConfig();
+    await _loadUnreadNotificationsCount();
+    await _loadUnreadShopDarwingNotificationsCount();
+    await _loadUnreadMeetingsNotificationsCount();
+    await _loadPendingWithdrawalActionsCount();
+    await _loadPendingReportsSysCount();
+    await _loadPendingShopDrawingCount();
+    await _loadPendingInvoicesOwnerCount();
+    await _loadAppReleaseUpdateBadge();
+    _notificationsPollTimer?.cancel();
+    _startNotificationsPollingIfManager();
+  }
+
   Future<void> _loadIconsConfig() async {
     try {
       final storage = getStorage();
-      final role = widget.currentUser.role;
+      final role = _user.role;
       final all = storage is ApiStorageService
           ? await storage.getHomeIconsVisibilityConfig()
           : await storage.getHomeIconsVisibilityConfig();
@@ -125,7 +164,7 @@ class _HomeScreenState extends State<HomeScreen>
       if (!mounted) return;
       setState(() {
         _iconConfig = IconVisibilityService.defaultForRole(
-          widget.currentUser.role,
+          _user.role,
         );
       });
     }
@@ -140,9 +179,26 @@ class _HomeScreenState extends State<HomeScreen>
     try {
       final prevCount = _unreadNotificationsCount;
       final storage = getStorage();
-      final count = storage is ApiStorageService
-          ? await storage.getUnreadNotificationsCount(widget.currentUser.id)
-          : await storage.getUnreadNotificationsCount(widget.currentUser.id);
+      int count;
+      if (_user.isViewingAsOtherRole && storage is ApiStorageService) {
+        final items = await storage.getNotificationsForUser(
+          _user.id,
+          limit: 100,
+          offset: 0,
+        );
+        count = items
+            .where(
+              (n) =>
+                  !n.isRead &&
+                  isNotificationVisibleForViewAsRole(
+                    eventType: n.eventType,
+                    viewAsRole: _user.viewAsRole,
+                  ),
+            )
+            .length;
+      } else {
+        count = await storage.getUnreadNotificationsCount(_user.id);
+      }
       if (!mounted) return;
       setState(() => _unreadNotificationsCount = count);
       if (count > prevCount && mounted) {
@@ -169,10 +225,10 @@ class _HomeScreenState extends State<HomeScreen>
       final storage = getStorage();
       final count = storage is ApiStorageService
           ? await storage.getUnreadShopDarwingNotificationsCount(
-              widget.currentUser.id,
+              _user.id,
             )
           : await storage.getUnreadShopDarwingNotificationsCount(
-              widget.currentUser.id,
+              _user.id,
             );
       if (!mounted) return;
       setState(() => _unreadShopDarwingNotificationsCount = count);
@@ -195,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen>
         return;
       }
       final count = await storage.getUnreadMeetingsNotificationsCount(
-        widget.currentUser.id,
+        _user.id,
       );
       if (!mounted) return;
       setState(() => _unreadMeetingsNotificationsCount = count);
@@ -206,7 +262,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadPendingWithdrawalActionsCount() async {
-    if (!widget.currentUser.canActOnWithdrawalRequests) {
+    if (!_user.canActOnWithdrawalRequests) {
       if (mounted) {
         setState(() => _pendingWithdrawalRequestsCount = 0);
         _wrRotateController.stop();
@@ -217,8 +273,8 @@ class _HomeScreenState extends State<HomeScreen>
     try {
       final storage = getStorage();
       final c = await storage.countPendingWithdrawalActionsForManager(
-        userId: widget.currentUser.id,
-        role: widget.currentUser.role,
+        userId: _user.id,
+        role: _user.role,
       );
       if (!mounted) return;
       setState(() => _pendingWithdrawalRequestsCount = c);
@@ -239,13 +295,13 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadPendingReportsSysCount() async {
-    if (!widget.currentUser.canParticipateInReportsSys) {
+    if (!_user.canParticipateInReportsSys) {
       if (mounted) setState(() => _pendingReportsSysCount = 0);
       return;
     }
     try {
       final storage = getStorage();
-      final c = await storage.countPendingReportsSys(widget.currentUser.id);
+      final c = await storage.countPendingReportsSys(_user.id);
       if (!mounted) return;
       setState(() => _pendingReportsSysCount = c);
     } catch (_) {
@@ -255,7 +311,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadPendingShopDrawingCount() async {
-    if (!widget.currentUser.canAccessShopDrawingHomeIcon) {
+    if (!_user.canAccessShopDrawingHomeIcon) {
       if (mounted) setState(() => _pendingShopDrawingCount = 0);
       return;
     }
@@ -265,7 +321,7 @@ class _HomeScreenState extends State<HomeScreen>
         if (mounted) setState(() => _pendingShopDrawingCount = 0);
         return;
       }
-      final c = await storage.getShopDrawingPendingCount(widget.currentUser.id);
+      final c = await storage.getShopDrawingPendingCount(_user.id);
       if (!mounted) return;
       setState(() => _pendingShopDrawingCount = c);
     } catch (_) {
@@ -275,7 +331,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadPendingInvoicesOwnerCount() async {
-    if (!widget.currentUser.canAccessInvoicesOwner) {
+    if (!_user.canAccessInvoicesOwner) {
       if (mounted) setState(() => _pendingInvoicesOwnerCount = 0);
       return;
     }
@@ -286,7 +342,7 @@ class _HomeScreenState extends State<HomeScreen>
         return;
       }
       final c =
-          await storage.getInvoicesOwnerPendingCount(widget.currentUser.id);
+          await storage.getInvoicesOwnerPendingCount(_user.id);
       if (!mounted) return;
       setState(() => _pendingInvoicesOwnerCount = c);
     } catch (_) {
@@ -296,7 +352,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _loadAppReleaseUpdateBadge() async {
-    if (!widget.currentUser.canViewAppVersionsIcon) {
+    if (!_user.canViewAppVersionsIcon) {
       if (mounted) setState(() => _hasAppReleaseUpdate = false);
       return;
     }
@@ -306,7 +362,7 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
     try {
-      final hasUpdate = await storage.hasAppReleaseUpdate(widget.currentUser.id);
+      final hasUpdate = await storage.hasAppReleaseUpdate(_user.id);
       if (!mounted) return;
       setState(() => _hasAppReleaseUpdate = hasUpdate);
     } catch (_) {
@@ -319,7 +375,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (!_canUseNotifications &&
         !_canUseShopDarwingNotification &&
         !_canUseMeetingsNotification &&
-        !widget.currentUser.canAccessShopDrawingHomeIcon &&
+        !_user.canAccessShopDrawingHomeIcon &&
         getStorage() is! ApiStorageService) {
       return;
     }
@@ -345,7 +401,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = widget.currentUser;
+    final currentUser = _user;
     return Scaffold(
       appBar: AppBar(
         title: FittedBox(
@@ -368,6 +424,48 @@ class _HomeScreenState extends State<HomeScreen>
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
         actions: [
+          if (widget.currentUser.canUseViewAsRole)
+            PopupMenuButton<String>(
+              tooltip: 'View as',
+              onSelected: _onViewAsChanged,
+              itemBuilder: (context) {
+                final options = buildViewAsRoleOptions(arabicRoleLabel);
+                final selected = ViewAsRoleSession.viewAsRole ??
+                    ViewAsRoleSession.primaryOptionValue;
+                return [
+                  for (final o in options)
+                    CheckedPopupMenuItem<String>(
+                      value: o.value,
+                      checked: o.value == selected ||
+                          (o.value == ViewAsRoleSession.primaryOptionValue &&
+                              ViewAsRoleSession.viewAsRole == null),
+                      child: Text(o.label),
+                    ),
+                ];
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'View as',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      currentUser.isViewingAsOtherRole
+                          ? (arabicRoleLabel(currentUser.role).isNotEmpty
+                              ? arabicRoleLabel(currentUser.role)
+                              : currentUser.role)
+                          : ViewAsRoleSession.primaryLabel,
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    const Icon(Icons.arrow_drop_down, size: 20),
+                  ],
+                ),
+              ),
+            ),
           if (currentUser.canActOnWithdrawalRequests)
             _pendingWithdrawalRequestsCount > 0
                 ? RotationTransition(
@@ -601,6 +699,7 @@ class _HomeScreenState extends State<HomeScreen>
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
+              ViewAsRoleSession.clear();
               await clearCurrentUser();
               await clearLastRoute();
               if (!context.mounted) return;

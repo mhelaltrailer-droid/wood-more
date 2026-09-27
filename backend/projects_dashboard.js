@@ -99,18 +99,19 @@ function pdBufferToDataUrl(buffer, mime) {
   return `data:${mime};base64,${b64}`;
 }
 
-async function pdGetUser(pool, userId) {
+async function pdGetUser(pool, userId, req) {
   const r = await pool.query('SELECT id, name, email, role FROM users WHERE id = $1', [
     userId,
   ]);
-  return r.rows[0] || null;
+  const { applyViewAsToUser } = require('./view_as');
+  return applyViewAsToUser(r.rows[0] || null, req);
 }
 
 function pdCanAccess(user) {
   if (!user) return false;
   const role = String(user.role || '');
   if (role === 'technical_office' || role === 'operation_manager') return true;
-  if (role === 'app_admin' && pdIsPrimaryAdminEmail(user.email)) return true;
+  if (role === 'app_admin' && pdIsPrimaryAdminEmail(user.email) && !user._viewAsActive) return true;
   return false;
 }
 
@@ -126,7 +127,7 @@ function pdNoteAuthorRole(user) {
   const role = String(user?.role || '');
   if (role === 'technical_office') return 'technical_office';
   if (role === 'operation_manager') return 'operation_manager';
-  if (role === 'app_admin' && pdIsPrimaryAdminEmail(user.email)) return 'operation_manager';
+  if (role === 'app_admin' && pdIsPrimaryAdminEmail(user.email) && !user._viewAsActive) return 'operation_manager';
   return null;
 }
 
@@ -202,7 +203,7 @@ async function pdAuthFromQuery(pool, req, variant) {
   if (!pdVerifyWebdavToken(userId, variant, token)) {
     return { ok: false, status: 401, error: 'invalid_token' };
   }
-  const user = await pdGetUser(pool, userId);
+  const user = await pdGetUser(pool, userId, req);
   if (!pdCanAccess(user)) return { ok: false, status: 403, error: 'forbidden' };
   return { ok: true, user, userId };
 }
@@ -345,7 +346,7 @@ function registerProjectsDashboardRoutes(app, pool, deps = {}) {
     try {
       const userId = parseInt(req.query.userId, 10);
       if (!userId) return res.status(400).json({ error: 'userId required' });
-      const user = await pdGetUser(pool, userId);
+      const user = await pdGetUser(pool, userId, req);
       if (!pdCanAccess(user)) return res.status(403).json({ error: 'forbidden' });
 
       const variant = pdNormalizeVariant(req.query.variant);
@@ -363,7 +364,7 @@ function registerProjectsDashboardRoutes(app, pool, deps = {}) {
     try {
       const userId = parseInt(req.query.userId, 10);
       if (!userId) return res.status(400).json({ error: 'userId required' });
-      const user = await pdGetUser(pool, userId);
+      const user = await pdGetUser(pool, userId, req);
       if (!pdCanAccess(user)) return res.status(403).json({ error: 'forbidden' });
 
       const variant = pdNormalizeVariant(req.query.variant);
@@ -389,7 +390,7 @@ function registerProjectsDashboardRoutes(app, pool, deps = {}) {
     try {
       const userId = parseInt((req.body || {}).userId, 10);
       if (!userId) return res.status(400).json({ error: 'userId required' });
-      const user = await pdGetUser(pool, userId);
+      const user = await pdGetUser(pool, userId, req);
       if (!pdCanEditSheet(user)) return res.status(403).json({ error: 'forbidden' });
 
       const variant = pdNormalizeVariant((req.body || {}).variant);
@@ -702,7 +703,7 @@ function registerProjectsDashboardRoutes(app, pool, deps = {}) {
     try {
       const userId = parseInt(req.query.userId, 10);
       if (!userId) return res.status(400).json({ error: 'userId required' });
-      const user = await pdGetUser(pool, userId);
+      const user = await pdGetUser(pool, userId, req);
       if (!pdCanAccess(user)) return res.status(403).json({ error: 'forbidden' });
 
       const variant = pdNormalizeVariant(req.query.variant);
@@ -743,7 +744,7 @@ function registerProjectsDashboardRoutes(app, pool, deps = {}) {
         return res.status(400).json({ error: 'invalid authorRole' });
       }
 
-      const user = await pdGetUser(pool, userId);
+      const user = await pdGetUser(pool, userId, req);
       if (!pdCanAccess(user)) return res.status(403).json({ error: 'forbidden' });
 
       const variant = pdNormalizeVariant(req.query.variant);

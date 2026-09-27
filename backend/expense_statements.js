@@ -1,3 +1,4 @@
+const { applyViewAsToUser } = require('./view_as');
 /**
  * بيانات صرف العهدة: إرسال من مهندس الموقع → اعتماد/رفض من مدير المشروعات المحدد.
  * إدخال مدير المشروعات يُحفظ معتمداً مباشرة مع خصم رصيده.
@@ -210,6 +211,7 @@ function registerExpenseStatementsRoutes(
         'SELECT id, name, email, role FROM users WHERE id = $1',
         [userId],
       );
+      if (u.rows[0]) u.rows[0] = applyViewAsToUser(u.rows[0], req);
       if (!u.rows.length) {
         return res.status(404).json({ error: 'user not found' });
       }
@@ -378,6 +380,7 @@ function registerExpenseStatementsRoutes(
         'SELECT id, name, email, role FROM users WHERE id = $1',
         [actorId],
       );
+      if (actor.rows[0]) actor.rows[0] = applyViewAsToUser(actor.rows[0], req);
       if (!actor.rows.length) {
         return res.status(404).json({ error: 'user not found' });
       }
@@ -482,7 +485,11 @@ function registerExpenseStatementsRoutes(
         'SELECT id, email FROM users WHERE id = $1',
         [actorId],
       );
-      if (!actor.rows.length || !esIsPrimaryAdminEmail(actor.rows[0].email)) {
+      const { primaryAdminPowersActive } = require('./view_as');
+      if (
+        !actor.rows.length ||
+        !primaryAdminPowersActive(actor.rows[0].email, req)
+      ) {
         return res.status(403).json({ error: 'غير مصرح بالحذف' });
       }
       const cur = await pool.query(

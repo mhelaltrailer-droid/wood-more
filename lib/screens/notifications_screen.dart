@@ -12,6 +12,7 @@ import 'engineer_withdraw_materials_screen.dart';
 import 'notification_attachments_screen.dart';
 import 'reports_sys_detail_screen.dart';
 import 'reports_sys_hub_screen.dart';
+import '../services/notification_view_as_filter.dart';
 
 class NotificationsScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -37,6 +38,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Timer? _pollTimer;
   final ScrollController _scrollController = ScrollController();
 
+  List<NotificationItemModel> _filterForViewAs(
+    List<NotificationItemModel> items,
+  ) {
+    if (!widget.currentUser.isViewingAsOtherRole) return items;
+    return items
+        .where(
+          (n) => isNotificationVisibleForViewAsRole(
+            eventType: n.eventType,
+            viewAsRole: widget.currentUser.viewAsRole,
+          ),
+        )
+        .toList();
+  }
   @override
   void initState() {
     super.initState();
@@ -70,14 +84,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }) async {
     final storage = getStorage();
     if (storage is ApiStorageService) {
-      return storage.getNotificationsForUser(
+      final items = await storage.getNotificationsForUser(
         widget.currentUser.id,
         limit: limit,
         offset: offset,
       );
+      return _filterForViewAs(items);
     }
     final items = await storage.getNotificationsForUser(widget.currentUser.id);
-    return List<NotificationItemModel>.from(items as List);
+    return _filterForViewAs(List<NotificationItemModel>.from(items as List));
   }
 
   Future<void> _loadNotifications() async {

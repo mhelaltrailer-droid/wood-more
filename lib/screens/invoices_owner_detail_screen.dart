@@ -12,6 +12,7 @@ import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
 import '../widgets/invoices_owner_timeline.dart';
 import '../widgets/reports_sys_attachments_panel.dart';
+import '../utils/invoices_owner_om_checklist_pdf.dart';
 import 'invoices_owner_form_screen.dart';
 
 class InvoicesOwnerDetailScreen extends StatefulWidget {
@@ -37,7 +38,11 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
   InvoicesOwnerModel? _invoice;
   bool _loading = true;
   bool _acting = false;
+  bool _exportingPdf = false;
   String? _error;
+  final Map<String, bool> _omChecklistDraft = {
+    for (final item in invoicesOwnerOmChecklistItems) item.key: false,
+  };
 
   @override
   void initState() {
@@ -68,6 +73,9 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
       if (!mounted) return;
       setState(() {
         _invoice = invoice;
+        for (final item in invoicesOwnerOmChecklistItems) {
+          _omChecklistDraft[item.key] = invoice.omChecklist[item.key] == true;
+        }
         _loading = false;
       });
     } catch (e) {
@@ -100,10 +108,14 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     setState(() => _acting = true);
     try {
       final notes = _approveNotesController.text.trim();
+      final isOmFinal =
+          _invoice?.status == invoicesOwnerStatusPendingOm &&
+          widget.currentUser.isOperationManager;
       await _storage.approveInvoicesOwner(
         invoiceId: widget.invoiceId,
         userId: widget.currentUser.id,
         notes: notes.isEmpty ? null : notes,
+        omChecklist: isOmFinal ? Map<String, bool>.from(_omChecklistDraft) : null,
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -117,6 +129,77 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     }
   }
 
+  Future<void> _exportOmChecklistPdf() async {
+    final invoice = _invoice;
+    if (invoice == null) return;
+    if (!widget.currentUser.isOperationManager) return;
+    if (invoice.status != invoicesOwnerStatusApproved) return;
+    setState(() => _exportingPdf = true);
+    try {
+      await shareInvoicesOwnerOmChecklistPdf(
+        projectName: invoice.projectName,
+        checklist: invoice.omChecklist,
+        invoiceId: invoice.id,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingPdf = false);
+    }
+  }
+
+  Widget _buildOmChecklistCard({required bool editable}) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              editable
+                  ? 'قائمة مراجعة مدير العمليات (اختياري)'
+                  : 'قائمة مراجعة مدير العمليات',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            ...invoicesOwnerOmChecklistItems.map((item) {
+              final checked = editable
+                  ? (_omChecklistDraft[item.key] == true)
+                  : (_invoice?.omChecklist[item.key] == true);
+              if (editable) {
+                return CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text(item.label),
+                  value: checked,
+                  onChanged: _acting
+                      ? null
+                      : (v) {
+                          setState(() {
+                            _omChecklistDraft[item.key] = v == true;
+                          });
+                        },
+                );
+              }
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                leading: Icon(
+                  checked ? Icons.check_box : Icons.check_box_outline_blank,
+                  color: checked ? const Color(0xFF1B5E20) : Colors.grey,
+                ),
+                title: Text(item.label),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
   Future<void> _returnForReview() async {
     if (_storage is! ApiStorageService) return;
     final reason = _returnReasonController.text.trim();
@@ -374,6 +457,26 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
         actions: [
+          if (_invoice != null &&
+              _invoice!.status == invoicesOwnerStatusApproved &&
+              widget.currentUser.isOperationManager)
+            TextButton.icon(
+              onPressed: (_acting || _exportingPdf) ? null : _exportOmChecklistPdf,
+              icon: _exportingPdf
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.picture_as_pdf, color: Colors.white),
+              label: const Text(
+                'PDF Export',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
           if (_invoice != null && widget.currentUser.canManageInvoicesOwner)
             IconButton(
               tooltip: 'حذف المستخلص',
@@ -398,6 +501,11 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     final canAct = user.canActOnInvoicesOwnerStatus(d.status) &&
         d.status != invoicesOwnerStatusReturnedCreator &&
         d.status != invoicesOwnerStatusApproved;
+    final showOmChecklistEditable = canAct &&
+        d.status == invoicesOwnerStatusPendingOm &&
+        user.isOperationManager;
+    final showOmChecklistReadonly =
+        d.status == invoicesOwnerStatusApproved && d.hasOmChecklistSaved;
     final canEdit = user.canCreateInvoicesOwner &&
         d.status == invoicesOwnerStatusReturnedCreator &&
         d.createdByUserId == user.id;
@@ -561,6 +669,10 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
           ),
         ],
         if (canAct) ...[
+          if (showOmChecklistEditable) ...[
+            const SizedBox(height: 16),
+            _buildOmChecklistCard(editable: true),
+          ],
           const SizedBox(height: 16),
           TextField(
             controller: _approveNotesController,
@@ -577,7 +689,11 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
               backgroundColor: const Color(0xFF1B5E20),
               minimumSize: const Size.fromHeight(48),
             ),
-            child: const Text('اعتماد'),
+            child: Text(
+              d.status == invoicesOwnerStatusPendingOm
+                  ? 'اعتماد نهائي'
+                  : 'اعتماد',
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -596,6 +712,29 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
               minimumSize: const Size.fromHeight(48),
             ),
             child: const Text('إعادة للخطوة السابقة'),
+          ),
+        ],
+        if (showOmChecklistReadonly) ...[
+          const SizedBox(height: 16),
+          _buildOmChecklistCard(editable: false),
+        ],
+        if (d.status == invoicesOwnerStatusApproved &&
+            user.isOperationManager) ...[
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: (_acting || _exportingPdf) ? null : _exportOmChecklistPdf,
+            icon: _exportingPdf
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.picture_as_pdf),
+            label: const Text('PDF Export'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              foregroundColor: const Color(0xFF1B5E20),
+            ),
           ),
         ],
       ],

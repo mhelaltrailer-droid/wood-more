@@ -31,12 +31,18 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const { noiseGuard } = require('./noise_guard');
+const {
+  attachViewAsHeaders,
+  applyViewAsToUser,
+  primaryAdminPowersActive,
+} = require('./view_as');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '120mb' }));
 // احجب بوتات/ماسحات مبكراً — بدون لمس Neon.
 app.use(noiseGuard);
+app.use(attachViewAsHeaders);
 const PRIMARY_APP_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 const SEM_LIKE_ROLES = ['site_engineer_manager', 'projects_manager'];
 function isSemLikeRole(role) {
@@ -758,11 +764,13 @@ async function notifyAppAdmins(pool, fields) {
   });
 }
 
-async function fetchUserRole(pool, userId) {
+async function fetchUserRole(pool, userId, req) {
   const id = parseInt(userId, 10);
   if (Number.isNaN(id)) return null;
-  const r = await pool.query('SELECT role FROM users WHERE id = $1', [id]);
-  return r.rows.length ? String(r.rows[0].role || '') : null;
+  const r = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [id]);
+  if (!r.rows.length) return null;
+  const user = applyViewAsToUser(r.rows[0], req);
+  return String(user.role || '');
 }
 
 function formatDateYmd(value) {
@@ -967,10 +975,8 @@ function _normalizeMsSdFileData(fileMime, fileData) {
   return { mime, data };
 }
 
-function _isPrimaryAppAdminEmail(email) {
-  return String(email || '')
-    .trim()
-    .toLowerCase() === PRIMARY_APP_ADMIN_EMAIL.toLowerCase();
+function _isPrimaryAppAdminEmail(email, req) {
+  return primaryAdminPowersActive(email, req);
 }
 
 async function ensureMsSdTables() {
@@ -2938,9 +2944,10 @@ app.post('/ir-mir/uploads', async (req, res) => {
 
     const proj = await pool.query('SELECT id FROM projects WHERE id = $1', [projectId]);
     if (proj.rows.length === 0) return res.status(400).json({ error: 'project not found' });
-    const usr = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
+    const usr = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [userId]);
     if (usr.rows.length === 0) return res.status(400).json({ error: 'user not found' });
-    const uploaderRole = String(usr.rows[0].role || '').trim();
+    const uploader = applyViewAsToUser(usr.rows[0], req);
+    const uploaderRole = String(uploader.role || '').trim();
     if (uploaderRole !== 'site_engineer' && uploaderRole !== 'document_controller') {
       return res.status(403).json({ error: 'only site engineer or document controller can upload IR/MIR' });
     }
@@ -3004,7 +3011,7 @@ app.delete('/ir-mir/uploads/:id', async (req, res) => {
     )
       .trim()
       .toLowerCase();
-    if (requesterEmail !== PRIMARY_APP_ADMIN_EMAIL.toLowerCase()) {
+    if (!primaryAdminPowersActive(requesterEmail, req)) {
       return res.status(403).json({ error: 'forbidden' });
     }
     const id = parseInt(req.params.id, 10);
@@ -3060,7 +3067,7 @@ app.get('/ms-sd/records', async (req, res) => {
       return res.status(400).json({ error: 'kind must be ms or sd' });
     }
     const requesterEmail = String(req.query.requesterEmail ?? '').trim();
-    const includeAudit = _isPrimaryAppAdminEmail(requesterEmail);
+    const includeAudit = _isPrimaryAppAdminEmail(requesterEmail, req);
 
     const recs = await pool.query(
       `SELECT id, project_id, user_id, user_name, kind, record_name, notes, created_at
@@ -3133,9 +3140,10 @@ app.post('/ms-sd/records', async (req, res) => {
       return res.status(400).json({ error: 'missing required fields' });
     }
 
-    const usr = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
+    const usr = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [userId]);
     if (usr.rows.length === 0) return res.status(400).json({ error: 'user not found' });
-    if (String(usr.rows[0].role) !== 'document_controller') {
+    const uploader = applyViewAsToUser(usr.rows[0], req);
+    if (String(uploader.role) !== 'document_controller') {
       return res.status(403).json({ error: 'only document controller can upload' });
     }
 
@@ -3202,7 +3210,7 @@ app.patch('/ms-sd/records/:id', async (req, res) => {
     const requesterEmail = String(
       req.query.requesterEmail ?? req.body?.requesterEmail ?? '',
     ).trim();
-    if (!_isPrimaryAppAdminEmail(requesterEmail)) {
+    if (!_isPrimaryAppAdminEmail(requesterEmail, req)) {
       return res.status(403).json({ error: 'forbidden' });
     }
     const id = parseInt(req.params.id, 10);
@@ -3305,7 +3313,7 @@ app.delete('/ms-sd/records/:id', async (req, res) => {
     const requesterEmail = String(
       req.query.requesterEmail ?? req.body?.requesterEmail ?? '',
     ).trim();
-    if (!_isPrimaryAppAdminEmail(requesterEmail)) {
+    if (!_isPrimaryAppAdminEmail(requesterEmail, req)) {
       return res.status(403).json({ error: 'forbidden' });
     }
     const id = parseInt(req.params.id, 10);
@@ -3359,7 +3367,7 @@ app.get('/mos-itp/records', async (req, res) => {
       return res.status(400).json({ error: 'kind must be mos or itp' });
     }
     const requesterEmail = String(req.query.requesterEmail ?? '').trim();
-    const includeAudit = _isPrimaryAppAdminEmail(requesterEmail);
+    const includeAudit = _isPrimaryAppAdminEmail(requesterEmail, req);
 
     const recs = await pool.query(
       `SELECT id, project_id, user_id, user_name, kind, record_name, notes, created_at
@@ -3432,9 +3440,10 @@ app.post('/mos-itp/records', async (req, res) => {
       return res.status(400).json({ error: 'missing required fields' });
     }
 
-    const usr = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
+    const usr = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [userId]);
     if (usr.rows.length === 0) return res.status(400).json({ error: 'user not found' });
-    if (String(usr.rows[0].role) !== 'document_controller') {
+    const uploader = applyViewAsToUser(usr.rows[0], req);
+    if (String(uploader.role) !== 'document_controller') {
       return res.status(403).json({ error: 'only document controller can upload' });
     }
 
@@ -3501,7 +3510,7 @@ app.patch('/mos-itp/records/:id', async (req, res) => {
     const requesterEmail = String(
       req.query.requesterEmail ?? req.body?.requesterEmail ?? '',
     ).trim();
-    if (!_isPrimaryAppAdminEmail(requesterEmail)) {
+    if (!_isPrimaryAppAdminEmail(requesterEmail, req)) {
       return res.status(403).json({ error: 'forbidden' });
     }
     const id = parseInt(req.params.id, 10);
@@ -3604,7 +3613,7 @@ app.delete('/mos-itp/records/:id', async (req, res) => {
     const requesterEmail = String(
       req.query.requesterEmail ?? req.body?.requesterEmail ?? '',
     ).trim();
-    if (!_isPrimaryAppAdminEmail(requesterEmail)) {
+    if (!_isPrimaryAppAdminEmail(requesterEmail, req)) {
       return res.status(403).json({ error: 'forbidden' });
     }
     const id = parseInt(req.params.id, 10);
@@ -5116,9 +5125,10 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
     if (decision === 'reject' && !reason) {
       return res.status(400).json({ error: 'reason_required' });
     }
-    const actor = await pool.query('SELECT id, role, name FROM users WHERE id = $1', [userId]);
-    if (actor.rows.length === 0) return res.status(404).json({ error: 'user not found' });
-    const actorRole = String(actor.rows[0].role || '');
+    const actorQ = await pool.query('SELECT id, email, role, name FROM users WHERE id = $1', [userId]);
+    if (actorQ.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+    const actorRow = applyViewAsToUser(actorQ.rows[0], req);
+    const actorRole = String(actorRow.role || '');
     if (!isSemLikeRole(actorRole) && actorRole !== 'operation_manager') {
       return res.status(403).json({ error: 'forbidden' });
     }
@@ -5158,7 +5168,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
           body: `تم رفض طلبك بسبب: ${reason}`,
           event_type: 'withdrawal_request_rejected',
           actor_user_id: userId,
-          actor_user_name: actor.rows[0].name,
+          actor_user_name: actorRow.name,
           project_name: projectName,
           withdrawal_request_id: id,
         });
@@ -5221,7 +5231,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
           body: `تم رفض طلبك بسبب: ${reason}`,
           event_type: 'withdrawal_request_rejected',
           actor_user_id: userId,
-          actor_user_name: actor.rows[0].name,
+          actor_user_name: actorRow.name,
           project_name: projectName,
           withdrawal_request_id: id,
         });
@@ -5253,7 +5263,7 @@ app.put('/withdrawal-requests/:id/respond', async (req, res) => {
           `الموقع: ${pathLabel || '—'} — مشروع "${projectName}"`,
         event_type: 'withdrawal_request_approved',
         actor_user_id: userId,
-        actor_user_name: actor.rows[0].name,
+        actor_user_name: actorRow.name,
         project_name: projectName,
         withdrawal_request_id: id,
       });

@@ -48,6 +48,8 @@ import 'withdrawal_stock_validation.dart';
 import '../data/materials_display.dart';
 import 'attendance_duplicate_guard.dart';
 
+import 'view_as_role_session.dart';
+
 /// Storage implementation that uses the REST API (PostgreSQL backend).
 class ApiStorageService {
   final String baseUrl;
@@ -59,6 +61,13 @@ class ApiStorageService {
 
   String _path(String segment) =>
       baseUrl.endsWith('/') ? '$baseUrl$segment' : '$baseUrl/$segment';
+
+  Map<String, String> _reqHeaders([Map<String, String>? extra]) {
+    return {
+      if (extra != null) ...extra,
+      ...ViewAsRoleSession.apiHeaders(),
+    };
+  }
 
   static String _ymd(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -111,9 +120,13 @@ class ApiStorageService {
 
   Future<http.Response> _httpGet(Uri uri, {int attempts = 3}) async {
     Object? lastError;
+    final headers = _reqHeaders();
     for (var attempt = 0; attempt < attempts; attempt++) {
       try {
-        return await http.get(uri);
+        return await http.get(
+          uri,
+          headers: headers.isEmpty ? null : headers,
+        );
       } catch (error) {
         lastError = error;
         if (attempt + 1 >= attempts) break;
@@ -197,7 +210,7 @@ class ApiStorageService {
     final r = await http.post(
       uri,
       body: jsonEncode(body),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
     if (r.body.isEmpty) return 0;
@@ -210,7 +223,7 @@ class ApiStorageService {
     final r = await http.post(
       uri,
       body: jsonEncode(body),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
   }
@@ -220,14 +233,14 @@ class ApiStorageService {
     final r = await http.put(
       uri,
       body: jsonEncode(body),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
   Future<void> _delete(String path) async {
     final uri = Uri.parse(_path(path));
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
@@ -235,7 +248,7 @@ class ApiStorageService {
     final uri = Uri.parse(
       _path('users/by-email'),
     ).replace(queryParameters: {'email': email});
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
     if (decoded == null) return null;
@@ -249,7 +262,7 @@ class ApiStorageService {
     final r = await http.post(
       uri,
       body: jsonEncode({'email': email.trim(), 'password': password}),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode == 401) return null;
     if (r.statusCode == 423) {
@@ -293,7 +306,7 @@ class ApiStorageService {
 
   Future<Map<String, Map<String, bool>>> getHomeIconsVisibilityConfig() async {
     final uri = Uri.parse(_path('home-icons-visibility'));
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = r.body.isEmpty ? null : jsonDecode(r.body);
     if (decoded is Map<String, dynamic>)
@@ -389,14 +402,14 @@ class ApiStorageService {
           'requesterEmail': requesterEmail.trim().toLowerCase(),
         },
       );
-      final r = await http.delete(uri);
+      final r = await http.delete(uri, headers: _reqHeaders());
       if (r.statusCode >= 400) {
         throw Exception(_deleteUserErrorMessage(r));
       }
       return;
     }
     final uri = Uri.parse(_path('users/$id'));
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) {
       throw Exception(_deleteUserErrorMessage(r));
     }
@@ -584,7 +597,7 @@ class ApiStorageService {
     final r = await http.post(
       uri,
       body: body,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode == 409) {
       String msg =
@@ -718,7 +731,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('notifications/$notificationId')).replace(
       queryParameters: {'userId': '$userId'},
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
@@ -761,7 +774,7 @@ class ApiStorageService {
     final uri = Uri.parse(
       _path('shop-darwing-notification/$notificationId'),
     ).replace(queryParameters: {'userId': '$userId'});
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
@@ -803,7 +816,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('meetings'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'meeting_number': meetingNumber,
@@ -833,7 +846,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('meetings/$meetingId/files/$fileType'));
     final r = await http.put(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'file_name': fileName,
@@ -873,7 +886,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('meetings/$meetingId/files/$fileType')).replace(
       queryParameters: {'userId': '$userId'},
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) {
       throw _apiHttpException(r, path: 'meetings/$meetingId/files/$fileType');
     }
@@ -889,7 +902,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('meetings/$meetingId')).replace(
       queryParameters: {'userId': '$userId'},
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) {
       throw _apiHttpException(r, path: 'meetings/$meetingId');
     }
@@ -937,7 +950,7 @@ class ApiStorageService {
   }) async {
     final uri = Uri.parse(_path('meetings-notifications/$notificationId'))
         .replace(queryParameters: {'userId': '$userId'});
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
@@ -990,7 +1003,7 @@ class ApiStorageService {
     final r = await http.post(
       uri,
       body: jsonEncode(body),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
@@ -1024,7 +1037,7 @@ class ApiStorageService {
     final uri = Uri.parse(
       _path('daily-reports'),
     ).replace(queryParameters: params);
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final list = jsonDecode(r.body) as List<dynamic>;
     return list.map((e) {
@@ -1039,7 +1052,7 @@ class ApiStorageService {
 
   Future<double> getEngineerBalance(int userId) async {
     final uri = Uri.parse(_path('engineer-balance/$userId'));
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
     return (decoded is num)
@@ -1443,7 +1456,7 @@ class ApiStorageService {
     final uri = Uri.parse(
       _path('detailed-reports'),
     ).replace(queryParameters: params);
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final list = jsonDecode(r.body) as List<dynamic>;
     return list
@@ -1573,7 +1586,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('executed-plans/pending-sem-fine-actions')).replace(
       queryParameters: {'userId': userId.toString()},
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
     if (decoded == null || decoded is! List) return [];
@@ -1594,7 +1607,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('executed-plans/$executedPlanId/sem-fine-resolution'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'managerUserId': managerUserId,
         'fineTarget': fineTarget,
@@ -1632,7 +1645,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('executed-plans/postpone-fines-report')).replace(
       queryParameters: qp,
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
     if (decoded == null || decoded is! List) return [];
@@ -1664,7 +1677,7 @@ class ApiStorageService {
     if (status != null && status.trim().isNotEmpty) qp['status'] = status.trim();
     const path = 'reports/material-withdrawals';
     final uri = Uri.parse(_path(path)).replace(queryParameters: qp);
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
     final decoded = jsonDecode(r.body);
     if (decoded == null || decoded is! List) return [];
@@ -1692,7 +1705,7 @@ class ApiStorageService {
     if (kind != null && kind.trim().isNotEmpty) qp['kind'] = kind.trim();
     const path = 'reports/uploaded-files';
     final uri = Uri.parse(_path(path)).replace(queryParameters: qp);
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
     final decoded = jsonDecode(r.body);
     if (decoded == null || decoded is! List) return [];
@@ -1715,7 +1728,7 @@ class ApiStorageService {
         'userId': userId.toString(),
       },
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     if (r.body.isEmpty) return null;
     final decoded = jsonDecode(r.body);
@@ -1725,7 +1738,7 @@ class ApiStorageService {
 
   Future<List<Map<String, dynamic>>> getPostponeReasons() async {
     final uri = Uri.parse(_path('postpone-reasons'));
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
     if (decoded == null || decoded is! List) return [];
@@ -1743,7 +1756,7 @@ class ApiStorageService {
         'userId': userId.toString(),
       },
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
     if (decoded == null || decoded is! List) return [];
@@ -1764,7 +1777,7 @@ class ApiStorageService {
         'dateTo': toD.toIso8601String(),
       },
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
     if (decoded == null || decoded is! List) return [];
@@ -1781,7 +1794,7 @@ class ApiStorageService {
         'requesterEmail': requesterEmail.trim().toLowerCase(),
       },
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final decoded = jsonDecode(r.body);
     return Map<String, dynamic>.from(decoded as Map);
@@ -1817,7 +1830,7 @@ class ApiStorageService {
     final uri = Uri.parse(
       _path('activity-logs'),
     ).replace(queryParameters: params);
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final list = jsonDecode(r.body) as List<dynamic>;
     return list
@@ -1891,7 +1904,7 @@ class ApiStorageService {
     final r = await http.post(
       uri,
       body: jsonEncode(body),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode >= 400) {
       final err = r.body;
@@ -1915,7 +1928,7 @@ class ApiStorageService {
     ).replace(
       queryParameters: {'locationId': locationId.toString(), 'phase': phase},
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
@@ -1938,7 +1951,7 @@ class ApiStorageService {
     final uri = Uri.parse(
       _path('location-withdrawals-for-period'),
     ).replace(queryParameters: params);
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     // خادم قديم بدون هذا المسار: نكمل التقرير المجمع مع عمود خامات = ---------
     if (r.statusCode == 404) return [];
     if (r.statusCode >= 400) throw Exception(r.body);
@@ -1967,7 +1980,7 @@ class ApiStorageService {
     if (locationId != null) params['locationId'] = locationId.toString();
     if (phase != null && phase.trim().isNotEmpty) params['phase'] = phase.trim();
     final uri = Uri.parse(_path('ir-mir/uploads')).replace(queryParameters: params);
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final list = jsonDecode(r.body) as List<dynamic>;
     return list
@@ -1979,7 +1992,7 @@ class ApiStorageService {
 
   /// جلب مرفق IR/MIR واحد مع محتوى الملف (عند الفتح فقط).
   Future<IrMirUploadModel> getIrMirUpload(int id) async {
-    final r = await http.get(Uri.parse(_path('ir-mir/uploads/$id')));
+    final r = await http.get(Uri.parse(_path('ir-mir/uploads/$id')), headers: _reqHeaders());
     if (r.statusCode == 404) throw Exception('المرفق غير موجود');
     if (r.statusCode >= 400) throw Exception(r.body);
     return IrMirUploadModel.fromMap(
@@ -2021,7 +2034,7 @@ class ApiStorageService {
         'requesterEmail': requesterEmail.trim().toLowerCase(),
       },
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode == 403) {
       throw Exception('غير مصرح بحذف المرفقات');
     }
@@ -2046,7 +2059,7 @@ class ApiStorageService {
     }
     const path = 'ms-sd/records';
     final uri = Uri.parse(_path(path)).replace(queryParameters: params);
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
     final list = jsonDecode(r.body) as List<dynamic>;
     return list
@@ -2057,7 +2070,7 @@ class ApiStorageService {
   }
 
   Future<MsSdAttachmentModel> getMsSdAttachment(int id) async {
-    final r = await http.get(Uri.parse(_path('ms-sd/attachments/$id')));
+    final r = await http.get(Uri.parse(_path('ms-sd/attachments/$id')), headers: _reqHeaders());
     if (r.statusCode == 404) throw Exception('المرفق غير موجود');
     if (r.statusCode >= 400) throw Exception(r.body);
     return MsSdAttachmentModel.fromMap(
@@ -2126,7 +2139,7 @@ class ApiStorageService {
     final r = await http.patch(
       uri,
       body: jsonEncode(body),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode == 403) {
       throw Exception('غير مصرح بتعديل السجل');
@@ -2143,7 +2156,7 @@ class ApiStorageService {
         'requesterEmail': requesterEmail.trim().toLowerCase(),
       },
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode == 403) {
       throw Exception('غير مصرح بحذف السجل');
     }
@@ -2168,7 +2181,7 @@ class ApiStorageService {
     }
     const path = 'mos-itp/records';
     final uri = Uri.parse(_path(path)).replace(queryParameters: params);
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
     final list = jsonDecode(r.body) as List<dynamic>;
     return list
@@ -2179,7 +2192,7 @@ class ApiStorageService {
   }
 
   Future<MosItpAttachmentModel> getMosItpAttachment(int id) async {
-    final r = await http.get(Uri.parse(_path('mos-itp/attachments/$id')));
+    final r = await http.get(Uri.parse(_path('mos-itp/attachments/$id')), headers: _reqHeaders());
     if (r.statusCode == 404) throw Exception('المرفق غير موجود');
     if (r.statusCode >= 400) throw Exception(r.body);
     return MosItpAttachmentModel.fromMap(
@@ -2248,7 +2261,7 @@ class ApiStorageService {
     final r = await http.patch(
       uri,
       body: jsonEncode(body),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode == 403) {
       throw Exception('غير مصرح بتعديل السجل');
@@ -2265,7 +2278,7 @@ class ApiStorageService {
         'requesterEmail': requesterEmail.trim().toLowerCase(),
       },
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode == 403) {
       throw Exception('غير مصرح بحذف السجل');
     }
@@ -2283,7 +2296,7 @@ class ApiStorageService {
     final r = await http.post(
       uri,
       body: jsonEncode(body),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
     if (r.body.isEmpty) return {};
@@ -2311,7 +2324,7 @@ class ApiStorageService {
   }
 
   Future<WithdrawalRequestModel?> getWithdrawalRequestById(int id) async {
-    final r = await http.get(Uri.parse(_path('withdrawal-requests/$id')));
+    final r = await http.get(Uri.parse(_path('withdrawal-requests/$id')), headers: _reqHeaders());
     if (r.statusCode == 404) return null;
     if (r.statusCode >= 400) throw Exception(r.body);
     final map = jsonDecode(r.body);
@@ -2328,7 +2341,7 @@ class ApiStorageService {
       'projectId': projectId.toString(),
       'engineerUserId': engineerUserId.toString(),
     });
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final list = jsonDecode(r.body) as List<dynamic>;
     return list
@@ -2362,7 +2375,7 @@ class ApiStorageService {
     final uri = Uri.parse(
       _path('withdrawal-requests-for-period'),
     ).replace(queryParameters: params);
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode == 404) return [];
     if (r.statusCode >= 400) throw Exception(r.body);
     final list = jsonDecode(r.body) as List<dynamic>;
@@ -2385,7 +2398,7 @@ class ApiStorageService {
         'phase': phase,
       },
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     if (r.body.isEmpty || r.body == 'null') return null;
     final decoded = jsonDecode(r.body);
@@ -2409,7 +2422,7 @@ class ApiStorageService {
         'role': role,
       },
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final data = jsonDecode(r.body) as Map<String, dynamic>;
     final c = data['count'];
@@ -2428,7 +2441,7 @@ class ApiStorageService {
         'role': role,
       },
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final list = jsonDecode(r.body) as List<dynamic>;
     return list
@@ -2454,7 +2467,7 @@ class ApiStorageService {
         'decision': approve ? 'approve' : 'reject',
         if (reason != null && reason.isNotEmpty) 'reason': reason,
       }),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
   }
@@ -2467,7 +2480,7 @@ class ApiStorageService {
     final r = await http.put(
       uri,
       body: jsonEncode({'userId': engineerUserId}),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
   }
@@ -2482,7 +2495,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('reports-sys/check-name')).replace(
       queryParameters: qp,
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final data = jsonDecode(r.body) as Map<String, dynamic>;
     return data['available'] == true;
@@ -2495,7 +2508,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('reports-sys/pending-count')).replace(
       queryParameters: {'userId': userId.toString()},
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final data = jsonDecode(r.body) as Map<String, dynamic>;
     return _storeCachedInt(
@@ -2524,7 +2537,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('reports-sys/inbox')).replace(
       queryParameters: qp,
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final list = jsonDecode(r.body) as List<dynamic>;
     return list
@@ -2536,7 +2549,7 @@ class ApiStorageService {
 
   Future<ReportsSysModel> getReportsSysDetail(int reportId) async {
     final uri = Uri.parse(_path('reports-sys/$reportId'));
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     return ReportsSysModel.fromMap(
       Map<String, dynamic>.from(jsonDecode(r.body) as Map),
@@ -2550,7 +2563,7 @@ class ApiStorageService {
     final uri = Uri.parse(
       _path('reports-sys/$reportId/attachments/$attachmentId'),
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final data = Map<String, dynamic>.from(jsonDecode(r.body) as Map);
     return {
@@ -2573,7 +2586,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('reports-sys'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'reportName': reportName,
@@ -2610,7 +2623,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('reports-sys/$reportId'));
     final r = await http.put(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'reportName': reportName,
@@ -2642,7 +2655,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('reports-sys/$reportId/submit'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'toUserId': toUserId,
@@ -2665,7 +2678,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('reports-sys/$reportId/respond'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'action': action,
@@ -2687,7 +2700,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('reports-sys/$sourceReportId/relaunch'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'reportName': reportName,
@@ -2710,7 +2723,7 @@ class ApiStorageService {
         'requesterEmail': requesterEmail.trim().toLowerCase(),
       },
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
@@ -2782,7 +2795,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('shop-drawing'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         if (projectId != null) 'projectId': projectId,
@@ -2819,7 +2832,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('shop-drawing/$drawingId'));
     final r = await http.put(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         if (projectId != null) 'projectId': projectId,
@@ -2846,7 +2859,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('shop-drawing/$drawingId/pm-approve'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({'userId': userId}),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
@@ -2863,7 +2876,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('shop-drawing/$drawingId/pm-return'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({'userId': userId, 'reason': reason}),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
@@ -2881,7 +2894,7 @@ class ApiStorageService {
     final trimmed = omNotes?.trim();
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         if (trimmed != null && trimmed.isNotEmpty) 'omNotes': trimmed,
@@ -2902,7 +2915,7 @@ class ApiStorageService {
     final trimmed = omNotes?.trim();
     final r = await http.put(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'omNotes': trimmed ?? '',
@@ -2921,7 +2934,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('shop-drawing/$drawingId')).replace(
       queryParameters: {'userId': userId.toString()},
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
@@ -3031,7 +3044,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId/attachments'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'file_name': fileName,
@@ -3060,7 +3073,7 @@ class ApiStorageService {
     );
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'file_name': fileName,
@@ -3085,7 +3098,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('invoices-owner'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         if (projectId != null) 'projectId': projectId,
@@ -3112,7 +3125,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId'));
     final r = await http.put(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         if (projectId != null) 'projectId': projectId,
@@ -3132,6 +3145,7 @@ class ApiStorageService {
     required int invoiceId,
     required int userId,
     String? notes,
+    Map<String, bool>? omChecklist,
   }) async {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId/approve'));
     final body = <String, dynamic>{'userId': userId};
@@ -3139,9 +3153,12 @@ class ApiStorageService {
     if (trimmed != null && trimmed.isNotEmpty) {
       body['notes'] = trimmed;
     }
+    if (omChecklist != null) {
+      body['omChecklist'] = omChecklist;
+    }
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode(body),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
@@ -3172,7 +3189,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId/return'));
     final r = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({'userId': userId, 'reason': reason}),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
@@ -3211,7 +3228,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId')).replace(
       queryParameters: {'userId': userId.toString()},
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
@@ -3223,7 +3240,7 @@ class ApiStorageService {
     final uri = Uri.parse(
       _path('invoices-owner/$invoiceId/attachments/$attachmentId'),
     ).replace(queryParameters: {'userId': userId.toString()});
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     return InvoicesOwnerModel.fromMap(
       Map<String, dynamic>.from(jsonDecode(r.body) as Map),
@@ -3275,7 +3292,7 @@ class ApiStorageService {
           'app-release/download-chunk?userId=$userId&chunkIndex=$chunkIndex',
         ),
       );
-      final response = await http.get(uri).timeout(const Duration(minutes: 3));
+      final response = await http.get(uri, headers: _reqHeaders()).timeout(const Duration(minutes: 3));
       if (response.statusCode >= 400) {
         throw _apiHttpException(response, path: 'app-release/download-chunk');
       }
@@ -3345,7 +3362,7 @@ class ApiStorageService {
       final r = await http
           .post(
             Uri.parse(_path(path)),
-            headers: {'Content-Type': 'application/json'},
+            headers: _reqHeaders({'Content-Type': 'application/json'}),
             body: jsonEncode(body),
           )
           .timeout(const Duration(minutes: 5));
@@ -3398,7 +3415,7 @@ class ApiStorageService {
         'variant': variant,
       },
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode == 404) return null;
     if (r.statusCode >= 400) throw Exception(r.body);
     return ProjectsDashboardSheetModel.fromMap(
@@ -3425,7 +3442,7 @@ class ApiStorageService {
   }) async {
     final r = await http.post(
       Uri.parse(_path('projects-dashboard/webdav/token')),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'variant': variant,
@@ -3458,7 +3475,7 @@ class ApiStorageService {
 
     final r = await http.put(
       Uri.parse(_path('projects-dashboard/sheet')),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode(body),
     );
     if (r.statusCode == 403) {
@@ -3483,7 +3500,7 @@ class ApiStorageService {
         'variant': variant,
       },
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw Exception(r.body);
     final list = jsonDecode(r.body) as List<dynamic>;
     return list
@@ -3507,7 +3524,7 @@ class ApiStorageService {
         'variant': variant,
       },
     );
-    final r = await http.get(uri);
+    final r = await http.get(uri, headers: _reqHeaders());
     if (r.statusCode == 404) return null;
     if (r.statusCode >= 400) throw Exception(r.body);
     return ProjectsDashboardNoteModel.fromMap(
@@ -3523,7 +3540,7 @@ class ApiStorageService {
   }) async {
     final r = await http.post(
       Uri.parse(_path('projects-dashboard/notes')),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
       body: jsonEncode({
         'userId': userId,
         'userName': userName,
@@ -3546,7 +3563,7 @@ class ApiStorageService {
         'requesterEmail': requesterEmail.trim().toLowerCase(),
       },
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode == 403) throw Exception('غير مصرح بحذف الملاحظة');
     if (r.statusCode == 404) throw Exception('الملاحظة غير موجودة');
     if (r.statusCode >= 400) throw Exception(r.body);
@@ -3571,7 +3588,7 @@ class ApiStorageService {
         'expenses': expenses.map((e) => e.toJson()).toList(),
         'autoApprove': autoApprove,
       }),
-      headers: {'Content-Type': 'application/json'},
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
     );
     if (r.statusCode >= 400) throw _apiHttpException(r, path: 'expense-statements');
     final data = r.body.isEmpty
@@ -3624,7 +3641,7 @@ class ApiStorageService {
     final uri = Uri.parse(_path('expense-statements/$statementId')).replace(
       queryParameters: {'userId': actorUserId.toString()},
     );
-    final r = await http.delete(uri);
+    final r = await http.delete(uri, headers: _reqHeaders());
     if (r.statusCode >= 400) throw _apiHttpException(r, path: 'expense-statements/$statementId');
   }
 }
