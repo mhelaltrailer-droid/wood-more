@@ -21,7 +21,14 @@ Future<void> shareInvoicesOwnerOmChecklistPdf({
 }) async {
   final fontBase = await PdfGoogleFonts.tajawalRegular();
   final fontBold = await PdfGoogleFonts.tajawalBold();
-  final theme = pw.ThemeData.withFont(base: fontBase, bold: fontBold);
+  // Amiri يدعم Bold Italic للعربية (Tajawal لا يوفر italic).
+  final fontBoldItalic = await PdfGoogleFonts.amiriBoldItalic();
+  final theme = pw.ThemeData.withFont(
+    base: fontBase,
+    bold: fontBold,
+    italic: fontBoldItalic,
+    boldItalic: fontBoldItalic,
+  );
 
   pw.ImageProvider? logoImage;
   try {
@@ -135,6 +142,7 @@ pw.Widget _headerCell(String text) {
       style: pw.TextStyle(
         fontSize: 11,
         fontWeight: pw.FontWeight.bold,
+        fontStyle: pw.FontStyle.italic,
         color: _brandGreen,
       ),
     ),
@@ -147,7 +155,12 @@ pw.Widget _bodyCell(String text, {bool center = false}) {
     child: pw.Text(
       text,
       textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
-      style: const pw.TextStyle(fontSize: 10, color: PdfColors.black),
+      style: pw.TextStyle(
+        fontSize: 10,
+        fontWeight: pw.FontWeight.bold,
+        fontStyle: pw.FontStyle.italic,
+        color: PdfColors.black,
+      ),
     ),
   );
 }
@@ -169,12 +182,13 @@ pw.Widget _statusCell(bool checked) {
             ? pw.CustomPaint(
                 size: const PdfPoint(16, 16),
                 painter: (canvas, s) {
+                  // إحداثيات PDF: Y تصاعدي من الأسفل — مسار ✓ الصحيح
                   canvas
                     ..setStrokeColor(PdfColors.white)
-                    ..setLineWidth(1.8)
-                    ..moveTo(s.x * 0.22, s.y * 0.52)
-                    ..lineTo(s.x * 0.42, s.y * 0.72)
-                    ..lineTo(s.x * 0.78, s.y * 0.28)
+                    ..setLineWidth(2.0)
+                    ..moveTo(s.x * 0.20, s.y * 0.48)
+                    ..lineTo(s.x * 0.42, s.y * 0.28)
+                    ..lineTo(s.x * 0.80, s.y * 0.72)
                     ..strokePath();
                 },
               )
