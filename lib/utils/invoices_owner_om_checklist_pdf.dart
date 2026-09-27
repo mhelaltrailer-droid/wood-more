@@ -8,6 +8,11 @@ import 'package:printing/printing.dart';
 import '../core/invoices_owner_constants.dart';
 import 'pdf_share.dart';
 
+/// ألوان هوية Wood & More (متناسقة مع شعار/التطبيق).
+const PdfColor _brandGreen = PdfColor.fromInt(0xFF1B5E20);
+const PdfColor _brandGreenLight = PdfColor.fromInt(0xFFE8F5E9);
+const PdfColor _brandGreenMid = PdfColor.fromInt(0xFF2E7D32);
+
 /// بناء ومشاركة PDF قائمة مراجعة OM بعد اعتماد المستخلص.
 Future<void> shareInvoicesOwnerOmChecklistPdf({
   required String projectName,
@@ -24,6 +29,9 @@ Future<void> shareInvoicesOwnerOmChecklistPdf({
     logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
   } catch (_) {}
 
+  final projectLabel =
+      projectName.trim().isEmpty ? '—' : projectName.trim();
+
   final doc = pw.Document();
   doc.addPage(
     pw.Page(
@@ -38,28 +46,46 @@ Future<void> shareInvoicesOwnerOmChecklistPdf({
             if (logoImage != null)
               pw.Center(
                 child: pw.Container(
-                  height: 48,
-                  margin: const pw.EdgeInsets.only(bottom: 12),
+                  height: 52,
+                  margin: const pw.EdgeInsets.only(bottom: 10),
                   child: pw.Image(logoImage, fit: pw.BoxFit.contain),
                 ),
               ),
-            pw.Text(
-              'المشروع: ${projectName.trim().isEmpty ? '—' : projectName.trim()}',
-              textAlign: pw.TextAlign.right,
-              style: const pw.TextStyle(fontSize: 12),
+            pw.Center(
+              child: pw.Text(
+                '(Invoices Checklist)',
+                style: pw.TextStyle(
+                  fontSize: 14,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _brandGreen,
+                ),
+              ),
             ),
-            pw.SizedBox(height: 16),
+            pw.SizedBox(height: 8),
+            pw.Align(
+              alignment: pw.Alignment.centerRight,
+              child: pw.Text(
+                projectLabel,
+                textAlign: pw.TextAlign.right,
+                style: pw.TextStyle(
+                  fontSize: 12,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _brandGreenMid,
+                ),
+              ),
+            ),
+            pw.SizedBox(height: 14),
             pw.Table(
-              border: pw.TableBorder.all(width: 0.8, color: PdfColors.black),
+              border: pw.TableBorder.all(width: 0.9, color: _brandGreen),
               columnWidths: {
-                0: const pw.FlexColumnWidth(1.1),
+                0: const pw.FlexColumnWidth(1.0),
                 1: const pw.FlexColumnWidth(2.0),
                 2: const pw.FlexColumnWidth(3.2),
                 3: const pw.FlexColumnWidth(0.7),
               },
               children: [
                 pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                  decoration: const pw.BoxDecoration(color: _brandGreenLight),
                   children: [
                     _headerCell('الحالة'),
                     _headerCell('المسئول'),
@@ -67,14 +93,16 @@ Future<void> shareInvoicesOwnerOmChecklistPdf({
                     _headerCell('م'),
                   ],
                 ),
-                ...List.generate(invoicesOwnerOmChecklistPdfRows.length, (i) {
-                  final row = invoicesOwnerOmChecklistPdfRows[i];
+                ...List.generate(invoicesOwnerOmChecklistItems.length, (i) {
+                  final row = invoicesOwnerOmChecklistItems[i];
                   final checked = checklist[row.key] == true;
+                  final zebra = i.isOdd ? _brandGreenLight : PdfColors.white;
                   return pw.TableRow(
+                    decoration: pw.BoxDecoration(color: zebra),
                     children: [
                       _statusCell(checked),
                       _bodyCell(row.responsible),
-                      _bodyCell(row.itemLabel),
+                      _bodyCell(row.label),
                       _bodyCell('${i + 1}', center: true),
                     ],
                   );
@@ -100,11 +128,15 @@ Future<void> shareInvoicesOwnerOmChecklistPdf({
 
 pw.Widget _headerCell(String text) {
   return pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+    padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 9),
     child: pw.Text(
       text,
       textAlign: pw.TextAlign.center,
-      style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+      style: pw.TextStyle(
+        fontSize: 11,
+        fontWeight: pw.FontWeight.bold,
+        color: _brandGreen,
+      ),
     ),
   );
 }
@@ -115,30 +147,36 @@ pw.Widget _bodyCell(String text, {bool center = false}) {
     child: pw.Text(
       text,
       textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
-      style: const pw.TextStyle(fontSize: 10),
+      style: const pw.TextStyle(fontSize: 10, color: PdfColors.black),
     ),
   );
 }
 
+/// مربع اختيار بهوية خضراء — علامة ✓ مرسومة (لتجنب تشويه حرف الخط).
 pw.Widget _statusCell(bool checked) {
   return pw.Padding(
-    padding: const pw.EdgeInsets.symmetric(vertical: 8),
+    padding: const pw.EdgeInsets.symmetric(vertical: 7),
     child: pw.Center(
       child: pw.Container(
-        width: 14,
-        height: 14,
+        width: 16,
+        height: 16,
         decoration: pw.BoxDecoration(
-          border: pw.Border.all(width: 1.2, color: PdfColors.black),
+          color: checked ? _brandGreen : PdfColors.white,
+          border: pw.Border.all(width: 1.6, color: _brandGreen),
+          borderRadius: pw.BorderRadius.circular(3),
         ),
         child: checked
-            ? pw.Center(
-                child: pw.Text(
-                  '✓',
-                  style: pw.TextStyle(
-                    fontSize: 10,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
+            ? pw.CustomPaint(
+                size: const PdfPoint(16, 16),
+                painter: (canvas, s) {
+                  canvas
+                    ..setStrokeColor(PdfColors.white)
+                    ..setLineWidth(1.8)
+                    ..moveTo(s.x * 0.22, s.y * 0.52)
+                    ..lineTo(s.x * 0.42, s.y * 0.72)
+                    ..lineTo(s.x * 0.78, s.y * 0.28)
+                    ..strokePath();
+                },
               )
             : null,
       ),

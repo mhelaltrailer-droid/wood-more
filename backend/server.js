@@ -1320,10 +1320,13 @@ function normalizeDatabaseUrl(raw) {
   try {
     const u = new URL(s);
     u.searchParams.delete('channel_binding');
+    // Neon pooler rejects startup options like search_path; never inject them here.
+    u.searchParams.delete('options');
     return u.toString();
   } catch (_) {
     return s
       .replace(/([?&])channel_binding=[^&]*/gi, '$1')
+      .replace(/([?&])options=[^&]*/gi, '$1')
       .replace(/\?&/, '?')
       .replace(/[?&]$/, '');
   }
@@ -1366,6 +1369,33 @@ const poolConfig = databaseUrl
       connectionTimeoutMillis: 10_000,
     };
 const pool = new Pool(poolConfig);
+
+// Neon pooler may start with an empty search_path and rejects search_path in
+// URL startup options. Set it on every client checkout (pool.query uses connect).
+const rawPoolConnect = pool.connect.bind(pool);
+pool.connect = function patchedConnect(callback) {
+  if (typeof callback === 'function') {
+    return rawPoolConnect((err, client, done) => {
+      if (err) return callback(err);
+      client.query('SET search_path TO public', (setErr) => {
+        if (setErr) {
+          done();
+          return callback(setErr);
+        }
+        return callback(null, client, done);
+      });
+    });
+  }
+  return rawPoolConnect().then(async (client) => {
+    try {
+      await client.query('SET search_path TO public');
+      return client;
+    } catch (setErr) {
+      client.release(setErr);
+      throw setErr;
+    }
+  });
+};
 
 // After Neon suspends, idle sockets may error; let the pool replace them on next query.
 pool.on('error', (err) => {

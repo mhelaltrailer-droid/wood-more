@@ -20,45 +20,38 @@ const String invoicesOwnerStatusPendingOm = 'pending_operation_manager';
 const String invoicesOwnerStatusReturnedCreator = 'returned_to_creator';
 const String invoicesOwnerStatusApproved = 'approved';
 
-/// بنود قائمة مراجعة مدير العمليات قبل الاعتماد النهائي (اختيارية).
-const List<({String key, String label})> invoicesOwnerOmChecklistItems = [
-  (key: 'prepare_progress', label: 'اعداد progress'),
-  (key: 'review_progress', label: 'مراجعه progress'),
-  (
-    key: 'prepare_invoice_ir_mir_ms',
-    label: 'اعداد المستخلص و مراجعه (IR+MIR+MS)',
-  ),
-  (key: 'review_invoice_execution', label: 'مراجعه المستخلص (التنفيذ)'),
-  (key: 'finance_review', label: 'المراجعه المالية للمستخلص'),
-];
-
-/// صفوف نموذج PDF Export بعد الاعتماد (نصوص الصورة + المسئول الثابت).
-const List<({String key, String itemLabel, String responsible})>
-    invoicesOwnerOmChecklistPdfRows = [
+/// بنود قائمة مراجعة OM — نفس النصوص في checkboxes وPDF Export.
+const List<({String key, String label, String responsible})>
+    invoicesOwnerOmChecklistItems = [
   (
     key: 'prepare_progress',
-    itemLabel: 'إعداد Progress',
+    label: 'اعداد Progress',
     responsible: 'إدارة التنفيذ',
   ),
   (
     key: 'review_progress',
-    itemLabel: 'مراجعة Progress',
+    label: 'مراجعه Progress',
     responsible: 'إدارة العمليات',
   ),
   (
     key: 'prepare_invoice_ir_mir_ms',
-    itemLabel: 'إعداد المستخلص ومراجعة (IR + MIR - MS)',
+    label: 'اعداد المستخلص و مراجعه (IR+MIR+MS)',
     responsible: 'المكتب الفني + QS',
   ),
   (
     key: 'review_invoice_execution',
-    itemLabel: 'مراجعة المستخلص',
+    label: 'مراجعه المستخلص فنيا',
     responsible: 'إدارة التنفيذ',
   ),
   (
     key: 'finance_review',
-    itemLabel: 'مراجعة المستخلص',
+    label: 'مراجعه المستخلص ماليا',
     responsible: 'إدارة الحسابات',
+  ),
+  (
+    key: 'final_approval',
+    label: 'الاعتماد النهائي',
+    responsible: 'إدارة العمليات',
   ),
 ];
 

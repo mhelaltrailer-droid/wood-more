@@ -119,6 +119,7 @@ const IO_OM_CHECKLIST_KEYS = [
   'prepare_invoice_ir_mir_ms',
   'review_invoice_execution',
   'finance_review',
+  'final_approval',
 ];
 
 function ioNormalizeOmChecklist(raw) {
