@@ -248,6 +248,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
       HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
+      balancesExpensesIcon,
       meetingsIcon,
       invoicesOwnerIcon,
     ],

@@ -329,6 +329,9 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
   }
 
   String get _helpText {
+    if (widget.currentUser.canSetUserBalancesDirectly) {
+      return 'المسؤول الأساسي يمكنه ضبط رصيد أي مستخدم يدوياً (تعيين القيمة مباشرة). هذا الضبط لا يُسجَّل في سجل حركات العهد/المصروفات.';
+    }
     if (widget.currentUser.isAccountant) {
       return 'المحاسب يمكنه إضافة رصيد لنفسه، أو إضافة/سحب رصيد من باقي المستخدمين (الإضافة تخصم من رصيده، والسحب يضاف لرصيده). لا يسمح له بسحب رصيد من نفسه.';
     }
@@ -344,11 +347,88 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
     return null;
   }
 
+  /// ضبط رصيد مباشر للمسؤول الأساسي — بدون تسجيل حركة في سجل الحركات.
+  Future<void> _setBalanceDirect(UserModel user) async {
+    if (!widget.currentUser.canSetUserBalancesDirectly) return;
+    final current = _balances[user.id] ?? 0;
+    final amountC = TextEditingController(
+      text: current == current.roundToDouble()
+          ? current.toStringAsFixed(0)
+          : current.toStringAsFixed(2),
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('ضبط رصيد - ${user.name}'),
+        content: TextField(
+          controller: amountC,
+          decoration: const InputDecoration(
+            labelText: 'قيمة الرصيد',
+            helperText: 'أدخل الرصيد النهائي المطلوب (يمكن أن يكون سالباً)',
+          ),
+          keyboardType: const TextInputType.numberWithOptions(
+            signed: true,
+            decimal: true,
+          ),
+          autofocus: true,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d*')),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final raw = amountC.text.trim().replaceAll(',', '');
+    final value = double.tryParse(raw);
+    if (value == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('أدخل قيمة صحيحة')),
+        );
+      }
+      return;
+    }
+    try {
+      // تعيين مباشر فقط — بدون addBalanceMovement حتى لا تظهر في سجل الحركات.
+      await _db.setEngineerBalance(user.id, value);
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'تم ضبط رصيد ${user.name} إلى ${value.toStringAsFixed(2)}',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isPrimaryBalanceEditor = widget.currentUser.canSetUserBalancesDirectly;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('الأرصدة / المصروفات'),
+        title: Text(
+          isPrimaryBalanceEditor ? 'الأرصدة' : 'الأرصدة / المصروفات',
+        ),
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
         leading: IconButton(
@@ -376,10 +456,12 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                   final balance = _balances[u.id] ?? 0;
                   final isSelf = u.id == widget.currentUser.id;
                   final selfBadge = _selfBadgeLabel(u);
-                  final showAdd = (!isSelf || widget.currentUser.isAccountant) &&
+                  final showSetBalance = isPrimaryBalanceEditor;
+                  final showAdd = !isPrimaryBalanceEditor &&
+                      (!isSelf || widget.currentUser.isAccountant) &&
                       !(widget.currentUser.hasSiteEngineerManagerPrivileges &&
                           u.isAccountant);
-                  final showWithdraw = !isSelf;
+                  final showWithdraw = !isPrimaryBalanceEditor && !isSelf;
                   return Card(
                     margin: const EdgeInsets.only(bottom: 12),
                     child: Padding(
@@ -416,6 +498,12 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
+                                  if (showSetBalance)
+                                    TextButton.icon(
+                                      icon: const Icon(Icons.edit, size: 20),
+                                      label: const Text('ضبط رصيد'),
+                                      onPressed: () => _setBalanceDirect(u),
+                                    ),
                                   if (showAdd)
                                     TextButton.icon(
                                       icon: const Icon(Icons.add, size: 20),
@@ -439,17 +527,19 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                     ),
                   );
                 }),
-                const SizedBox(height: 32),
-                FilledButton.icon(
-                  onPressed: _showCreateReport,
-                  icon: const Icon(Icons.summarize),
-                  label: const Text('إنشاء تقرير'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF1B5E20),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    minimumSize: const Size(double.infinity, 52),
+                if (!isPrimaryBalanceEditor) ...[
+                  const SizedBox(height: 32),
+                  FilledButton.icon(
+                    onPressed: _showCreateReport,
+                    icon: const Icon(Icons.summarize),
+                    label: const Text('إنشاء تقرير'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF1B5E20),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      minimumSize: const Size(double.infinity, 52),
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
     );

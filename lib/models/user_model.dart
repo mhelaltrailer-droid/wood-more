@@ -159,6 +159,9 @@ class UserModel {
   bool get canManageUserBalances =>
       isAccountant || hasSiteEngineerManagerPrivileges;
 
+  /// ضبط رصيد مستخدم يدوياً (تعيين مباشر بدون سجل حركات) — المسؤول الأساسي فقط.
+  bool get canSetUserBalancesDirectly => isPrimaryAppAdmin;
+
   /// موافقة / رفض طلبات سحب الخامات (مدير المشروعات أو مدير العمليات).
   bool get canActOnWithdrawalRequests =>
       hasSiteEngineerManagerPrivileges || role == 'operation_manager';
@@ -203,6 +206,9 @@ class UserModel {
 
   /// حذف أي بيان صرف — المسؤول الأساسي فقط.
   bool get canDeleteExpenseStatements => isPrimaryAppAdmin;
+
+  /// حذف أي حركة من سجل العهد/المصروفات — المسؤول الأساسي فقط.
+  bool get canDeleteCustodyLogMovements => isPrimaryAppAdmin;
 
   /// أيقونة Invoices (Owner) — QS، Finance، المكتب الفني، العمليات، Projects Manager، Ah.Amin، والمسؤول الأساسي.
   bool get canAccessInvoicesOwner =>

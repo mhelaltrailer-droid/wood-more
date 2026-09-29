@@ -1283,6 +1283,8 @@ function _resolveActivityAction(method, path, body) {
   if (p.startsWith('/detailed-reports') && m === 'POST') return _planSaveAction(b);
   if (p.startsWith('/detailed-reports') && m === 'PUT') return _planUpdateAction(b);
   if (p.startsWith('/detailed-reports') && m === 'DELETE') return { type: 'detailed_report_delete', label: 'حذف تقرير مفصل' };
+  if (p.startsWith('/custody/') && m === 'DELETE') return { type: 'custody_balance_delete', label: 'حذف حركة رصيد من السجل' };
+  if (p.startsWith('/expense-statements/') && m === 'DELETE') return { type: 'expense_statement_delete', label: 'حذف بيان صرف' };
   if (p.startsWith('/users') && m === 'POST') return { type: 'user_create', label: 'إنشاء مستخدم' };
   if (p.startsWith('/users') && m === 'PUT') return { type: 'user_update', label: 'تعديل مستخدم' };
   if (p.startsWith('/users') && m === 'DELETE') return { type: 'user_delete', label: 'حذف مستخدم' };
@@ -4042,6 +4044,69 @@ app.get('/custody', async (req, res) => {
       return out;
     };
     res.json(r.rows.map(mapRow));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+// حذف حركة رصيد من سجل الحركات — المسؤول الأساسي فقط (عكس أثر الرصيد)
+app.delete('/custody/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const actorId = parseInt(String(req.query.userId || ''), 10);
+    if (Number.isNaN(id) || Number.isNaN(actorId)) {
+      return res.status(400).json({ error: 'id and userId required' });
+    }
+    const { primaryAdminPowersActive } = require('./view_as');
+    const actor = await pool.query('SELECT id, email FROM users WHERE id = $1', [actorId]);
+    if (!actor.rows.length || !primaryAdminPowersActive(actor.rows[0].email, req)) {
+      return res.status(403).json({ error: 'غير مصرح بالحذف' });
+    }
+    const cur = await pool.query('SELECT * FROM engineer_custody WHERE id = $1', [id]);
+    if (!cur.rows.length) {
+      return res.status(404).json({ error: 'الحركة غير موجودة' });
+    }
+    const row = cur.rows[0];
+    const movementType = String(row.movement_type || '');
+    if (movementType !== 'add_balance' && movementType !== 'withdraw_balance') {
+      return res.status(400).json({ error: 'يمكن حذف حركات الأرصدة فقط من السجل' });
+    }
+    const amount = parseFloat(row.amount) || 0;
+    const targetUserId = parseInt(row.user_id, 10);
+    const actorUserId =
+      row.actor_user_id != null ? parseInt(row.actor_user_id, 10) : null;
+
+    const adjustBalance = async (userId, delta) => {
+      if (!userId || !Number.isFinite(delta) || delta === 0) return;
+      const bal = await pool.query(
+        'SELECT balance FROM engineer_balance WHERE user_id = $1',
+        [userId],
+      );
+      const current = bal.rows.length ? parseFloat(bal.rows[0].balance) || 0 : 0;
+      await pool.query(
+        `INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE SET balance = $2`,
+        [userId, current + delta],
+      );
+    };
+
+    // عكس أثر الحركة على صاحب الرصيد (ومنفّذها إن وُجد تحويل بين طرفين)
+    if (amount > 0 && targetUserId) {
+      if (movementType === 'add_balance') {
+        await adjustBalance(targetUserId, -amount);
+        if (actorUserId && actorUserId !== targetUserId) {
+          await adjustBalance(actorUserId, amount);
+        }
+      } else {
+        await adjustBalance(targetUserId, amount);
+        if (actorUserId && actorUserId !== targetUserId) {
+          await adjustBalance(actorUserId, -amount);
+        }
+      }
+    }
+
+    await pool.query('DELETE FROM engineer_custody WHERE id = $1', [id]);
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }

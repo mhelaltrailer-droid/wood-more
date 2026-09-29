@@ -1151,6 +1151,20 @@ class ApiStorageService {
     }).toList();
   }
 
+  /// حذف حركة رصيد من سجل الحركات — المسؤول الأساسي فقط.
+  Future<void> deleteCustodyBalanceMovement({
+    required int custodyId,
+    required int actorUserId,
+  }) async {
+    final uri = Uri.parse(_path('custody/$custodyId')).replace(
+      queryParameters: {'userId': actorUserId.toString()},
+    );
+    final r = await http.delete(uri, headers: _reqHeaders());
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'custody/$custodyId');
+    }
+  }
+
   Future<List<SupervisorModel>> getSupervisors() async {
     final list = await _getList('supervisors');
     return list

@@ -194,8 +194,12 @@ class HomeIconBuilder {
       case 'accountant_finance':
         return _lightCard(
           icon: Icons.account_balance_wallet,
-          title: 'الأرصدة / المصروفات',
-          subtitle: 'أرصدة المستخدمين، إضافة/سحب رصيد، وإنشاء تقرير',
+          title: user.canSetUserBalancesDirectly
+              ? 'الأرصدة'
+              : 'الأرصدة / المصروفات',
+          subtitle: user.canSetUserBalancesDirectly
+              ? 'عرض الأرصدة وضبط قيمة الرصيد يدوياً'
+              : 'أرصدة المستخدمين، إضافة/سحب رصيد، وإنشاء تقرير',
           onTap: () => pushAndSaveRoute(
             context,
             'accountant-finance',

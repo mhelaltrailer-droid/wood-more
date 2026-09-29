@@ -4,13 +4,14 @@ import 'package:intl/intl.dart';
 import '../models/custody_expense_log_entry.dart';
 import '../models/user_model.dart';
 import '../services/custody_expense_log_service.dart';
+import '../services/storage_service.dart';
 import '../utils/full_screen_image.dart';
 import 'expense_statements_screen.dart';
 
 const Color _kPrimary = Color(0xFF1B5E20);
 
-/// العهدة/المصروفات لمدير العمليات والمسؤول الأساسي: بيانات الصرف كما هي،
-/// إضافة إلى سجل حركات العهد والمصروفات للعرض فقط.
+/// العهدة/المصروفات لمدير العمليات والمسؤول الأساسي: بيانات الصرف،
+/// إضافة إلى سجل حركات العهد والمصروفات (حذف الحركات للمسؤول الأساسي فقط).
 class CustodyExpensesViewScreen extends StatefulWidget {
   final UserModel currentUser;
   final String appBarTitle;
@@ -128,6 +129,7 @@ class _CustodyExpensesViewScreenState extends State<CustodyExpensesViewScreen>
             users: _users,
             newSince: _newSince,
             dateFormat: _dateFormat,
+            currentUser: widget.currentUser,
             onRefresh: _load,
           ),
         ],
@@ -172,6 +174,7 @@ class _MovementsLogTab extends StatefulWidget {
   final List<UserModel> users;
   final DateTime? newSince;
   final DateFormat dateFormat;
+  final UserModel currentUser;
   final Future<void> Function() onRefresh;
 
   const _MovementsLogTab({
@@ -181,6 +184,7 @@ class _MovementsLogTab extends StatefulWidget {
     required this.users,
     required this.newSince,
     required this.dateFormat,
+    required this.currentUser,
     required this.onRefresh,
   });
 
@@ -191,6 +195,9 @@ class _MovementsLogTab extends StatefulWidget {
 class _MovementsLogTabState extends State<_MovementsLogTab> {
   CustodyLogCategory? _category;
   int? _userId;
+  bool _deleting = false;
+
+  bool get _canDelete => widget.currentUser.canDeleteCustodyLogMovements;
 
   List<UserModel> get _userOptions {
     final involved = <int>{};
@@ -210,6 +217,69 @@ class _MovementsLogTabState extends State<_MovementsLogTab> {
       if (_userId != null && !e.matchesUser(_userId!)) return false;
       return true;
     }).toList();
+  }
+
+  Future<void> _confirmAndDelete(CustodyExpenseLogEntry e) async {
+    if (!_canDelete || e.sourceRecordId == null || _deleting) return;
+
+    final isBalance = e.isBalance;
+    final message = isBalance
+        ? 'هل تريد حذف حركة الرصيد هذه من السجل؟\nسيتم عكس أثرها على الأرصدة المرتبطة.'
+        : 'هل تريد حذف حركة بيان الصرف هذه من السجل؟\nسيتم حذف البيان بالكامل (بما فيها أحداث الاعتماد/الرفض إن وُجدت).';
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تأكيد الحذف'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _deleting = true);
+    try {
+      final db = getStorage();
+      if (isBalance) {
+        await db.deleteCustodyBalanceMovement(
+          custodyId: e.sourceRecordId!,
+          actorUserId: widget.currentUser.id,
+        );
+      } else {
+        await db.deleteExpenseStatement(
+          statementId: e.sourceRecordId!,
+          actorUserId: widget.currentUser.id,
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم حذف الحركة'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      await widget.onRefresh();
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تعذّر الحذف: $err'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
   }
 
   @override
@@ -242,30 +312,41 @@ class _MovementsLogTabState extends State<_MovementsLogTab> {
         _filters(),
         const Divider(height: 1),
         Expanded(
-          child: RefreshIndicator(
-            onRefresh: widget.onRefresh,
-            child: items.isEmpty
-                ? ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(24, 64, 24, 24),
-                        child: Text(
-                          widget.entries.isEmpty
-                              ? 'لا توجد حركات مسجّلة بعد.\nتظهر هنا إضافة وسحب الأرصدة وبيانات الصرف (بما فيها المعلّقة).'
-                              : 'لا توجد حركات مطابقة للفلتر المحدد.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
+          child: Stack(
+            children: [
+              RefreshIndicator(
+                onRefresh: widget.onRefresh,
+                child: items.isEmpty
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(24, 64, 24, 24),
+                            child: Text(
+                              widget.entries.isEmpty
+                                  ? 'لا توجد حركات مسجّلة بعد.\nتظهر هنا إضافة وسحب الأرصدة وبيانات الصرف (بما فيها المعلّقة).'
+                                  : 'لا توجد حركات مطابقة للفلتر المحدد.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.grey.shade600),
+                            ),
+                          ),
+                        ],
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        itemCount: items.length,
+                        itemBuilder: (context, i) => _entryCard(items[i]),
                       ),
-                    ],
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: items.length,
-                    itemBuilder: (context, i) => _entryCard(items[i]),
+              ),
+              if (_deleting)
+                const Positioned.fill(
+                  child: ColoredBox(
+                    color: Color(0x66000000),
+                    child: Center(child: CircularProgressIndicator()),
                   ),
+                ),
+            ],
           ),
         ),
       ],
@@ -403,6 +484,20 @@ class _MovementsLogTabState extends State<_MovementsLogTab> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
+                        ),
+                      ],
+                      if (_canDelete && e.sourceRecordId != null) ...[
+                        const SizedBox(width: 4),
+                        IconButton(
+                          tooltip: 'حذف الحركة',
+                          icon: Icon(
+                            Icons.delete_outline,
+                            color: Colors.red.shade700,
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: _deleting
+                              ? null
+                              : () => _confirmAndDelete(e),
                         ),
                       ],
                     ],

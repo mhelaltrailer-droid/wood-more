@@ -1629,6 +1629,59 @@ class DatabaseService {
         .toList();
   }
 
+  /// حذف حركة رصيد من سجل الحركات — المسؤول الأساسي فقط (مع عكس أثر الرصيد).
+  Future<void> deleteCustodyBalanceMovement({
+    required int custodyId,
+    required int actorUserId,
+  }) async {
+    final db = await database;
+    final actors = await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [actorUserId],
+    );
+    if (actors.isEmpty) throw Exception('غير مصرح بالحذف');
+    final email = (actors.first['email'] ?? '').toString().trim().toLowerCase();
+    if (email != UserModel.primaryAppAdminEmail.toLowerCase()) {
+      throw Exception('غير مصرح بالحذف');
+    }
+    final rows = await db.query(
+      'engineer_custody',
+      where: 'id = ?',
+      whereArgs: [custodyId],
+    );
+    if (rows.isEmpty) throw Exception('الحركة غير موجودة');
+    final row = rows.first;
+    final movementType = (row['movement_type'] ?? '').toString();
+    if (movementType != 'add_balance' && movementType != 'withdraw_balance') {
+      throw Exception('يمكن حذف حركات الأرصدة فقط من السجل');
+    }
+    final amount = (row['amount'] as num?)?.toDouble() ?? 0;
+    final targetUserId = row['user_id'] as int;
+    final movementActorId = row['actor_user_id'] as int?;
+
+    Future<void> adjust(int userId, double delta) async {
+      if (delta == 0) return;
+      final current = await getEngineerBalance(userId);
+      await setEngineerBalance(userId, current + delta);
+    }
+
+    if (amount > 0) {
+      if (movementType == 'add_balance') {
+        await adjust(targetUserId, -amount);
+        if (movementActorId != null && movementActorId != targetUserId) {
+          await adjust(movementActorId, amount);
+        }
+      } else {
+        await adjust(targetUserId, amount);
+        if (movementActorId != null && movementActorId != targetUserId) {
+          await adjust(movementActorId, -amount);
+        }
+      }
+    }
+    await db.delete('engineer_custody', where: 'id = ?', whereArgs: [custodyId]);
+  }
+
   /// الحصول على سجلات الحضور لمستخدم معين
   Future<List<AttendanceRecordModel>> getAttendanceRecordsByUser(
     int userId,

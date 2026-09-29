@@ -16,6 +16,9 @@ class CustodyExpenseLogEntry {
   final String key;
   final CustodyLogCategory category;
 
+  /// معرّف الصف في المصدر: engineer_custody أو expense_statements.
+  final int? sourceRecordId;
+
   /// add_balance أو withdraw_balance لحركات الأرصدة، وفارغ لبيانات الصرف.
   final String movementType;
   final DateTime occurredAt;
@@ -42,6 +45,7 @@ class CustodyExpenseLogEntry {
   const CustodyExpenseLogEntry({
     required this.key,
     required this.category,
+    this.sourceRecordId,
     this.movementType = '',
     required this.occurredAt,
     this.actorUserId,

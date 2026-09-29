@@ -49,6 +49,7 @@ Future<CustodyExpenseLog> loadCustodyExpenseLog() async {
       CustodyExpenseLogEntry(
         key: 'balance_${row['id']}',
         category: CustodyLogCategory.balance,
+        sourceRecordId: _asInt(row['id']),
         movementType: movementType,
         occurredAt: occurredAt,
         actorUserId: actorUserId,
@@ -83,6 +84,7 @@ Future<CustodyExpenseLog> loadCustodyExpenseLog() async {
       CustodyExpenseLogEntry(
         key: 'expense_${s.id}_submitted',
         category: CustodyLogCategory.expense,
+        sourceRecordId: s.id,
         occurredAt: s.createdAt,
         actorUserId: s.submitterUserId,
         actorName: submitterName,
@@ -110,6 +112,7 @@ Future<CustodyExpenseLog> loadCustodyExpenseLog() async {
         CustodyExpenseLogEntry(
           key: 'expense_${s.id}_decision',
           category: CustodyLogCategory.expense,
+          sourceRecordId: s.id,
           occurredAt: decidedAt,
           actorUserId: s.respondedByUserId,
           actorName: 'Projects Manager',

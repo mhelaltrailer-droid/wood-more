@@ -735,6 +735,12 @@ class WebStorageService {
         .toList();
   }
 
+  Future<void> deleteCustodyBalanceMovement({
+    required int custodyId,
+    required int actorUserId,
+  }) async =>
+      throw UnsupportedError('حذف حركات الرصيد يتطلب وضع API');
+
   Future<List<UserModel>> getSiteEngineers() async {
     await _initData();
     final prefs = await _prefs;
