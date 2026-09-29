@@ -18,8 +18,9 @@ const ProjectModel _otherProject = ProjectModel(
   name: ReportsSysModel.otherProjectLabel,
 );
 
-/// العهدة والمصروفات: بنود صرف تُضاف تباعاً (حتى 4).
-/// مهندس الموقع يرسل للاعتماد؛ مدير المشروعات يحفظ معتمداً مباشرة.
+/// العهدة والمصروفات — المسار الوحيد لإدخال بيان صرف.
+/// مهندس الموقع يرسل للاعتماد (pending)؛ مدير المشروعات يحفظ معتمداً مباشرة.
+/// لا يرتبط بالتقرير المفصل / خطط العمل.
 class DetailedReportFinancesScreen extends StatefulWidget {
   final UserModel user;
   final DetailedReportModel report;

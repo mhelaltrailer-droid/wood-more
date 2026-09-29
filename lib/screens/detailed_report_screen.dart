@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
-import 'detailed_report_finances_screen.dart';
 import '../models/project_model.dart';
 import '../models/supervisor_model.dart';
 import '../models/contractor_model.dart';
@@ -125,7 +124,7 @@ class DetailedReportScreen extends StatefulWidget {
     this.initialPostponedReasonText,
     this.initialModificationSummary,
     this.executionInfoMessage,
-    this.continueToFinancesOnNext = true,
+    this.continueToFinancesOnNext = false,
     this.plannedExecutionMinSelectableDate,
     this.plannedExecutionDefaultDate,
     this.primaryWorkActionLabel,
@@ -956,14 +955,8 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
   }
 
   void _goNext() {
-    final report = _buildReportForNext();
-    if (report == null || !mounted) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) =>
-            DetailedReportFinancesScreen(user: widget.user, report: report),
-      ),
-    );
+    // العهد/المصروفات لم تعد تُفتح من هنا — المسار الوحيد: أيقونة العهدة/المصروفات.
+    _saveWorkWithoutFinances();
   }
 
   Future<void> _saveWorkWithoutFinances() async {

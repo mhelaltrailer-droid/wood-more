@@ -9,14 +9,11 @@ import '../screens/finance_screen.dart';
 import '../screens/engineer_projects_screen.dart';
 import '../screens/engineer_withdraw_materials_screen.dart';
 import '../screens/daily_report_step1_screen.dart';
-import '../screens/detailed_report_screen.dart';
 import '../screens/detailed_report_finances_screen.dart';
 import '../screens/tomorrow_work_plan_screen.dart';
 import '../screens/today_work_plan_screen.dart';
 import '../screens/site_engineer_reports_screen.dart';
 import '../screens/manager_custody_screen.dart';
-import '../screens/accountant_custody_screen.dart';
-import '../screens/site_engineer_expenses_report_screen.dart';
 import '../screens/accountant_finance_screen.dart';
 import '../screens/manager_custody_expenses_hub_screen.dart';
 import '../screens/custody_expenses_view_screen.dart';
@@ -59,7 +56,8 @@ Widget? getScreenForRoute(String name, UserModel user) {
       );
       return DailyReportStep1Screen(user: user, report: report);
     case 'detailed-report':
-      return DetailedReportScreen(user: user, continueToFinancesOnNext: false);
+      // أُزيل مسار التقرير المفصل من الواجهة؛ خطط اليوم/الغد منفصلة.
+      return null;
     case 'engineer-finances':
       return DetailedReportFinancesScreen.directEntry(user: user);
     case 'tomorrow-work-plan':
@@ -73,12 +71,18 @@ Widget? getScreenForRoute(String name, UserModel user) {
     case 'engineer-withdraw-materials':
       return EngineerWithdrawMaterialsScreen(user: user);
     case 'accountant-custody':
-      return AccountantCustodyScreen(currentUser: user);
-    case 'site-engineer-expenses-report':
-      return SiteEngineerExpensesReportScreen(
+      return ExpenseStatementsScreen(
         currentUser: user,
-        canDeleteExpenses: user.canManageSiteEngineerExpensesReport,
-        appBarTitle: 'بنود الصرف',
+        appBarTitle: 'بيانات الصرف',
+        allowRespond: false,
+        allowDelete: false,
+      );
+    case 'site-engineer-expenses-report':
+      return ExpenseStatementsScreen(
+        currentUser: user,
+        appBarTitle: 'بيانات الصرف',
+        allowRespond: false,
+        allowDelete: user.canDeleteExpenseStatements,
       );
     case 'accountant-finance':
       return AccountantFinanceScreen(currentUser: user);

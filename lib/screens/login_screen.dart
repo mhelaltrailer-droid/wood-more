@@ -4,6 +4,7 @@ import '../services/auth_persistence.dart';
 import '../services/last_project_persistence.dart';
 import '../services/storage_service.dart';
 import '../services/system_lock_service.dart';
+import '../widgets/system_lock_watch.dart';
 import 'home_screen.dart';
 
 /// شاشة تسجيل الدخول - البريد الإلكتروني يحدد المستخدم ودوره
@@ -85,7 +86,12 @@ class _LoginScreenState extends State<LoginScreen> {
       } catch (_) {}
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => HomeScreen(currentUser: user)),
+        MaterialPageRoute(
+          builder: (_) => SystemLockWatch(
+            user: user,
+            child: HomeScreen(currentUser: user),
+          ),
+        ),
       );
     } catch (e) {
       if (mounted) {

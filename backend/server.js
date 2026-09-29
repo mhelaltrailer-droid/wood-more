@@ -1490,6 +1490,54 @@ async function readSystemLocked() {
   }
 }
 
+/** هل الطلب من المسؤول الأساسي المسموح له بالعمل أثناء System Lock؟ */
+async function isSystemLockBypassRequest(req) {
+  const emails = [
+    req.body?.requesterEmail,
+    req.query?.requesterEmail,
+    req.body?.email,
+  ]
+    .map((e) => String(e || '').trim().toLowerCase())
+    .filter(Boolean);
+  if (emails.includes(PRIMARY_APP_ADMIN_EMAIL)) return true;
+
+  const uidRaw =
+    req.body?.userId ?? req.query?.userId ?? req.headers['x-requester-user-id'];
+  const uid = parseInt(String(uidRaw || ''), 10);
+  if (!Number.isInteger(uid) || uid <= 0) return false;
+  try {
+    const r = await pool.query('SELECT email FROM users WHERE id = $1 LIMIT 1', [uid]);
+    return (
+      r.rows.length > 0 &&
+      String(r.rows[0].email || '').trim().toLowerCase() === PRIMARY_APP_ADMIN_EMAIL
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+// أثناء الصيانة: امنع أي كتابة (حضور/انصراف/تقارير...) حتى لو الجلسة ما زالت مفتوحة على الجهاز.
+app.use(async (req, res, next) => {
+  const method = String(req.method || '').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+  const p = String(req.path || '');
+  if (p === '/healthz' || p === '/') return next();
+  // login و system-lock لهما فحص خاص داخل الـ handlers
+  if (p === '/auth/login' || p === '/system-lock') return next();
+  try {
+    const locked = await readSystemLocked();
+    if (!locked) return next();
+    if (await isSystemLockBypassRequest(req)) return next();
+    return res.status(423).json({
+      error: 'system_locked',
+      message: 'System Locked for maintainance please try again later',
+    });
+  } catch (e) {
+    console.warn('systemLockGuard:', e && e.message ? e.message : e);
+    return next();
+  }
+});
+
 async function findUserForLogin(identifier) {
   const id = String(identifier || '').trim().toLowerCase();
   if (!id) return null;
@@ -1561,7 +1609,6 @@ async function ensureHomeIconsVisibilitySetting() {
         engineer_withdraw_materials: true,
         engineer_finances: true,
         operation_reports: true,
-        detailed_report: true,
         engineer_projects: true,
         ir_mir: true,
         ms_sd: true,
@@ -1690,6 +1737,8 @@ async function ensureHomeIconsVisibilitySetting() {
         for (const [iconId, visible] of Object.entries(icons)) {
           if (roleMap[iconId] === undefined) roleMap[iconId] = visible;
         }
+        // أُزيلت أيقونة التقرير المفصل من الواجهة — أخفِها إن بقيت في الإعدادات القديمة.
+        delete roleMap.detailed_report;
         merged[role] = roleMap;
       }
       return merged;

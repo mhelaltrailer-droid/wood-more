@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../models/user_model.dart';
-import 'site_engineer_expenses_report_screen.dart';
+import 'expense_statements_screen.dart';
 
-/// شاشة العهدة للمحاسب: عرض بنود صرف مهندسي المواقع حسب المستخدم والمدة.
+/// شاشة العهدة للمحاسب: بيانات الصرف من مسار الاعتماد فقط.
 class AccountantCustodyScreen extends StatelessWidget {
   final UserModel currentUser;
 
@@ -11,9 +11,11 @@ class AccountantCustodyScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SiteEngineerExpensesReportScreen(
+    return ExpenseStatementsScreen(
       currentUser: currentUser,
-      appBarTitle: 'تقرير العهدة',
+      appBarTitle: 'بيانات الصرف',
+      allowRespond: false,
+      allowDelete: false,
     );
   }
 }

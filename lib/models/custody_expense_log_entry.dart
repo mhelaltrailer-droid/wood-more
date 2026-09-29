@@ -4,10 +4,13 @@ import 'expense_statement_model.dart';
 /// تصنيف حدث سجل العهد والمصروفات (يُستخدم للفلترة).
 enum CustodyLogCategory { balance, expense }
 
+/// مرحلة حدث بيان الصرف في السجل (إرفاق / اعتماد / رفض).
+enum CustodyExpensePhase { submitted, approved, rejected }
+
 /// حدث واحد في سجل حركات العهد والمصروفات — للعرض فقط.
 ///
-/// يُبنى من مصدرين: حركات جدول [engineer_custody] وبيانات الصرف التي تم البت
-/// فيها. لا يقابله جدول في قاعدة البيانات.
+/// يُبنى من مصدرين: حركات جدول [engineer_custody] وبيانات الصرف
+/// (إرفاق معلّق + اعتماد/رفض كأحداث منفصلة).
 class CustodyExpenseLogEntry {
   /// مفتاح فريد عبر المصدرين معاً (لأن المعرفات تتكرر بين الجدولين).
   final String key;
@@ -20,7 +23,7 @@ class CustodyExpenseLogEntry {
   final String actorName;
   final String actorRole;
 
-  /// صاحب الرصيد المتأثر بالحركة.
+  /// صاحب الرصيد / مقدّم بيان الصرف.
   final int? targetUserId;
   final String targetName;
   final double amount;
@@ -28,10 +31,13 @@ class CustodyExpenseLogEntry {
   final String? projectName;
   final String? imagePath;
 
-  /// approved أو rejected لبيانات الصرف فقط.
+  /// pending / approved / rejected لبيانات الصرف.
   final String? status;
   final String? rejectionReason;
   final String? respondedByName;
+
+  /// مرحلة حدث الصرف في السجل (null لحركات الرصيد).
+  final CustodyExpensePhase? expensePhase;
 
   const CustodyExpenseLogEntry({
     required this.key,
@@ -50,11 +56,18 @@ class CustodyExpenseLogEntry {
     this.status,
     this.rejectionReason,
     this.respondedByName,
+    this.expensePhase,
   });
 
   bool get isBalance => category == CustodyLogCategory.balance;
   bool get isAddBalance => movementType == 'add_balance';
-  bool get isRejected => status == ExpenseStatementModel.statusRejected;
+  bool get isRejected =>
+      expensePhase == CustodyExpensePhase.rejected ||
+      status == ExpenseStatementModel.statusRejected;
+  bool get isPendingExpense =>
+      expensePhase == CustodyExpensePhase.submitted &&
+      status == ExpenseStatementModel.statusPending;
+  bool get isApprovedExpense => expensePhase == CustodyExpensePhase.approved;
 
   /// المبلغ بصيغة مختصرة: بدون كسور عندما يكون رقماً صحيحاً.
   String get amountLabel {
@@ -63,6 +76,14 @@ class CustodyExpenseLogEntry {
         ? rounded.toStringAsFixed(0)
         : amount.toStringAsFixed(2);
     return '$text جنيه';
+  }
+
+  String get amountInParens {
+    final rounded = amount.roundToDouble();
+    final text = amount == rounded
+        ? rounded.toStringAsFixed(0)
+        : amount.toStringAsFixed(2);
+    return '($text)';
   }
 
   /// «قام المحاسب أحمد علي …» — يسقط الدور إن كان غير معروف.
@@ -82,15 +103,38 @@ class CustodyExpenseLogEntry {
           ? 'قام $_actorLabel بإضافة رصيد $amountLabel للمستخدم $target'
           : 'قام $_actorLabel بسحب رصيد $amountLabel من المستخدم $target';
     }
-    return 'قام $_actorLabel بإضافة بيان صرف بقيمة $amountLabel';
+
+    final user = targetName.trim().isEmpty
+        ? (actorName.trim().isEmpty ? 'مستخدم غير معروف' : actorName.trim())
+        : targetName.trim();
+
+    switch (expensePhase) {
+      case CustodyExpensePhase.submitted:
+        if (status == ExpenseStatementModel.statusPending) {
+          return 'المستخدم "$user" أرفق بيان صرف بقيمة $amountInParens ولم يتم اعتماده';
+        }
+        return 'المستخدم "$user" أرفق بيان صرف بقيمة $amountInParens';
+      case CustodyExpensePhase.approved:
+        return 'قام Projects Manager باعتماد بيان الصرف للمستخدم $user بقيمة $amountInParens';
+      case CustodyExpensePhase.rejected:
+        return 'قام Projects Manager برفض بيان الصرف للمستخدم $user بقيمة $amountInParens';
+      case null:
+        return 'قام $_actorLabel بإضافة بيان صرف بقيمة $amountLabel';
+    }
   }
 
-  /// سطر ثانوي يوضح مَن اعتمد أو رفض بيان الصرف.
+  /// سطر ثانوي لحالة بيان الصرف (اختياري).
   String? get decisionNote {
     if (isBalance) return null;
-    final by = respondedByName?.trim();
-    if (by == null || by.isEmpty) return null;
-    return isRejected ? 'تم الرفض بواسطة $by' : 'تم الاعتماد بواسطة $by';
+    if (expensePhase == CustodyExpensePhase.submitted &&
+        status == ExpenseStatementModel.statusPending) {
+      return 'بانتظار الاعتماد';
+    }
+    if (expensePhase == CustodyExpensePhase.rejected) {
+      final reason = rejectionReason?.trim();
+      if (reason != null && reason.isNotEmpty) return 'سبب الرفض: $reason';
+    }
+    return null;
   }
 
   bool matchesUser(int userId) =>

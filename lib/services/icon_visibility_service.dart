@@ -169,7 +169,6 @@ class IconVisibilityService {
       ),
       HomeIconItem(id: 'engineer_finances', label: 'العهدة/المصروفات'),
       HomeIconItem(id: 'operation_reports', label: 'تقارير التشغيل'),
-      HomeIconItem(id: 'detailed_report', label: 'التقرير اليومي'),
       HomeIconItem(id: 'engineer_projects', label: 'المشروعات'),
       documentControlIcon,
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
@@ -273,13 +272,17 @@ class IconVisibilityService {
       final roleMap = <String, bool>{};
       if (dynamicRole is Map) {
         dynamicRole.forEach((key, value) {
-          roleMap[key.toString()] = value == true;
+          final id = key.toString();
+          // أيقونة التقرير المفصل أُزيلت من الواجهة.
+          if (id == 'detailed_report') return;
+          roleMap[id] = value == true;
         });
       }
       final defaults = defaultForRole(role);
       for (final entry in defaults.entries) {
         roleMap.putIfAbsent(entry.key, () => entry.value);
       }
+      roleMap.remove('detailed_report');
       output[role] = roleMap;
     }
     return output;

@@ -13,8 +13,9 @@ class CustodyExpenseLog {
   const CustodyExpenseLog({required this.entries, required this.users});
 }
 
-/// يبني سجل الحركات بدمج حركات الأرصدة مع بيانات الصرف التي تم البت فيها.
+/// يبني سجل الحركات بدمج حركات الأرصدة مع بيانات الصرف.
 ///
+/// لكل بيان صرف: حدث عند الإرفاق + حدث منفصل عند الاعتماد/الرفض إن وُجد.
 /// الحركات المسجّلة قبل إضافة أعمدة المنفّذ تُتجاهل لأنه يتعذر معرفة من نفّذها.
 Future<CustodyExpenseLog> loadCustodyExpenseLog() async {
   final db = getStorage();
@@ -22,13 +23,9 @@ Future<CustodyExpenseLog> loadCustodyExpenseLog() async {
   final custody = List<Map<String, dynamic>>.from(
     await db.getCustodyRecords() as List,
   );
+  // كل الحالات: معلّق + معتمد + مرفوض (سجل الحركات فقط).
   final statements = List<ExpenseStatementModel>.from(
-    await db.getExpenseStatements(
-      statuses: const [
-        ExpenseStatementModel.statusApproved,
-        ExpenseStatementModel.statusRejected,
-      ],
-    ) as List,
+    await db.getExpenseStatements() as List,
   );
 
   final usersById = {for (final u in users) u.id: u};
@@ -72,28 +69,66 @@ Future<CustodyExpenseLog> loadCustodyExpenseLog() async {
 
   for (final s in statements) {
     final target = usersById[s.balanceUserId];
+    final submitterName = _firstNonEmpty([
+      s.submitterUserName,
+      usersById[s.submitterUserId]?.name ?? '',
+    ]);
+    final targetName = _firstNonEmpty([
+      target?.name ?? '',
+      submitterName,
+    ]);
+
+    // 1) حدث الإرفاق (معلّق أو تاريخ إرفاق سابق).
     entries.add(
       CustodyExpenseLogEntry(
-        key: 'expense_${s.id}',
+        key: 'expense_${s.id}_submitted',
         category: CustodyLogCategory.expense,
-        occurredAt: s.respondedAt ?? s.createdAt,
+        occurredAt: s.createdAt,
         actorUserId: s.submitterUserId,
-        actorName: s.submitterUserName,
+        actorName: submitterName,
         actorRole: _firstNonEmpty([
           s.submitterRole,
           usersById[s.submitterUserId]?.role ?? '',
         ]),
         targetUserId: s.balanceUserId,
-        targetName: target?.name ?? '',
+        targetName: targetName,
         amount: s.amount,
         description: s.description,
         projectName: s.projectName,
         imagePath: s.imagePath,
-        status: s.status,
-        rejectionReason: s.rejectionReason,
-        respondedByName: s.respondedByUserName,
+        status: s.isPending
+            ? ExpenseStatementModel.statusPending
+            : s.status,
+        expensePhase: CustodyExpensePhase.submitted,
       ),
     );
+
+    // 2) حدث الاعتماد / الرفض منفصل.
+    if (s.isApproved || s.isRejected) {
+      final decidedAt = s.respondedAt ?? s.createdAt;
+      entries.add(
+        CustodyExpenseLogEntry(
+          key: 'expense_${s.id}_decision',
+          category: CustodyLogCategory.expense,
+          occurredAt: decidedAt,
+          actorUserId: s.respondedByUserId,
+          actorName: 'Projects Manager',
+          actorRole: 'projects_manager',
+          targetUserId: s.balanceUserId,
+          targetName: targetName,
+          amount: s.amount,
+          description: s.description,
+          projectName: s.projectName,
+          imagePath: s.imagePath,
+          status: s.status,
+          rejectionReason: s.rejectionReason,
+          respondedByName: 'Projects Manager',
+          expensePhase: s.isApproved
+              ? CustodyExpensePhase.approved
+              : CustodyExpensePhase.rejected,
+        ),
+      );
+    }
   }
 
   entries.sort((a, b) => b.occurredAt.compareTo(a.occurredAt));

@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../models/user_model.dart';
-import '../screens/accountant_custody_screen.dart';
-import '../screens/site_engineer_expenses_report_screen.dart';
 import '../screens/accountant_finance_screen.dart';
 import '../screens/activity_logs_screen.dart';
 import '../screens/admin_dashboard_screen.dart';
@@ -10,9 +8,9 @@ import '../screens/admin_project_structure_screen.dart';
 import '../screens/attendance_reports_screen.dart';
 import '../screens/attendance_screen.dart';
 import '../screens/contractor_report_screen.dart';
-import '../screens/detailed_report_screen.dart';
 import '../screens/engineer_projects_screen.dart';
 import '../screens/engineer_withdraw_materials_screen.dart';
+import '../screens/expense_statements_screen.dart';
 import '../screens/icons_control_screen.dart';
 import '../screens/document_control_hub_screen.dart';
 import '../screens/new_icon_screen.dart';
@@ -122,6 +120,7 @@ class HomeIconBuilder {
           icon: Icons.payments_outlined,
           iconSize: 56,
           title: 'العهدة/المصروفات',
+          subtitle: 'إدخال بيان صرف وإرساله لمدير المشروعات للاعتماد',
           padding: 28,
           onTap: () => pushAndSaveRoute(
             context,
@@ -144,23 +143,8 @@ class HomeIconBuilder {
           ),
         );
       case 'detailed_report':
-        return _lightCard(
-          icon: Icons.assessment_outlined,
-          iconSize: 56,
-          title: 'التقرير اليومي',
-          subtitle:
-              'تفاصيل العمل والمواقع ثم «حفظ التقرير» — الماليات من أيقونة «الماليات»',
-          padding: 28,
-          onTap: () => _openAfterAttendanceCheck(
-            context: context,
-            user: user,
-            routeName: 'detailed-report',
-            screen: DetailedReportScreen(
-              user: user,
-              continueToFinancesOnNext: false,
-            ),
-          ),
-        );
+        // أُزيلت من الواجهة: العهد/المصروفات فقط عبر engineer_finances.
+        return const SizedBox.shrink();
       case 'engineer_projects':
         return _lightCard(
           icon: Icons.business,
@@ -179,25 +163,31 @@ class HomeIconBuilder {
         return _lightCard(
           icon: Icons.handshake,
           title: 'العهدة',
-          subtitle: 'بنود صرف العهدة/المصروفات حسب المستخدم والمدة وتصدير PDF',
+          subtitle: 'عرض بيانات الصرف المعتمدة والمرفوضة وقيد الانتظار',
           onTap: () => pushAndSaveRoute(
             context,
             'accountant-custody',
-            AccountantCustodyScreen(currentUser: user),
+            ExpenseStatementsScreen(
+              currentUser: user,
+              appBarTitle: 'بيانات الصرف',
+              allowRespond: false,
+              allowDelete: false,
+            ),
           ),
         );
       case 'site_engineer_expenses_report':
         return _lightCard(
           icon: Icons.receipt_long_outlined,
-          title: 'بنود الصرف',
-          subtitle: 'عرض وحذف بنود صرف مهندسي المواقع حسب المستخدم والمدة',
+          title: 'بيانات الصرف',
+          subtitle: 'عرض بيانات صرف المهندسين (مسار الاعتماد فقط)',
           onTap: () => pushAndSaveRoute(
             context,
             'site-engineer-expenses-report',
-            SiteEngineerExpensesReportScreen(
+            ExpenseStatementsScreen(
               currentUser: user,
-              canDeleteExpenses: true,
-              appBarTitle: 'بنود الصرف',
+              appBarTitle: 'بيانات الصرف',
+              allowRespond: false,
+              allowDelete: user.canDeleteExpenseStatements,
             ),
           ),
         );

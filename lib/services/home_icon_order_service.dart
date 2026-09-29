@@ -133,6 +133,6 @@ List<String> sanitizeSavedHomeIconOrder(List<dynamic>? raw) {
   if (raw == null || raw.isEmpty) return const [];
   return raw
       .map((value) => value.toString().trim())
-      .where((value) => value.isNotEmpty)
+      .where((value) => value.isNotEmpty && value != 'detailed_report')
       .toList();
 }

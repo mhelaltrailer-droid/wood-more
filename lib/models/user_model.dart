@@ -188,7 +188,7 @@ class UserModel {
   /// حذف مرفقات IR / MIR — مسؤول التطبيق بهذا البريد فقط.
   bool get canDeleteIrMirAttachments => isPrimaryAppAdmin && isAdmin;
 
-  /// تقرير بنود صرف العهدة/المصروفات + حذف البنود — مسؤول التطبيق بهذا البريد فقط.
+  /// عرض بيانات الصرف (مسار الاعتماد) + حذف — مسؤول التطبيق بهذا البريد فقط.
   bool get canManageSiteEngineerExpensesReport =>
       isPrimaryAppAdmin && isAdmin;
 

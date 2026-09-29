@@ -252,7 +252,7 @@ class _MovementsLogTabState extends State<_MovementsLogTab> {
                         padding: const EdgeInsets.fromLTRB(24, 64, 24, 24),
                         child: Text(
                           widget.entries.isEmpty
-                              ? 'لا توجد حركات مسجّلة بعد.\nتظهر هنا إضافة وسحب الأرصدة وبيانات الصرف بعد البت فيها.'
+                              ? 'لا توجد حركات مسجّلة بعد.\nتظهر هنا إضافة وسحب الأرصدة وبيانات الصرف (بما فيها المعلّقة).'
                               : 'لا توجد حركات مطابقة للفلتر المحدد.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.grey.shade600),
@@ -331,14 +331,20 @@ class _MovementsLogTabState extends State<_MovementsLogTab> {
     if (e.isBalance) {
       return e.isAddBalance ? Colors.green.shade700 : Colors.orange.shade800;
     }
-    return e.isRejected ? Colors.red.shade700 : _kPrimary;
+    if (e.isPendingExpense) return Colors.orange.shade800;
+    if (e.isRejected) return Colors.red.shade700;
+    if (e.isApprovedExpense) return Colors.green.shade700;
+    return _kPrimary;
   }
 
   IconData _icon(CustodyExpenseLogEntry e) {
     if (e.isBalance) {
       return e.isAddBalance ? Icons.add_card : Icons.money_off;
     }
-    return e.isRejected ? Icons.receipt_long_outlined : Icons.receipt_long;
+    if (e.isPendingExpense) return Icons.hourglass_top;
+    if (e.isRejected) return Icons.receipt_long_outlined;
+    if (e.isApprovedExpense) return Icons.verified_outlined;
+    return Icons.receipt_long;
   }
 
   Widget _entryCard(CustodyExpenseLogEntry e) {

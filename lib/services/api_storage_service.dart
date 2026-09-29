@@ -74,6 +74,19 @@ class ApiStorageService {
 
   Exception _apiHttpException(http.Response r, {String? path}) {
     final body = r.body.trim();
+    if (r.statusCode == 423) {
+      try {
+        final decoded = jsonDecode(body);
+        if (decoded is Map &&
+            (decoded['error']?.toString() == 'system_locked' ||
+                decoded['message'] != null)) {
+          return Exception(
+            'النظام في وضع الصيانة. لا يمكن تنفيذ العملية الآن.',
+          );
+        }
+      } catch (_) {}
+      return Exception('النظام في وضع الصيانة. لا يمكن تنفيذ العملية الآن.');
+    }
     final htmlRouteMissing = body.contains('<pre>Cannot GET') ||
         body.contains('<pre>Cannot POST') ||
         body.contains('<pre>Cannot PATCH') ||
@@ -610,7 +623,7 @@ class ApiStorageService {
       } catch (_) {}
       throw DuplicateAttendanceException(msg);
     }
-    if (r.statusCode >= 400) throw Exception(r.body);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: 'attendance');
     if (r.body.isEmpty) return 0;
     final decoded = jsonDecode(r.body);
     return decoded is int ? decoded : int.tryParse(decoded.toString()) ?? 0;

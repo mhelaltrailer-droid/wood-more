@@ -154,7 +154,10 @@ class _HomeWithRouteRestoreState extends State<_HomeWithRouteRestore> {
           if (!mounted) return;
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (_) => HomeScreen(currentUser: widget.user),
+              builder: (_) => SystemLockWatch(
+                user: widget.user,
+                child: HomeScreen(currentUser: widget.user),
+              ),
             ),
           );
         }
