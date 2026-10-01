@@ -9,6 +9,8 @@ import '../models/project_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
+import '../utils/invoices_owner_new_pdf.dart';
+import 'invoices_owner_new_pdf_screen.dart';
 
 class InvoicesOwnerFormScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -180,6 +182,54 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
     setState(() => _attachments.addAll(added));
   }
 
+  Future<void> _openNewPdf() async {
+    if (_attachments.length >= invoicesOwnerMaxAttachments) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('الحد الأقصى $invoicesOwnerMaxAttachments ملفات'),
+        ),
+      );
+      return;
+    }
+    final result = await Navigator.of(context).push<InvoicesOwnerNewPdfResult>(
+      MaterialPageRoute(builder: (_) => const InvoicesOwnerNewPdfScreen()),
+    );
+    if (result == null || !mounted) return;
+    if (result.sizeBytes > invoicesOwnerMaxAttachmentBytes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('الملف أكبر من 5 ميجا'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    if (_attachments.length >= invoicesOwnerMaxAttachments) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('الحد الأقصى $invoicesOwnerMaxAttachments ملفات'),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _attachments.add(
+        _PendingAttachment(
+          fileName: result.fileName,
+          mimeType: 'application/pdf',
+          dataBase64: base64Encode(result.bytes),
+          sizeBytes: result.sizeBytes,
+        ),
+      );
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('تمت إضافة ${result.fileName} كمرفق'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
   List<Map<String, dynamic>> _attachmentsPayload() {
     return _attachments
         .map(
@@ -337,6 +387,11 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
                   onPressed: _pickFiles,
                   icon: const Icon(Icons.attach_file),
                   label: const Text('إضافة'),
+                ),
+                TextButton.icon(
+                  onPressed: _openNewPdf,
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: const Text('New-PDF'),
                 ),
               ],
             ),

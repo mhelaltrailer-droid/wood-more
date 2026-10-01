@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>يحتاج التطبيق للموقع لتسجيل حضور وانصراف المهندسين</string>
+	<key>NSCameraUsageDescription</key>
+	<string>يحتاج التطبيق للكاميرا لالتقاط صور لإنشاء PDF Progress</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>يحتاج التطبيق للصور لإنشاء PDF Progress من المعرض</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
