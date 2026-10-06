@@ -66,17 +66,30 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
         requesterEmail: widget.currentUser.email,
       );
       if (!mounted) return;
+      final filteredUsers = users
+          .where((u) => u.id != widget.currentUser.id)
+          .where(
+            (u) => !ReportsSysModel.isHiddenFromAssigneeList(
+              email: u.email,
+              name: u.name,
+            ),
+          )
+          .toList();
+      int? preselectedAssignee;
+      if (report.canCreatorResendPendingBy(widget.currentUser.id) ||
+          (report.canEditBy(widget.currentUser.id) &&
+              report.status == ReportsSysModel.statusReturnedForEdit)) {
+        final currentId = report.currentAssigneeUserId;
+        if (currentId != null &&
+            currentId != widget.currentUser.id &&
+            filteredUsers.any((u) => u.id == currentId)) {
+          preselectedAssignee = currentId;
+        }
+      }
       setState(() {
         _report = report;
-        _users = users
-            .where((u) => u.id != widget.currentUser.id)
-            .where(
-              (u) => !ReportsSysModel.isHiddenFromAssigneeList(
-                email: u.email,
-                name: u.name,
-              ),
-            )
-            .toList();
+        _users = filteredUsers;
+        _forwardToUserId = preselectedAssignee ?? _forwardToUserId;
         _loading = false;
       });
     } catch (e) {
@@ -146,6 +159,7 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
     );
     if (changed == true) {
       await _load();
+      // نموذج التعديل يعيد الإرسال مباشرة — نغلق التفاصيل بعد النجاح.
       if (mounted) Navigator.of(context).pop(true);
     }
   }
@@ -319,9 +333,15 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
 
     final report = _report!;
     final canEdit = report.canEditBy(widget.currentUser.id);
+    final canCreatorResendPending =
+        report.canCreatorResendPendingBy(widget.currentUser.id);
+    final canResubmitAfterReturn = canEdit &&
+        report.status == ReportsSysModel.statusReturnedForEdit;
     final canAct = report.canActBy(widget.currentUser.id);
     final canArchive = widget.currentUser.canArchiveReportsSys;
     final canRelaunch = report.isTerminal;
+    final showAssigneePicker =
+        canAct || canResubmitAfterReturn || canCreatorResendPending;
 
     return Scaffold(
       appBar: AppBar(
@@ -422,17 +442,18 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
           ],
           const SizedBox(height: 12),
           ReportsSysTimeline(actions: report.actions),
-          if (canAct || (canEdit && report.status == ReportsSysModel.statusReturnedForEdit)) ...[
+          if (showAssigneePicker) ...[
             const SizedBox(height: 16),
-            TextField(
-              controller: _commentController,
-              decoration: const InputDecoration(
-                labelText: 'ملاحظة / سبب (إلزامي عند الرفض أو الإرجاع)',
-                border: OutlineInputBorder(),
+            if (canAct)
+              TextField(
+                controller: _commentController,
+                decoration: const InputDecoration(
+                  labelText: 'ملاحظة / سبب (إلزامي عند الرفض أو الإرجاع)',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 3,
               ),
-              maxLines: 3,
-            ),
-            const SizedBox(height: 12),
+            if (canAct) const SizedBox(height: 12),
             DropdownButtonFormField<int>(
               value: _forwardToUserId,
               decoration: const InputDecoration(
@@ -483,7 +504,7 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
               ],
             ),
           ],
-          if (canEdit && report.status == ReportsSysModel.statusReturnedForEdit) ...[
+          if (canResubmitAfterReturn || canCreatorResendPending) ...[
             const SizedBox(height: 16),
             Row(
               children: [
@@ -501,7 +522,11 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
                       foregroundColor: Colors.white,
                     ),
                     onPressed: _acting ? null : _submitAfterEdit,
-                    child: const Text('إعادة الإرسال'),
+                    child: Text(
+                      canCreatorResendPending
+                          ? 'حفظ وإعادة الإرسال'
+                          : 'إعادة الإرسال',
+                    ),
                   ),
                 ),
               ],

@@ -314,6 +314,10 @@ class UserModel {
 
   bool get canViewReportsSysAllTab => canViewReportsSysFullAccess;
 
+  /// تبويب سجل حركات Reports-SYS — Operation Manager + المسؤول الأساسي فقط.
+  bool get canViewReportsSysActivityLog =>
+      isOperationManager || isPrimaryAppAdmin;
+
   /// أيقونة Shop-drawing في الشاشة الرئيسية.
   bool get canAccessShopDrawingHomeIcon =>
       isTechnicalOffice ||

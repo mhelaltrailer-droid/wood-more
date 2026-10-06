@@ -2574,6 +2574,27 @@ class ApiStorageService {
         .toList();
   }
 
+  Future<List<ReportsSysActivityLogEntry>> listReportsSysActivityLog({
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('reports-sys/inbox')).replace(
+      queryParameters: {
+        'userId': userId.toString(),
+        'tab': 'activity',
+      },
+    );
+    final r = await http.get(uri, headers: _reqHeaders());
+    if (r.statusCode >= 400) throw Exception(r.body);
+    final list = jsonDecode(r.body) as List<dynamic>;
+    return list
+        .map(
+          (e) => ReportsSysActivityLogEntry.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
   Future<ReportsSysModel> getReportsSysDetail(int reportId) async {
     final uri = Uri.parse(_path('reports-sys/$reportId'));
     final r = await http.get(uri, headers: _reqHeaders());

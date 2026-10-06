@@ -103,25 +103,65 @@ class ReportsSysActionModel {
     );
   }
 
+  static const String actionCreated = 'created';
+  static const String actionSubmit = 'submit';
+  static const String actionResubmit = 'resubmit';
+  static const String actionCreatorEditResubmit = 'creator_edit_resubmit';
+  static const String actionForward = 'forward';
+  static const String actionReturn = 'return';
+  static const String actionReject = 'reject';
+  static const String actionArchive = 'archive';
+
+  static const Set<String> outboundActions = {
+    actionSubmit,
+    actionResubmit,
+    actionCreatorEditResubmit,
+  };
+
+  static const Set<String> reviewerActions = {
+    actionForward,
+    actionReturn,
+    actionReject,
+    actionArchive,
+  };
+
   String get actionLabelAr {
     switch (action) {
-      case 'created':
+      case actionCreated:
         return 'إنشاء';
-      case 'submit':
+      case actionSubmit:
         return 'إرسال للمراجعة';
-      case 'resubmit':
+      case actionResubmit:
         return 'إعادة إرسال بعد التعديل';
-      case 'forward':
+      case actionCreatorEditResubmit:
+        return 'قام بتعديل التقرير وأعاد إرساله';
+      case actionForward:
         return 'توجيه بعد الاطلاع';
-      case 'return':
+      case actionReturn:
         return 'إرجاع للتعديل';
-      case 'reject':
+      case actionReject:
         return 'رفض';
-      case 'archive':
+      case actionArchive:
         return 'أرشفة';
       default:
         return action;
     }
+  }
+
+  /// جملة العرض الكاملة للحركة (للخط الزمني وسجل الحركات).
+  String get displayPhraseAr {
+    if (action == actionCreatorEditResubmit) {
+      final to = (toUserName ?? '').trim();
+      if (to.isEmpty) {
+        return '$actorUserName قام بتعديل التقرير وأعاد إرساله';
+      }
+      return '$actorUserName قام بتعديل التقرير وأعاد إرساله لـ $to';
+    }
+    final toLabel =
+        toUserName != null && toUserName!.trim().isNotEmpty
+            ? ' → ${toUserName!.trim()}'
+            : '';
+    return '$actorUserName: $actionLabelAr$toLabel';
   }
 }
 
@@ -306,10 +346,40 @@ class ReportsSysModel {
     }
   }
 
+  /// هل اتخذ المرسل إليه إجراءً بعد آخر إرسال/إعادة إرسال؟
+  bool get hasAssigneeActedAfterLastSend {
+    var lastSendIdx = -1;
+    for (var i = actions.length - 1; i >= 0; i--) {
+      if (ReportsSysActionModel.outboundActions.contains(actions[i].action)) {
+        lastSendIdx = i;
+        break;
+      }
+    }
+    if (lastSendIdx < 0) return true;
+    for (var i = lastSendIdx + 1; i < actions.length; i++) {
+      if (ReportsSysActionModel.reviewerActions.contains(actions[i].action)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool canEditBy(int userId) {
+    if (userId != createdByUserId) return false;
+    if (status == statusDraft || status == statusReturnedForEdit) {
+      return currentAssigneeUserId == userId;
+    }
+    if (status == statusPendingReview) {
+      return !hasAssigneeActedAfterLastSend;
+    }
+    return false;
+  }
+
+  /// إعادة إرسال بعد تعديل المنشئ بينما التقرير بانتظار المراجعة.
+  bool canCreatorResendPendingBy(int userId) {
     return userId == createdByUserId &&
-        (status == statusDraft || status == statusReturnedForEdit) &&
-        currentAssigneeUserId == userId;
+        status == statusPendingReview &&
+        !hasAssigneeActedAfterLastSend;
   }
 
   bool canActBy(int userId) {
@@ -317,4 +387,39 @@ class ReportsSysModel {
   }
 
   bool get isTerminal => status == statusArchived || status == statusRejected;
+}
+
+/// صف في تبويب سجل حركات Reports-SYS.
+class ReportsSysActivityLogEntry {
+  final int id;
+  final int reportId;
+  final String reportName;
+  final String reportType;
+  final String projectName;
+  final ReportsSysActionModel action;
+
+  const ReportsSysActivityLogEntry({
+    required this.id,
+    required this.reportId,
+    required this.reportName,
+    required this.reportType,
+    required this.projectName,
+    required this.action,
+  });
+
+  factory ReportsSysActivityLogEntry.fromMap(Map<String, dynamic> map) {
+    int asInt(dynamic v) => int.tryParse(v?.toString() ?? '') ?? 0;
+    return ReportsSysActivityLogEntry(
+      id: asInt(map['id']),
+      reportId: asInt(map['report_id'] ?? map['reportId']),
+      reportName: (map['report_name'] ?? map['reportName'] ?? '').toString(),
+      reportType: (map['report_type'] ?? map['reportType'] ?? '').toString(),
+      projectName: (map['project_name'] ?? map['projectName'] ?? '').toString(),
+      action: ReportsSysActionModel.fromMap({
+        ...map,
+        'id': asInt(map['id']),
+        'actor_user_id': asInt(map['actor_user_id'] ?? map['actorUserId']),
+      }),
+    );
+  }
 }

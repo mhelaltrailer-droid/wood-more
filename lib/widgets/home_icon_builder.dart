@@ -532,22 +532,31 @@ class HomeIconBuilder {
     }
   }
 
+  /// يوم الجمعة إجازة (أسبوع العمل سبت–خميس): لا يُشترط تسجيل الحضور.
+  static bool attendanceRequiredToOpenIcons([DateTime? now]) {
+    final d = now ?? DateTime.now();
+    return d.weekday != DateTime.friday;
+  }
+
   static Future<void> _openAfterAttendanceCheck({
     required BuildContext context,
     required UserModel user,
     required String routeName,
     required Widget screen,
   }) async {
-    final db = getStorage();
     final today = DateTime.now();
-    final attendance = await db.getAttendanceForUserOnDate(user.id, today);
-    if (!context.mounted) return;
-    if (attendance.checkIn == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يجب تسجيل الحضور اولا')),
-      );
-      return;
+    if (attendanceRequiredToOpenIcons(today)) {
+      final db = getStorage();
+      final attendance = await db.getAttendanceForUserOnDate(user.id, today);
+      if (!context.mounted) return;
+      if (attendance.checkIn == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('يجب تسجيل الحضور اولا')),
+        );
+        return;
+      }
     }
+    if (!context.mounted) return;
     await pushAndSaveRoute(context, routeName, screen);
   }
 

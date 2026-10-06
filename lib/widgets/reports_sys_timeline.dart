@@ -26,9 +26,9 @@ class ReportsSysTimeline extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             ...actions.map((a) {
-              final toLabel = a.toUserName != null && a.toUserName!.isNotEmpty
-                  ? ' → ${a.toUserName}'
-                  : '';
+              final hideComment = a.action ==
+                      ReportsSysActionModel.actionCreatorEditResubmit &&
+                  (a.comment ?? '').trim() == a.displayPhraseAr.trim();
               return Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Row(
@@ -45,10 +45,12 @@ class ReportsSysTimeline extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '${a.actorUserName}: ${a.actionLabelAr}$toLabel',
+                            a.displayPhraseAr,
                             style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
-                          if (a.comment != null && a.comment!.trim().isNotEmpty)
+                          if (!hideComment &&
+                              a.comment != null &&
+                              a.comment!.trim().isNotEmpty)
                             Text(
                               a.comment!,
                               style: TextStyle(color: Colors.grey.shade700),

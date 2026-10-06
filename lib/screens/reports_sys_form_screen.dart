@@ -332,9 +332,17 @@ class _ReportsSysFormScreenState extends State<ReportsSysFormScreen> {
 
       if (!mounted) return;
       Navigator.of(context).pop(true);
+      final wasPendingEdit = widget.existing?.status ==
+          ReportsSysModel.statusPendingReview;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(andSubmit ? 'تم إرسال التقرير' : 'تم حفظ المسودة'),
+          content: Text(
+            andSubmit
+                ? (wasPendingEdit
+                    ? 'تم تعديل التقرير وإعادة إرساله'
+                    : 'تم إرسال التقرير')
+                : 'تم حفظ المسودة',
+          ),
         ),
       );
     } catch (e) {
@@ -502,7 +510,13 @@ class _ReportsSysFormScreenState extends State<ReportsSysFormScreen> {
                           color: Colors.white,
                         ),
                       )
-                    : const Text('إرسال للتوجيه'),
+                    : Text(
+                        isEdit &&
+                                widget.existing!.status ==
+                                    ReportsSysModel.statusPendingReview
+                            ? 'حفظ وإعادة الإرسال'
+                            : 'إرسال للتوجيه',
+                      ),
               ),
             ),
           ],

@@ -553,6 +553,36 @@ async function reportsSysInsertAction(pool, fields) {
   return now;
 }
 
+function reportsSysAssigneeActedAfterLastSend(actions) {
+  const list = Array.isArray(actions) ? actions : [];
+  const outbound = new Set(['submit', 'resubmit', 'creator_edit_resubmit']);
+  const reviewer = new Set(['forward', 'return', 'reject', 'archive']);
+  let lastSend = -1;
+  for (let i = 0; i < list.length; i++) {
+    if (outbound.has(String(list[i].action || ''))) lastSend = i;
+  }
+  if (lastSend < 0) return true;
+  for (let i = lastSend + 1; i < list.length; i++) {
+    if (reviewer.has(String(list[i].action || ''))) return true;
+  }
+  return false;
+}
+
+async function reportsSysLoadActions(pool, reportId) {
+  const act = await pool.query(
+    `SELECT action FROM reports_sys_actions WHERE report_id = $1 ORDER BY created_at ASC, id ASC`,
+    [reportId],
+  );
+  return act.rows;
+}
+
+function reportsSysCanViewActivityLog(role, email) {
+  const r = String(role || '').trim();
+  const e = String(email || '').trim().toLowerCase();
+  return r === 'operation_manager'
+    || (r === 'app_admin' && e === REPORTS_SYS_PRIMARY_ADMIN_EMAIL.toLowerCase());
+}
+
 function reportsSysHasFullAccess(role) {
   const r = String(role || '').trim();
   return r === 'app_admin'
@@ -1292,6 +1322,18 @@ function _resolveActivityAction(method, path, body) {
   if (p.startsWith('/projects') && m === 'PUT') return { type: 'project_update', label: 'تعديل مشروع' };
   if (p.startsWith('/projects') && m === 'DELETE') return { type: 'project_delete', label: 'حذف مشروع' };
   if (p === '/activity-logs' && m === 'GET') return { type: 'activity_log_view', label: 'عرض سجل الحركة' };
+  if (p.startsWith('/reports-sys') && m === 'POST' && /\/submit$/.test(p)) {
+    return { type: 'reports_sys_submit', label: 'إرسال/إعادة إرسال تقرير Reports-SYS' };
+  }
+  if (p.startsWith('/reports-sys') && m === 'PUT') {
+    return { type: 'reports_sys_update', label: 'تعديل تقرير Reports-SYS' };
+  }
+  if (p.startsWith('/reports-sys') && m === 'POST' && /\/respond$/.test(p)) {
+    return { type: 'reports_sys_respond', label: 'إجراء على تقرير Reports-SYS' };
+  }
+  if (p === '/reports-sys' && m === 'POST') {
+    return { type: 'reports_sys_create', label: 'إنشاء تقرير Reports-SYS' };
+  }
   return { type: 'other', label: 'حركة أخرى' };
 }
 
@@ -5552,6 +5594,36 @@ app.get('/reports-sys/inbox', async (req, res) => {
       }
       sql = `SELECT * FROM reports_sys ORDER BY updated_at DESC`;
       params = [];
+    } else if (tab === 'activity') {
+      const actor = await pool.query('SELECT role, email FROM users WHERE id = $1', [userId]);
+      if (actor.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+      if (!reportsSysCanViewActivityLog(actor.rows[0].role, actor.rows[0].email)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const act = await pool.query(
+        `SELECT a.id, a.report_id, a.actor_user_id, a.actor_user_name, a.action, a.comment,
+                a.from_user_id, a.to_user_id, a.to_user_name, a.created_at,
+                r.report_name, r.report_type, r.project_name
+         FROM reports_sys_actions a
+         INNER JOIN reports_sys r ON r.id = a.report_id
+         ORDER BY a.created_at DESC, a.id DESC
+         LIMIT 3000`,
+      );
+      return res.json(act.rows.map((row) => ({
+        id: parseInt(row.id, 10),
+        report_id: parseInt(row.report_id, 10),
+        report_name: row.report_name || '',
+        report_type: row.report_type || '',
+        project_name: row.project_name || '',
+        actor_user_id: parseInt(row.actor_user_id, 10),
+        actor_user_name: row.actor_user_name || '',
+        action: row.action || '',
+        comment: row.comment || null,
+        from_user_id: row.from_user_id != null ? parseInt(row.from_user_id, 10) : null,
+        to_user_id: row.to_user_id != null ? parseInt(row.to_user_id, 10) : null,
+        to_user_name: row.to_user_name || null,
+        created_at: row.created_at,
+      })));
     } else {
       return res.status(400).json({ error: 'invalid tab' });
     }
@@ -5727,10 +5799,16 @@ app.put('/reports-sys/:id', async (req, res) => {
       : null;
 
     if (userId !== creatorId) return res.status(403).json({ error: 'forbidden' });
-    if (!(status === 'draft' || status === 'returned_for_edit')) {
+    if (status === 'pending_review') {
+      const actions = await reportsSysLoadActions(pool, id);
+      if (reportsSysAssigneeActedAfterLastSend(actions)) {
+        return res.status(400).json({ error: 'not_editable' });
+      }
+    } else if (status === 'draft' || status === 'returned_for_edit') {
+      if (assigneeId !== userId) return res.status(403).json({ error: 'not_current_holder' });
+    } else {
       return res.status(400).json({ error: 'not_editable' });
     }
-    if (assigneeId !== userId) return res.status(403).json({ error: 'not_current_holder' });
 
     const reportName = String(b.reportName ?? b.report_name ?? row.report_name).trim();
     const reportType = String(b.reportType ?? b.report_type ?? row.report_type).trim();
@@ -5842,10 +5920,21 @@ app.post('/reports-sys/:id/submit', async (req, res) => {
       ? parseInt(row.current_assignee_user_id, 10)
       : null;
 
-    if (userId !== creatorId || assigneeId !== userId) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-    if (!(status === 'draft' || status === 'returned_for_edit')) {
+    let actionType;
+    const prevAssigneeId = assigneeId;
+    if (status === 'pending_review') {
+      if (userId !== creatorId) return res.status(403).json({ error: 'forbidden' });
+      const actions = await reportsSysLoadActions(pool, id);
+      if (reportsSysAssigneeActedAfterLastSend(actions)) {
+        return res.status(400).json({ error: 'invalid_status' });
+      }
+      actionType = 'creator_edit_resubmit';
+    } else if (status === 'draft' || status === 'returned_for_edit') {
+      if (userId !== creatorId || assigneeId !== userId) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      actionType = status === 'returned_for_edit' ? 'resubmit' : 'submit';
+    } else {
       return res.status(400).json({ error: 'invalid_status' });
     }
 
@@ -5854,36 +5943,62 @@ app.post('/reports-sys/:id/submit', async (req, res) => {
     const actor = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
     const actorName = actor.rows.length ? actor.rows[0].name : '';
     const now = new Date().toISOString();
-    const actionType = status === 'returned_for_edit' ? 'resubmit' : 'submit';
+    const toUserName = toUser.rows[0].name;
+    const actionComment = actionType === 'creator_edit_resubmit'
+      ? (`${actorName} قام بتعديل التقرير وأعاد إرساله لـ ${toUserName}`
+        + (comment ? `\n${comment}` : ''))
+      : (comment || null);
 
     await pool.query(
       `UPDATE reports_sys SET status='pending_review', current_assignee_user_id=$1,
        current_assignee_user_name=$2, updated_at=$3 WHERE id=$4`,
-      [toUserId, toUser.rows[0].name, now, id],
+      [toUserId, toUserName, now, id],
     );
     await reportsSysInsertAction(pool, {
       reportId: id,
       actorUserId: userId,
       actorUserName: actorName,
       action: actionType,
-      comment: comment || null,
+      comment: actionComment,
       fromUserId: userId,
       toUserId,
-      toUserName: toUser.rows[0].name,
+      toUserName,
     });
 
     const reportName = row.report_name;
     await reportsSysNotifyUser(pool, toUserId, {
-      title: 'Reports-SYS — تقرير بانتظار مراجعتك',
-      body: `أرسل إليك ${actorName} التقرير «${reportName}» للاطلاع والتوجيه`,
+      title: actionType === 'creator_edit_resubmit'
+        ? 'Reports-SYS — إعادة إرسال بعد تعديل'
+        : 'Reports-SYS — تقرير بانتظار مراجعتك',
+      body: actionType === 'creator_edit_resubmit'
+        ? `${actorName} قام بتعديل التقرير «${reportName}» وأعاد إرساله إليك`
+        : `أرسل إليك ${actorName} التقرير «${reportName}» للاطلاع والتوجيه`,
       eventType: `reports_sys_${id}`,
       actorUserId: userId,
       actorUserName: actorName,
       reportName,
     });
+    if (
+      actionType === 'creator_edit_resubmit'
+      && prevAssigneeId != null
+      && prevAssigneeId !== toUserId
+    ) {
+      await reportsSysNotifyUser(pool, prevAssigneeId, {
+        title: 'Reports-SYS — سحب تقرير من حوزتك',
+        body: `${actorName} عدّل التقرير «${reportName}» وأعاد إرساله إلى ${toUserName}`,
+        eventType: `reports_sys_${id}`,
+        actorUserId: userId,
+        actorUserName: actorName,
+        reportName,
+      });
+    }
     await reportsSysNotifyPrimaryAdmin(pool, {
-      title: 'Reports-SYS — إرسال تقرير',
-      body: `${actorName} أرسل التقرير «${reportName}» إلى ${toUser.rows[0].name}`,
+      title: actionType === 'creator_edit_resubmit'
+        ? 'Reports-SYS — تعديل وإعادة إرسال'
+        : 'Reports-SYS — إرسال تقرير',
+      body: actionType === 'creator_edit_resubmit'
+        ? `${actorName} قام بتعديل التقرير «${reportName}» وأعاد إرساله لـ ${toUserName}`
+        : `${actorName} أرسل التقرير «${reportName}» إلى ${toUserName}`,
       eventType: `reports_sys_${id}`,
       actorUserId: userId,
       actorUserName: actorName,

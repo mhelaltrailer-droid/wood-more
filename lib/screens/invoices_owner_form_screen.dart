@@ -309,6 +309,7 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
   @override
   Widget build(BuildContext context) {
     final customProjectName = _customProjectNameController.text.trim();
+    final returnReason = widget.existing?.returnReason?.trim() ?? '';
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEdit ? 'تعديل Progress' : 'New Progress +'),
@@ -320,6 +321,26 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (_isEdit && returnReason.isNotEmpty) ...[
+              Card(
+                color: Colors.orange.shade50,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'سبب الإعادة',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(returnReason),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             if (_loadingProjects)
               const Center(child: CircularProgressIndicator())
             else if (_projectsError != null)

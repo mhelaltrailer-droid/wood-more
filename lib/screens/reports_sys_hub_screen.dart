@@ -30,6 +30,7 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
   bool _loading = true;
   String? _error;
   final Map<String, List<ReportsSysModel>> _lists = {};
+  List<ReportsSysActivityLogEntry> _activity = const [];
   String _archiveSearch = '';
   String _rejectedSearch = '';
 
@@ -45,6 +46,9 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
     tabs.add(_TabDef('rejected', 'المرفوضة'));
     if (widget.currentUser.canViewReportsSysAllTab) {
       tabs.add(_TabDef('all', 'الكل'));
+    }
+    if (widget.currentUser.canViewReportsSysActivityLog) {
+      tabs.add(_TabDef('activity', 'سجل الحركات'));
     }
     return tabs;
   }
@@ -136,6 +140,12 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
     if (_storage is! ApiStorageService) {
       throw Exception('Reports-SYS يتطلب اتصال API');
     }
+    if (tab == 'activity') {
+      _activity = await _storage.listReportsSysActivityLog(
+        userId: widget.currentUser.id,
+      );
+      return;
+    }
     final list = await _storage.listReportsSysInbox(
       userId: widget.currentUser.id,
       tab: tab,
@@ -160,6 +170,18 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
         builder: (_) => ReportsSysDetailScreen(
           currentUser: widget.currentUser,
           reportId: report.id,
+        ),
+      ),
+    );
+    if (changed == true) await _loadAll();
+  }
+
+  Future<void> _openReportById(int reportId) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ReportsSysDetailScreen(
+          currentUser: widget.currentUser,
+          reportId: reportId,
         ),
       ),
     );
@@ -243,6 +265,9 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
                     : TabBarView(
                         controller: _tabController,
                         children: tabs.map((t) {
+                          if (t.key == 'activity') {
+                            return _buildActivityList(fmt: fmt);
+                          }
                           final items = _lists[t.key] ?? const [];
                           return _buildTabList(
                             items: items,
@@ -256,6 +281,62 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
                       ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildActivityList({required DateFormat fmt}) {
+    if (_activity.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _loadAll,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(height: 120),
+            Center(child: Text('لا توجد حركات بعد')),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _loadAll,
+      child: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: _activity.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final entry = _activity[index];
+          final a = entry.action;
+          return Card(
+            child: ListTile(
+              onTap: () => _openReportById(entry.reportId),
+              title: Text(
+                a.displayPhraseAr,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('التقرير: ${entry.reportName}'),
+                  if (entry.reportType.trim().isNotEmpty) Text(entry.reportType),
+                  if (entry.projectName.trim().isNotEmpty)
+                    Text('المشروع: ${entry.projectName}'),
+                  if (a.comment != null &&
+                      a.comment!.trim().isNotEmpty &&
+                      a.comment!.trim() != a.displayPhraseAr.trim())
+                    Text(
+                      a.comment!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: Colors.grey.shade700),
+                    ),
+                  Text(fmt.format(a.createdAt)),
+                ],
+              ),
+              trailing: const Icon(Icons.chevron_left),
+            ),
+          );
+        },
       ),
     );
   }
