@@ -423,9 +423,9 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
               maxLines: 3,
             ),
             const SizedBox(height: 16),
-            Text(
-              'المرفقات (PDF / Excel) — حد ${invoicesOwnerMaxAttachmentSizeLabel()} لكل ملف',
-              style: const TextStyle(fontWeight: FontWeight.w600),
+            const Text(
+              'المرفقات (PDF / Excel)',
+              style: TextStyle(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             Wrap(

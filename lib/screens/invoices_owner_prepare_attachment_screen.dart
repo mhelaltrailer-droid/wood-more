@@ -338,8 +338,7 @@ class _InvoicesOwnerPrepareAttachmentScreenState
           ),
           const SizedBox(height: 4),
           Text(
-            'يمكن دمج أكثر من ملف وترتيب الصفحات. الحد الأقصى للرفع: '
-            '${invoicesOwnerMaxAttachmentSizeLabel()}.',
+            'يمكن دمج أكثر من ملف وترتيب الصفحات.',
             style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
           ),
           const SizedBox(height: 8),
