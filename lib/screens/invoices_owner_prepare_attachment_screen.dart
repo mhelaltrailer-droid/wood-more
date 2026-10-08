@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
@@ -41,11 +42,25 @@ class _InvoicesOwnerPrepareAttachmentScreenState
   Uint8List? _pdfBytes;
   String? _pdfName;
   InvoicesOwnerPrepareQuality? _usedQuality;
+  DateTime _lastProgressUi = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void dispose() {
     _nameController.dispose();
     super.dispose();
+  }
+
+  void _reportProgress(String message) {
+    if (!mounted) return;
+    final now = DateTime.now();
+    // تحديث الواجهة كل ~250ms لتجنب إعادة البناء الثقيلة كل صفحة.
+    if (now.difference(_lastProgressUi).inMilliseconds < 250 &&
+        _progressMessage != null) {
+      _progressMessage = message;
+      return;
+    }
+    _lastProgressUi = now;
+    setState(() => _progressMessage = message);
   }
 
   void _clearResult() {
@@ -92,6 +107,21 @@ class _InvoicesOwnerPrepareAttachmentScreenState
         _items.addAll(added);
         _clearResult();
       });
+      final heavyPdf = added.any(
+        (e) => e.isPdf && e.bytes.length >= 12 * 1024 * 1024,
+      );
+      if (heavyPdf && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              kIsWeb
+                  ? 'ملف PDF كبير: التجهيز قد يستغرق وقتاً. للملفات متعددة الصفحات يُفضّل الوضع «إداري»، ولا تغلق التبويب.'
+                  : 'ملف PDF كبير: التجهيز قد يستغرق وقتاً. للملفات متعددة الصفحات يُفضّل الوضع «إداري».',
+            ),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -146,10 +176,7 @@ class _InvoicesOwnerPrepareAttachmentScreenState
         sources: sources,
         maxBytes: invoicesOwnerMaxAttachmentBytes,
         preferred: _quality,
-        onProgress: (p) {
-          if (!mounted) return;
-          setState(() => _progressMessage = p.message);
-        },
+        onProgress: (p) => _reportProgress(p.message),
       );
       final name = sanitizePdfFileName(_nameController.text);
       if (!mounted) return;
@@ -410,13 +437,6 @@ class _InvoicesOwnerPrepareAttachmentScreenState
                       _quality = s.first;
                       _clearResult();
                     }),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _quality == InvoicesOwnerPrepareQuality.engineering
-                ? 'مناسب للرسومات الهندسية — ضغط خفيف مع الحفاظ على الوضوح.'
-                : 'ضغط أقوى للمستندات الإدارية عندما يكون الحجم أكبر من اللازم.',
-            style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
           ),
           if (_canAttachAsIs) ...[
             const SizedBox(height: 16),

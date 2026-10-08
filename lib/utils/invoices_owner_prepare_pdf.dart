@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show compute, kIsWeb;
 import 'package:image/image.dart' as img;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -53,13 +54,22 @@ class _QualityProfile {
 }
 
 _QualityProfile _profileFor(InvoicesOwnerPrepareQuality quality) {
+  // على الويب الضغط يعمل على خيط الواجهة؛ ملف متعدد الصفحات بـ 200 DPI
+  // يجمّد المتصفح (Page Unresponsive). نخفّف الملف الشخصي قليلاً هناك.
   switch (quality) {
     case InvoicesOwnerPrepareQuality.engineering:
-      return const _QualityProfile(dpi: 200, jpegQuality: 90, maxEdge: 3000);
+      return kIsWeb
+          ? const _QualityProfile(dpi: 160, jpegQuality: 85, maxEdge: 2200)
+          : const _QualityProfile(dpi: 200, jpegQuality: 90, maxEdge: 3000);
     case InvoicesOwnerPrepareQuality.standard:
-      return const _QualityProfile(dpi: 140, jpegQuality: 75, maxEdge: 1600);
+      return kIsWeb
+          ? const _QualityProfile(dpi: 120, jpegQuality: 70, maxEdge: 1400)
+          : const _QualityProfile(dpi: 140, jpegQuality: 75, maxEdge: 1600);
   }
 }
+
+/// يترك خيط الأحداث يتنفس حتى لا تظهر «Page Unresponsive» في المتصفح.
+Future<void> _yieldToUi() => Future<void>.delayed(Duration.zero);
 
 bool invoicesOwnerPrepareLooksLikePdf(String name, String? mime) {
   final n = name.toLowerCase();
@@ -79,17 +89,19 @@ bool invoicesOwnerPrepareLooksLikeImage(String name, String? mime) {
       n.endsWith('.bmp');
 }
 
-Uint8List _encodeRasterJpeg(
-  PdfRaster raster, {
-  required int jpegQuality,
-  required int maxEdge,
-}) {
+/// Top-level لـ [compute]: Map حتى تُرسل بأمان عبر isolate.
+Uint8List _encodeRasterJpegJob(Map<String, Object> job) {
+  final width = job['width'] as int;
+  final height = job['height'] as int;
+  final pixels = job['pixels'] as Uint8List;
+  final jpegQuality = job['jpegQuality'] as int;
+  final maxEdge = job['maxEdge'] as int;
   var image = img.Image.fromBytes(
-    width: raster.width,
-    height: raster.height,
-    bytes: raster.pixels.buffer,
-    bytesOffset: raster.pixels.offsetInBytes,
-    rowStride: raster.width * 4,
+    width: width,
+    height: height,
+    bytes: pixels.buffer,
+    bytesOffset: pixels.offsetInBytes,
+    rowStride: width * 4,
     order: img.ChannelOrder.rgba,
   );
   final longest = image.width > image.height ? image.width : image.height;
@@ -104,6 +116,30 @@ Uint8List _encodeRasterJpeg(
   return Uint8List.fromList(
     img.encodeJpg(image, quality: jpegQuality.clamp(1, 100)),
   );
+}
+
+Future<Uint8List> _encodeRasterJpegAsync(
+  PdfRaster raster, {
+  required int jpegQuality,
+  required int maxEdge,
+}) async {
+  // نسخة مستقلة من البكسلات حتى لا تُبقى إشارة للـ raster بعد الترميز.
+  final job = <String, Object>{
+    'width': raster.width,
+    'height': raster.height,
+    'pixels': Uint8List.fromList(raster.pixels),
+    'jpegQuality': jpegQuality,
+    'maxEdge': maxEdge,
+  };
+  // على الويب نقل عشرات الميغا لكل صفحة إلى Worker أغلى من الترميز المحلي
+  // مع إتاحة الواجهة؛ على الموبايل/سطح المكتب نستخدم isolate.
+  if (kIsWeb) {
+    await _yieldToUi();
+    final out = _encodeRasterJpegJob(job);
+    await _yieldToUi();
+    return out;
+  }
+  return compute(_encodeRasterJpegJob, job);
 }
 
 Uint8List _prepareImageBytes(
@@ -145,13 +181,6 @@ Future<List<Uint8List>> _rasterPdfToJpegs(
   var pageIndex = 0;
   await for (final page in Printing.raster(pdfBytes, dpi: profile.dpi)) {
     pageIndex += 1;
-    out.add(
-      _encodeRasterJpeg(
-        page,
-        jpegQuality: profile.jpegQuality,
-        maxEdge: profile.maxEdge,
-      ),
-    );
     onProgress?.call(
       InvoicesOwnerPrepareProgress(
         message: 'معالجة صفحات PDF ($pageIndex)...',
@@ -159,6 +188,15 @@ Future<List<Uint8List>> _rasterPdfToJpegs(
         total: progressTotal + pageIndex,
       ),
     );
+    out.add(
+      await _encodeRasterJpegAsync(
+        page,
+        jpegQuality: profile.jpegQuality,
+        maxEdge: profile.maxEdge,
+      ),
+    );
+    // إتاحة دورية للواجهة بين الصفحات (مهم جداً على Chrome/Web).
+    await _yieldToUi();
   }
   if (out.isEmpty) {
     throw StateError('تعذر قراءة صفحات ملف PDF');
@@ -169,9 +207,22 @@ Future<List<Uint8List>> _rasterPdfToJpegs(
 Future<Uint8List> _buildPdfFromPageImages(
   List<Uint8List> pages, {
   required double dpi,
+  void Function(InvoicesOwnerPrepareProgress progress)? onProgress,
 }) async {
   final doc = pw.Document();
-  for (final jpeg in pages) {
+  final total = pages.length;
+  for (var i = 0; i < pages.length; i++) {
+    final jpeg = pages[i];
+    if (i % 3 == 0) {
+      onProgress?.call(
+        InvoicesOwnerPrepareProgress(
+          message: 'إنشاء ملف PDF النهائي (${i + 1}/$total)...',
+          done: i + 1,
+          total: total,
+        ),
+      );
+      await _yieldToUi();
+    }
     final decoded = img.decodeImage(jpeg);
     final image = pw.MemoryImage(jpeg);
     if (decoded != null && decoded.width > 0 && decoded.height > 0) {
@@ -196,6 +247,7 @@ Future<Uint8List> _buildPdfFromPageImages(
       );
     }
   }
+  await _yieldToUi();
   return doc.save();
 }
 
@@ -253,13 +305,17 @@ Future<Uint8List> buildPreparedAttachmentPdf({
   }
 
   onProgress?.call(
-    const InvoicesOwnerPrepareProgress(
-      message: 'إنشاء ملف PDF النهائي...',
-      done: 1,
-      total: 1,
+    InvoicesOwnerPrepareProgress(
+      message: 'إنشاء ملف PDF النهائي (0/${pageImages.length})...',
+      done: 0,
+      total: pageImages.length,
     ),
   );
-  return _buildPdfFromPageImages(pageImages, dpi: profile.dpi);
+  return _buildPdfFromPageImages(
+    pageImages,
+    dpi: profile.dpi,
+    onProgress: onProgress,
+  );
 }
 
 /// يحاول الجودة الهندسية أولاً ثم الإدارية إن تجاوز الحجم الحد.
