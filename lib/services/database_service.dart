@@ -2718,9 +2718,8 @@ class DatabaseService {
       'created_at': (report.createdAt ?? DateTime.now()).toIso8601String(),
       'summary': report.summary,
       'executed_today_summary': report.executedTodaySummary,
-      'expenses_json': report.expenses.isEmpty
-          ? null
-          : jsonEncode(report.expenses.map((e) => e.toJson()).toList()),
+      // مصروفات التقرير المفصل أُلغيت — الصرف عبر expense_statements فقط.
+      'expenses_json': null,
       'attachments_json': report.attachments.isEmpty
           ? null
           : jsonEncode(report.attachments.map((e) => e.toJson()).toList()),
@@ -2738,15 +2737,6 @@ class DatabaseService {
         'phase_id': line.phaseId,
         'workers_count': line.workersCount,
       });
-    }
-    // خصم إجمالي بنود الماليات من رصيد مهندس الموقع (مستخدم كاتب التقرير)
-    double total = 0;
-    for (final e in report.expenses) {
-      total += double.tryParse(e.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
-    }
-    if (total > 0) {
-      final current = await getEngineerBalance(report.userId);
-      await setEngineerBalance(report.userId, current - total);
     }
     await _notifyAppAdminsWorkPlanSaved(db, report: report, isUpdate: false);
     return id as int;
@@ -2775,9 +2765,6 @@ class DatabaseService {
           'supervisor_id': report.supervisorId,
           'summary': report.summary,
           'executed_today_summary': report.executedTodaySummary,
-          'expenses_json': report.expenses.isEmpty
-              ? null
-              : jsonEncode(report.expenses.map((e) => e.toJson()).toList()),
           'attachments_json': report.attachments.isEmpty
               ? null
               : jsonEncode(report.attachments.map((e) => e.toJson()).toList()),
@@ -2803,79 +2790,16 @@ class DatabaseService {
     await _notifyAppAdminsWorkPlanSaved(db, report: report, isUpdate: true);
   }
 
-  /// تحديث بنود الماليات فقط (للتقارير المحفوظة مسبقاً دون صرف) مع تعديل رصيد المهندس بالفرق.
+  /// أُلغي: مصروفات التقرير المفصل لم تعد مدعومة.
   Future<void> patchDetailedReportExpenses({
     required int reportId,
     required int userId,
     required List<ExpenseItem> expenses,
   }) async {
-    final db = await database;
-    final rows = await db.query(
-      'detailed_reports',
-      where: 'id = ?',
-      whereArgs: [reportId],
-      limit: 1,
+    throw Exception(
+      'لم يعد إدخال/تعديل المصروفات عبر التقرير المفصل متاحاً. '
+      'استخدم أيقونة العهدة/المصروفات لإرسال البيان لمدير المشروعات للاعتماد ثم الخصم من الرصيد.',
     );
-    if (rows.isEmpty) {
-      throw Exception('التقرير غير موجود');
-    }
-    final uid = rows.first['user_id'];
-    if (uid != userId) {
-      throw Exception('لا يمكن تعديل تقرير لمستخدم آخر');
-    }
-    double oldTotal = 0;
-    final oldJson = rows.first['expenses_json'] as String?;
-    if (oldJson != null && oldJson.trim().isNotEmpty) {
-      try {
-        final oldList = jsonDecode(oldJson) as List<dynamic>?;
-        if (oldList != null) {
-          for (final e in oldList) {
-            final m = Map<String, dynamic>.from(e as Map);
-            oldTotal +=
-                double.tryParse(
-                  (m['amount'] ?? '').toString().replaceAll(
-                    RegExp(r'[^\d.]'),
-                    '',
-                  ),
-                ) ??
-                0;
-          }
-        }
-      } catch (_) {}
-    }
-    double newTotal = 0;
-    for (final e in expenses) {
-      newTotal +=
-          double.tryParse(e.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
-    }
-    final delta = newTotal - oldTotal;
-    if (delta != 0) {
-      final current = await getEngineerBalance(userId);
-      await setEngineerBalance(userId, current - delta);
-    }
-    await db.update(
-      'detailed_reports',
-      {
-        'expenses_json': expenses.isEmpty
-            ? null
-            : jsonEncode(expenses.map((e) => e.toJson()).toList()),
-      },
-      where: 'id = ?',
-      whereArgs: [reportId],
-    );
-    final userName = rows.first['user_name'] as String? ?? '';
-    final projectName = rows.first['project_name'] as String?;
-    if (await _userRole(db, userId) == 'site_engineer') {
-      await _notifyAppAdmins(
-        db,
-        title: 'تحديث ماليات التقرير',
-        body: 'قام "$userName" بتحديث بنود الصرف في التقرير المفصل #$reportId',
-        eventType: 'detailed_report_expenses_updated',
-        actorUserId: userId,
-        actorUserName: userName,
-        projectName: projectName,
-      );
-    }
   }
 
   /// حذف تقرير مفصّل واسترجاع خصم الماليات من رصيد المهندس إن وُجد

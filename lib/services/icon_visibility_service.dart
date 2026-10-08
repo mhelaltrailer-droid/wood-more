@@ -91,6 +91,11 @@ class IconVisibilityService {
     label: 'Invoices (Owner)',
   );
 
+  static const HomeIconItem contInvoicesIcon = HomeIconItem(
+    id: 'cont_invoices',
+    label: 'Cont-Invoices',
+  );
+
   static const HomeIconItem managerCustodyExpensesIcon = HomeIconItem(
     id: 'manager_custody_expenses',
     label: 'العهد/تقارير المصروفات',
@@ -251,6 +256,7 @@ class IconVisibilityService {
       balancesExpensesIcon,
       meetingsIcon,
       invoicesOwnerIcon,
+      contInvoicesIcon,
     ],
   };
 

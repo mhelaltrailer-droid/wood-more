@@ -11,6 +11,7 @@ import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
 import '../utils/invoices_owner_new_pdf.dart';
 import 'invoices_owner_new_pdf_screen.dart';
+import 'invoices_owner_prepare_attachment_screen.dart';
 
 class InvoicesOwnerFormScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -161,7 +162,9 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
         if (!mounted) continue;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('الملف ${f.name} أكبر من 5 ميجا'),
+            content: Text(
+              'الملف ${f.name} أكبر من ${invoicesOwnerMaxAttachmentSizeLabel()} — استخدم «تجهيز المرفق»',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -195,10 +198,34 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
       MaterialPageRoute(builder: (_) => const InvoicesOwnerNewPdfScreen()),
     );
     if (result == null || !mounted) return;
+    _addPreparedPdf(result);
+  }
+
+  Future<void> _openPrepareAttachment() async {
+    if (_attachments.length >= invoicesOwnerMaxAttachments) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('الحد الأقصى $invoicesOwnerMaxAttachments ملفات'),
+        ),
+      );
+      return;
+    }
+    final result = await Navigator.of(context).push<InvoicesOwnerNewPdfResult>(
+      MaterialPageRoute(
+        builder: (_) => const InvoicesOwnerPrepareAttachmentScreen(),
+      ),
+    );
+    if (result == null || !mounted) return;
+    _addPreparedPdf(result);
+  }
+
+  void _addPreparedPdf(InvoicesOwnerNewPdfResult result) {
     if (result.sizeBytes > invoicesOwnerMaxAttachmentBytes) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('الملف أكبر من 5 ميجا'),
+        SnackBar(
+          content: Text(
+            'الملف أكبر من ${invoicesOwnerMaxAttachmentSizeLabel()}',
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -396,18 +423,24 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
               maxLines: 3,
             ),
             const SizedBox(height: 16),
-            Row(
+            Text(
+              'المرفقات (PDF / Excel) — حد ${invoicesOwnerMaxAttachmentSizeLabel()} لكل ملف',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
               children: [
-                Expanded(
-                  child: Text(
-                    'المرفقات (PDF / Excel)',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
                 TextButton.icon(
                   onPressed: _pickFiles,
                   icon: const Icon(Icons.attach_file),
                   label: const Text('إضافة'),
+                ),
+                TextButton.icon(
+                  onPressed: _openPrepareAttachment,
+                  icon: const Icon(Icons.auto_fix_high),
+                  label: const Text('تجهيز المرفق'),
                 ),
                 TextButton.icon(
                   onPressed: _openNewPdf,
@@ -428,7 +461,7 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
                   dense: true,
                   leading: const Icon(Icons.insert_drive_file_outlined),
                   title: Text(a.fileName),
-                  subtitle: Text('${(a.sizeBytes / 1024).toStringAsFixed(1)} KB'),
+                  subtitle: Text(invoicesOwnerFormatAttachmentSize(a.sizeBytes)),
                   trailing: IconButton(
                     icon: const Icon(Icons.close),
                     onPressed: () => setState(() => _attachments.removeAt(i)),

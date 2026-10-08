@@ -126,7 +126,9 @@ class _InvoicesOwnerNewPdfScreenState extends State<InvoicesOwnerNewPdfScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'حجم الـ PDF ${(bytes.length / (1024 * 1024)).toStringAsFixed(1)} ميجا أكبر من الحد 5 ميجا. قلل عدد الصور أو جودتها.',
+              'حجم الـ PDF ${invoicesOwnerFormatAttachmentSize(bytes.length)} '
+              'أكبر من الحد ${invoicesOwnerMaxAttachmentSizeLabel()}. '
+              'قلل عدد الصور أو جودتها.',
             ),
             backgroundColor: Colors.red,
           ),

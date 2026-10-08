@@ -181,51 +181,16 @@ class _SiteEngineerExpensesReportScreenState
   }
 
   Future<void> _deleteExpense(_ExpenseRowData row) async {
-    final report = _reportsById[row.reportId];
-    if (report == null) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('حذف بند الصرف'),
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
         content: Text(
-          'حذف البند:\n${row.description}\nبمبلغ ${row.amountText}؟',
+          'حذف مصروفات التقرير المفصل لم يعد متاحاً. '
+          'مسار الصرف الوحيد: العهدة/المصروفات مع اعتماد مدير المشروعات.',
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('حذف'),
-          ),
-        ],
+        backgroundColor: Colors.orange,
       ),
     );
-    if (ok != true || !mounted) return;
-
-    setState(() => _loading = true);
-    try {
-      final updated = List<ExpenseItem>.from(report.expenses);
-      if (row.expenseIndex < 0 || row.expenseIndex >= updated.length) {
-        throw Exception('البند غير موجود');
-      }
-      updated.removeAt(row.expenseIndex);
-      await _db.patchDetailedReportExpenses(
-        reportId: row.reportId,
-        userId: row.reportUserId,
-        expenses: updated,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم حذف بند الصرف'), backgroundColor: Colors.green),
-      );
-      await _run();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
-      );
-    }
   }
 
   static Uint8List? _decodeDataUri(String? path) {

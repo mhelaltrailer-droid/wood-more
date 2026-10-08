@@ -210,6 +210,9 @@ class UserModel {
   /// حذف أي حركة من سجل العهد/المصروفات — المسؤول الأساسي فقط.
   bool get canDeleteCustodyLogMovements => isPrimaryAppAdmin;
 
+  /// أيقونة Cont-Invoices — app_admin فقط (مرحلة أولية).
+  bool get canAccessContInvoices => isAdmin;
+
   /// أيقونة Invoices (Owner) — QS، Finance، المكتب الفني، العمليات، Projects Manager، Ah.Amin، والمسؤول الأساسي.
   bool get canAccessInvoicesOwner =>
       isQs ||

@@ -7,7 +7,8 @@ const IO_CREATOR_EMAILS = new Set([
   'qs-user',
   'ali',
 ]);
-const IO_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+/** حد مؤقت حتى Object Storage للمرفقات الكبيرة. */
+const IO_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const IO_MAX_ATTACHMENTS = 4;
 
 const IO_STATUS = {

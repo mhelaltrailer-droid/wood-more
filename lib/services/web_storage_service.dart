@@ -2380,8 +2380,9 @@ class WebStorageService {
     required int userId,
     required List<ExpenseItem> expenses,
   }) async {
-    throw UnimplementedError(
-      'تعديل الماليات يتطلب الاتصال بالخادم. يرجى ضبط config.json.',
+    throw Exception(
+      'لم يعد إدخال/تعديل المصروفات عبر التقرير المفصل متاحاً. '
+      'استخدم أيقونة العهدة/المصروفات لإرسال البيان لمدير المشروعات للاعتماد ثم الخصم من الرصيد.',
     );
   }
 

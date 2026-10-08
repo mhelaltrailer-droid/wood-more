@@ -27,6 +27,10 @@ const {
   ensureMeetingsTables,
   registerMeetingsRoutes,
 } = require('./meetings');
+const {
+  ensureContInvoicesTables,
+  registerContInvoicesRoutes,
+} = require('./cont_invoices');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -1743,6 +1747,7 @@ async function ensureHomeIconsVisibilitySetting() {
         projects_dashboard_plus1: true,
         meetings: true,
         invoices_owner: true,
+        cont_invoices: true,
       },
       document_controller: {
         ir_mir: true,
@@ -4302,8 +4307,8 @@ app.post('/detailed-reports', async (req, res) => {
       }
     }
 
-    const expensesJson = (b.expenses != null && Array.isArray(b.expenses) && b.expenses.length > 0)
-      ? JSON.stringify(b.expenses) : null;
+    // مصروفات التقرير المفصل أُلغيت: الصرف فقط عبر expense_statements (اعتماد مدير المشروعات ثم الخصم).
+    const expensesJson = null;
     const attachmentsJson = (b.attachments != null && Array.isArray(b.attachments) && b.attachments.length > 0)
       ? JSON.stringify(b.attachments) : null;
     const r = await pool.query(
@@ -4322,18 +4327,6 @@ app.post('/detailed-reports', async (req, res) => {
         'INSERT INTO detailed_report_lines (detailed_report_id, contractor_id, contractor_workers_count, self_workers_count, zone_id, building_id, location_id, manual_work_location, phase_id, workers_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
         [reportId, contractorId, line.contractorWorkersCount ?? 0, line.selfWorkersCount ?? 0, zoneId, buildingId, locationId, (line.manualWorkLocation != null && String(line.manualWorkLocation).trim() !== '') ? String(line.manualWorkLocation).trim() : null, line.phaseId, line.workersCount]
       );
-    }
-    // خصم إجمالي بنود الماليات من رصيد مهندس الموقع (مستخدم كاتب التقرير)
-    const expenses = Array.isArray(b.expenses) ? b.expenses : (expensesJson ? JSON.parse(expensesJson) : []);
-    let totalExpense = 0;
-    for (const e of expenses) {
-      const amt = parseFloat(String((e.amount || '').replace(/[^\d.]/g, ''))) || 0;
-      totalExpense += amt;
-    }
-    if (totalExpense > 0 && b.userId) {
-      const bal = await pool.query('SELECT balance FROM engineer_balance WHERE user_id = $1', [b.userId]);
-      const current = bal.rows.length ? parseFloat(bal.rows[0].balance) : 0;
-      await pool.query('INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2', [b.userId, current - totalExpense]);
     }
     const hasAttachments = countDetailedReportFiles(b) > 0;
     await notifyAppAdminsWorkPlanSaved(pool, {
@@ -4453,75 +4446,13 @@ app.get('/detailed-reports', async (req, res) => {
 });
 
 app.put('/detailed-reports/:id/expenses', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
-    const bodyUserId = req.body.userId != null ? parseInt(req.body.userId, 10) : null;
-    const expenses = Array.isArray(req.body.expenses) ? req.body.expenses : [];
-
-    const r = await pool.query(
-      'SELECT user_id, expenses_json FROM detailed_reports WHERE id = $1',
-      [id]
-    );
-    if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
-    const rowUserId = parseInt(r.rows[0].user_id, 10);
-    if (bodyUserId != null && bodyUserId !== rowUserId) {
-      return res.status(403).json({ error: 'user mismatch' });
-    }
-
-    function expenseTotal(expList) {
-      let t = 0;
-      if (!Array.isArray(expList)) return 0;
-      for (const e of expList) {
-        const amt = parseFloat(String((e.amount || '').replace(/[^\d.]/g, ''))) || 0;
-        t += amt;
-      }
-      return t;
-    }
-
-    let oldTotal = 0;
-    if (r.rows[0].expenses_json) {
-      try {
-        const oldArr = JSON.parse(r.rows[0].expenses_json);
-        oldTotal = expenseTotal(oldArr);
-      } catch (_) {}
-    }
-    const newTotal = expenseTotal(expenses);
-    const delta = newTotal - oldTotal;
-
-    if (delta !== 0 && rowUserId) {
-      const bal = await pool.query('SELECT balance FROM engineer_balance WHERE user_id = $1', [rowUserId]);
-      const current = bal.rows.length ? parseFloat(bal.rows[0].balance) : 0;
-      await pool.query(
-        'INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2',
-        [rowUserId, current - delta]
-      );
-    }
-
-    const expensesJson =
-      expenses.length > 0 ? JSON.stringify(expenses) : null;
-    await pool.query('UPDATE detailed_reports SET expenses_json = $1 WHERE id = $2', [
-      expensesJson,
-      id,
-    ]);
-    const userRow = await pool.query(
-      'SELECT user_name, project_name FROM detailed_reports WHERE id = $1',
-      [id],
-    );
-    const userName = userRow.rows.length ? String(userRow.rows[0].user_name || '') : '';
-    const projectName = userRow.rows.length ? userRow.rows[0].project_name : null;
-    await notifyAppAdminsIfSiteEngineer(pool, rowUserId, {
-      title: 'تحديث ماليات التقرير',
-      body: `قام "${userName}" بتحديث بنود الصرف في التقرير المفصل #${id}`,
-      eventType: 'detailed_report_expenses_updated',
-      actorUserId: rowUserId,
-      actorUserName: userName,
-      projectName,
-    });
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
+  // مسار مصروفات التقرير المفصل أُلغي بالكامل.
+  // الصرف الوحيد: /expense-statements (انتظار اعتماد مدير المشروعات ثم الخصم من الرصيد).
+  return res.status(410).json({
+    error: 'detailed_report_expenses_removed',
+    message:
+      'لم يعد إدخال المصروفات عبر التقرير المفصل متاحاً. استخدم أيقونة العهدة/المصروفات لإرسال بيان الصرف لمدير المشروعات للاعتماد ثم الخصم من الرصيد.',
+  });
 });
 
 app.put('/detailed-reports/:id', async (req, res) => {
@@ -4535,18 +4466,17 @@ app.put('/detailed-reports/:id', async (req, res) => {
     const executedTodaySummary = parseExecutedTodaySummaryFromBody(b);
     const projectId = b.projectId != null ? parseInt(b.projectId, 10) : null;
     const projectName = (b.projectName != null && String(b.projectName).trim() !== '') ? String(b.projectName).trim() : null;
-    const expensesJson = (b.expenses != null && Array.isArray(b.expenses) && b.expenses.length > 0)
-      ? JSON.stringify(b.expenses) : null;
     const attachmentsJson = (b.attachments != null && Array.isArray(b.attachments) && b.attachments.length > 0)
       ? JSON.stringify(b.attachments) : null;
     await pool.query('BEGIN');
     try {
       await pool.query('DELETE FROM detailed_report_lines WHERE detailed_report_id = $1', [id]);
+      // لا نحدّث expenses_json هنا — المصروفات لم تعد جزءاً من خطة العمل/التقرير المفصل.
       await pool.query(
         `UPDATE detailed_reports SET
           user_id = $1, user_name = $2, report_datetime = $3, project_id = $4, project_name = $5,
-          supervisor_id = $6, summary = $7, executed_today_summary = $8, expenses_json = $9, attachments_json = $10
-         WHERE id = $11`,
+          supervisor_id = $6, summary = $7, executed_today_summary = $8, attachments_json = $9
+         WHERE id = $10`,
         [
           b.userId,
           b.userName,
@@ -4556,7 +4486,6 @@ app.put('/detailed-reports/:id', async (req, res) => {
           b.supervisorId || null,
           summary,
           executedTodaySummary,
-          expensesJson,
           attachmentsJson,
           id,
         ]
@@ -7689,6 +7618,7 @@ registerExpenseStatementsRoutes(app, pool, { runNotificationSafely, notifyFileUp
 registerAttachmentRoutes(app, pool);
 registerWithdrawalFilesReportRoutes(app, pool);
 registerMeetingsRoutes(app, pool, { runNotificationSafely });
+registerContInvoicesRoutes(app, pool);
 
 async function ensureProjectsMainContractor() {
   await pool.query(
@@ -7905,6 +7835,7 @@ async function runStartupMigrations() {
     () => ensureInvoicesOwnerTables(pool),
     () => ensureProjectsDashboardTables(pool),
     () => ensureExpenseStatementsTable(pool),
+    () => ensureContInvoicesTables(pool),
     ensureEngineerCustodyActorColumns,
     ensureIrMirUploadsTable,
     ensureMsSdTables,

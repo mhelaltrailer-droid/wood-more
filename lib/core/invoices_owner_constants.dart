@@ -3,8 +3,18 @@ const String invoicesOwnerCreatorEmail = 'ah-amin';
 const String invoicesOwnerQsCreatorEmailQsUser = 'QS-User';
 const String invoicesOwnerQsCreatorEmailAli = 'Ali';
 
-const int invoicesOwnerMaxAttachmentBytes = 5 * 1024 * 1024;
+/// حد مؤقت حتى نقل المرفقات الكبيرة لـ Object Storage (المرحلة 2).
+const int invoicesOwnerMaxAttachmentBytes = 20 * 1024 * 1024;
 const int invoicesOwnerMaxAttachments = 4;
+
+String invoicesOwnerMaxAttachmentSizeLabel() => '20 ميجا';
+
+String invoicesOwnerFormatAttachmentSize(int bytes) {
+  if (bytes >= 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} ميجا';
+  }
+  return '${(bytes / 1024).toStringAsFixed(1)} ك.ب';
+}
 
 const String invoicesOwnerHomeIconLabel = 'Invoices (Owner)';
 

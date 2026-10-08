@@ -911,9 +911,8 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
         widget.editingReportId != null && widget.initialReport != null
         ? widget.initialReport!.userName
         : widget.user.name;
-    final exp = widget.editingReportId != null && widget.initialReport != null
-        ? List<ExpenseItem>.from(widget.initialReport!.expenses)
-        : const <ExpenseItem>[];
+    // مصروفات التقرير المفصل أُلغيت — الصرف فقط عبر أيقونة العهدة/المصروفات.
+    const exp = <ExpenseItem>[];
     var att = widget.editingReportId != null && widget.initialReport != null
         ? List<DetailedReportAttachment>.from(widget.initialReport!.attachments)
         : (widget.showAttachmentsSection

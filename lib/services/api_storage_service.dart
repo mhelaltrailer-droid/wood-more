@@ -38,6 +38,7 @@ import '../models/uploaded_file_report_row_model.dart';
 import '../models/reports_sys_model.dart';
 import '../models/shop_drawing_model.dart';
 import '../models/invoices_owner_model.dart';
+import '../models/cont_invoice_model.dart';
 import '../models/app_release_info_model.dart';
 import '../models/projects_dashboard_note_model.dart';
 import '../models/projects_dashboard_sheet_model.dart';
@@ -1419,6 +1420,8 @@ class ApiStorageService {
     final body = report.toJson();
     body['lines'] = report.lines.map((e) => e.toJson()).toList();
     body.addAll(report.executedTodaySummaryJsonEntries());
+    // مصروفات التقرير المفصل أُلغيت — لا تُرسل مع خطة العمل.
+    body.remove('expenses');
     return _post('detailed-reports', body);
   }
 
@@ -1439,7 +1442,6 @@ class ApiStorageService {
         'summary': report.summary!.trim(),
       ...report.executedTodaySummaryJsonEntries(),
       'lines': report.lines.map((e) => e.toJson()).toList(),
-      'expenses': report.expenses.map((e) => e.toJson()).toList(),
       'attachments': report.attachments.map((e) => e.toJson()).toList(),
     };
     await _put('detailed-reports/$reportId', body);
@@ -1450,10 +1452,10 @@ class ApiStorageService {
     required int userId,
     required List<ExpenseItem> expenses,
   }) async {
-    await _put('detailed-reports/$reportId/expenses', {
-      'userId': userId,
-      'expenses': expenses.map((e) => e.toJson()).toList(),
-    });
+    throw Exception(
+      'لم يعد إدخال/تعديل المصروفات عبر التقرير المفصل متاحاً. '
+      'استخدم أيقونة العهدة/المصروفات لإرسال البيان لمدير المشروعات للاعتماد ثم الخصم من الرصيد.',
+    );
   }
 
   Future<List<DetailedReportModel>> getDetailedReports({
@@ -3293,6 +3295,95 @@ class ApiStorageService {
     return InvoicesOwnerModel.fromMap(
       Map<String, dynamic>.from(jsonDecode(r.body) as Map),
     );
+  }
+
+  Future<List<ContInvoiceModel>> getContInvoices(int userId) async {
+    final list = await _getList('cont-invoices?userId=$userId');
+    return list
+        .map(
+          (e) => ContInvoiceModel.fromMap(Map<String, dynamic>.from(e as Map)),
+        )
+        .toList();
+  }
+
+  /// السابق صرفه المقترح = إجمالي آخر مستخلص لنفس المقاول (أو 0 إن لم يوجد).
+  Future<Map<String, dynamic>> getContInvoicePreviousPaid({
+    required int userId,
+    int? contractorId,
+    String? contractorName,
+    int? excludeId,
+  }) async {
+    final qp = <String, String>{'userId': userId.toString()};
+    if (contractorId != null) qp['contractorId'] = contractorId.toString();
+    if (contractorName != null && contractorName.trim().isNotEmpty) {
+      qp['contractorName'] = contractorName.trim();
+    }
+    if (excludeId != null) qp['excludeId'] = excludeId.toString();
+    final uri = Uri.parse(_path('cont-invoices/previous-paid')).replace(
+      queryParameters: qp,
+    );
+    final r = await _httpGet(uri);
+    if (r.statusCode >= 400) throw Exception(r.body);
+    if (r.body.isEmpty) {
+      return {
+        'previously_paid': 0,
+        'has_previous': false,
+      };
+    }
+    return Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+  }
+
+  Future<ContInvoiceModel> getContInvoiceDetail(int id, int userId) async {
+    final data = await _get('cont-invoices/$id?userId=$userId');
+    return ContInvoiceModel.fromMap(data);
+  }
+
+  Future<ContInvoiceModel> createContInvoice({
+    required int userId,
+    required ContInvoiceModel invoice,
+  }) async {
+    final body = invoice.toMap();
+    body['userId'] = userId;
+    final uri = Uri.parse(_path('cont-invoices'));
+    final r = await http.post(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode(body),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ContInvoiceModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ContInvoiceModel> updateContInvoice({
+    required int id,
+    required int userId,
+    required ContInvoiceModel invoice,
+  }) async {
+    final body = invoice.toMap();
+    body['userId'] = userId;
+    final uri = Uri.parse(_path('cont-invoices/$id'));
+    final r = await http.put(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode(body),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ContInvoiceModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<void> deleteContInvoice({
+    required int id,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('cont-invoices/$id')).replace(
+      queryParameters: {'userId': userId.toString()},
+    );
+    final r = await http.delete(uri, headers: _reqHeaders());
+    if (r.statusCode >= 400) throw Exception(r.body);
   }
 
   Future<AppReleaseInfoModel> getAppReleaseLatest(int userId) async {

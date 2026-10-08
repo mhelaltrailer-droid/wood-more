@@ -12,8 +12,10 @@ import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
 import '../widgets/invoices_owner_timeline.dart';
 import '../widgets/reports_sys_attachments_panel.dart';
+import '../utils/invoices_owner_new_pdf.dart';
 import '../utils/invoices_owner_om_checklist_pdf.dart';
 import 'invoices_owner_form_screen.dart';
+import 'invoices_owner_prepare_attachment_screen.dart';
 
 class InvoicesOwnerDetailScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -365,7 +367,9 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('الملف ${f.name} أكبر من 5 ميجا'),
+            content: Text(
+              'الملف ${f.name} أكبر من ${invoicesOwnerMaxAttachmentSizeLabel()} — استخدم «تجهيز المرفق»',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -382,20 +386,8 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     };
   }
 
-  Future<void> _addAttachment() async {
+  Future<void> _uploadAttachmentMap(Map<String, dynamic> file) async {
     if (_storage is! ApiStorageService) return;
-    final d = _invoice;
-    if (d == null) return;
-    if (d.attachments.length >= invoicesOwnerMaxAttachments) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('الحد الأقصى $invoicesOwnerMaxAttachments ملفات'),
-        ),
-      );
-      return;
-    }
-    final file = await _pickSingleAttachmentFile();
-    if (file == null) return;
     setState(() => _acting = true);
     try {
       final updated = await _storage.addInvoicesOwnerAttachment(
@@ -416,6 +408,60 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     } finally {
       if (mounted) setState(() => _acting = false);
     }
+  }
+
+  Future<void> _addAttachment() async {
+    if (_storage is! ApiStorageService) return;
+    final d = _invoice;
+    if (d == null) return;
+    if (d.attachments.length >= invoicesOwnerMaxAttachments) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('الحد الأقصى $invoicesOwnerMaxAttachments ملفات'),
+        ),
+      );
+      return;
+    }
+    final file = await _pickSingleAttachmentFile();
+    if (file == null) return;
+    await _uploadAttachmentMap(file);
+  }
+
+  Future<void> _prepareAndAddAttachment() async {
+    if (_storage is! ApiStorageService) return;
+    final d = _invoice;
+    if (d == null) return;
+    if (d.attachments.length >= invoicesOwnerMaxAttachments) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('الحد الأقصى $invoicesOwnerMaxAttachments ملفات'),
+        ),
+      );
+      return;
+    }
+    final result = await Navigator.of(context).push<InvoicesOwnerNewPdfResult>(
+      MaterialPageRoute(
+        builder: (_) => const InvoicesOwnerPrepareAttachmentScreen(),
+      ),
+    );
+    if (result == null || !mounted) return;
+    if (result.sizeBytes > invoicesOwnerMaxAttachmentBytes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'الملف أكبر من ${invoicesOwnerMaxAttachmentSizeLabel()}',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    await _uploadAttachmentMap({
+      'file_name': result.fileName,
+      'mime_type': 'application/pdf',
+      'data_base64': base64Encode(result.bytes),
+      'size_bytes': result.sizeBytes,
+    });
   }
 
   Future<void> _replaceAttachment(int index) async {
@@ -647,10 +693,21 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
           if (canAssigneeAttachments &&
               d.attachments.length < invoicesOwnerMaxAttachments) ...[
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _acting ? null : _addAttachment,
-              icon: const Icon(Icons.add),
-              label: const Text('إضافة مرفق'),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _acting ? null : _addAttachment,
+                  icon: const Icon(Icons.add),
+                  label: const Text('إضافة مرفق'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _acting ? null : _prepareAndAddAttachment,
+                  icon: const Icon(Icons.auto_fix_high),
+                  label: const Text('تجهيز المرفق'),
+                ),
+              ],
             ),
           ],
         ],

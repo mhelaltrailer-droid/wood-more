@@ -34,6 +34,8 @@ import '../screens/projects_dashboard_screen.dart';
 import '../screens/projects_dashboard_plus1_screen.dart';
 import '../screens/meetings_screen.dart';
 import '../screens/invoices_owner_hub_screen.dart';
+import '../screens/cont_invoices_hub_screen.dart';
+import '../core/cont_invoices_constants.dart';
 import '../services/api_storage_service.dart';
 import '../services/home_icon_order_service.dart';
 import '../services/route_restore.dart';
@@ -526,6 +528,22 @@ class HomeIconBuilder {
             );
             await onInvoicesOwnerReturn?.call();
           },
+        );
+      case contInvoicesIconId:
+        if (!user.canAccessContInvoices) {
+          return const SizedBox.shrink();
+        }
+        return _lightCard(
+          icon: Icons.request_quote_outlined,
+          iconSize: 56,
+          title: contInvoicesHomeLabel,
+          subtitle: 'مستخلصات المقاول — إدخال كميات ونسب الإنجاز',
+          padding: 28,
+          onTap: () => pushAndSaveRoute(
+            context,
+            contInvoicesRouteName,
+            ContInvoicesHubScreen(currentUser: user),
+          ),
         );
       default:
         return const SizedBox.shrink();
