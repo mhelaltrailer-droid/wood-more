@@ -398,7 +398,13 @@ function registerWithdrawalFilesReportRoutes(app, pool) {
               r.user_id, r.user_name,
               ${kindExpr} AS kind_code,
               a.file_name, a.file_mime AS mime_type,
-              (length(a.file_data) * 3 / 4) AS size_bytes,
+              COALESCE(
+                a.size_bytes,
+                CASE
+                  WHEN a.file_data IS NULL OR length(a.file_data) = 0 THEN 0
+                  ELSE (length(a.file_data) * 3 / 4)
+                END
+              ) AS size_bytes,
               r.record_name AS context_label
             FROM ${attachmentTable} a
             INNER JOIN ${recordTable} r ON r.id = a.${joinColumn}

@@ -1051,6 +1051,22 @@ async function ensureMsSdTables() {
     await pool.query(
       'CREATE INDEX IF NOT EXISTS idx_ms_sd_attachments_record_id ON ms_sd_attachments(record_id)',
     ).catch(() => {});
+    await pool.query(`
+      ALTER TABLE ms_sd_attachments
+        ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'db'
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE ms_sd_attachments
+        ADD COLUMN IF NOT EXISTS storage_key TEXT
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE ms_sd_attachments
+        ADD COLUMN IF NOT EXISTS size_bytes BIGINT
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE ms_sd_attachments
+        ALTER COLUMN file_data DROP NOT NULL
+    `).catch(() => {});
     console.log('ensureMsSdTables: ok');
   } catch (e) {
     console.warn('ensureMsSdTables:', e.message);
@@ -1087,6 +1103,22 @@ async function ensureMosItpTables() {
     await pool.query(
       'CREATE INDEX IF NOT EXISTS idx_mos_itp_attachments_record_id ON mos_itp_attachments(record_id)',
     ).catch(() => {});
+    await pool.query(`
+      ALTER TABLE mos_itp_attachments
+        ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'db'
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE mos_itp_attachments
+        ADD COLUMN IF NOT EXISTS storage_key TEXT
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE mos_itp_attachments
+        ADD COLUMN IF NOT EXISTS size_bytes BIGINT
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE mos_itp_attachments
+        ALTER COLUMN file_data DROP NOT NULL
+    `).catch(() => {});
     console.log('ensureMosItpTables: ok');
   } catch (e) {
     console.warn('ensureMosItpTables:', e.message);
@@ -1140,20 +1172,22 @@ async function ensureIrMirUploadsTable() {
   }
 }
 
-function irMirSafeFileSuffix(name) {
+function attachmentSafeFileSuffix(name) {
   const base = String(name || 'file').replace(/[^a-zA-Z0-9._-]+/g, '_');
   return base.slice(0, 80) || 'file';
 }
 
-function irMirNewStorageKey(projectId, fileName) {
-  return `ir-mir/${projectId}/${crypto.randomUUID()}-${irMirSafeFileSuffix(fileName)}`;
-}
-
-async function irMirStoreFileBlob({ projectId, fileName, fileMime, fileData }) {
+async function storeModuleAttachmentBlob({
+  keyPrefix,
+  ownerId,
+  fileName,
+  fileMime,
+  fileData,
+}) {
   const rawB64 = stripBase64Payload(fileData);
   const body = Buffer.from(rawB64, 'base64');
   if (isR2Configured()) {
-    const key = irMirNewStorageKey(projectId, fileName);
+    const key = `${keyPrefix}/${ownerId}/${crypto.randomUUID()}-${attachmentSafeFileSuffix(fileName)}`;
     await r2PutObject({
       key,
       body,
@@ -1177,7 +1211,17 @@ async function irMirStoreFileBlob({ projectId, fileName, fileMime, fileData }) {
   };
 }
 
-async function irMirLoadFileDataUrl(row) {
+async function irMirStoreFileBlob({ projectId, fileName, fileMime, fileData }) {
+  return storeModuleAttachmentBlob({
+    keyPrefix: 'ir-mir',
+    ownerId: projectId,
+    fileName,
+    fileMime,
+    fileData,
+  });
+}
+
+async function loadAttachmentFileDataUrl(row) {
   const backend = String(row.storage_backend || 'db');
   const mime = String(row.file_mime || 'application/octet-stream');
   if (backend === 'r2' && row.storage_key) {
@@ -1190,7 +1234,11 @@ async function irMirLoadFileDataUrl(row) {
   return `data:${mime};base64,${stripBase64Payload(raw)}`;
 }
 
-function irMirSizeBytesSql(alias = '') {
+async function irMirLoadFileDataUrl(row) {
+  return loadAttachmentFileDataUrl(row);
+}
+
+function attachmentSizeBytesSql(alias = '') {
   const p = alias ? `${alias}.` : '';
   return `COALESCE(
     ${p}size_bytes,
@@ -1199,6 +1247,26 @@ function irMirSizeBytesSql(alias = '') {
       ELSE (length(${p}file_data) * 3 / 4)::bigint
     END
   )`;
+}
+
+function irMirSizeBytesSql(alias = '') {
+  return attachmentSizeBytesSql(alias);
+}
+
+async function deleteAttachmentR2Object(row) {
+  if (String(row?.storage_backend || '') === 'r2' && row.storage_key) {
+    await r2DeleteObject(row.storage_key);
+  }
+}
+
+async function purgeChildAttachmentsR2(pool, childTable, recordId) {
+  const r = await pool.query(
+    `SELECT storage_backend, storage_key FROM ${childTable} WHERE record_id = $1`,
+    [recordId],
+  );
+  for (const row of r.rows) {
+    await deleteAttachmentR2Object(row);
+  }
 }
 
 
@@ -3312,7 +3380,7 @@ app.get('/ms-sd/records', async (req, res) => {
     for (const row of recs.rows) {
       const att = await pool.query(
         `SELECT id, record_id, file_name, file_mime, created_at,
-                length(file_data) AS data_len
+                ${attachmentSizeBytesSql()} AS size_bytes
          FROM ms_sd_attachments WHERE record_id = $1 ORDER BY id ASC`,
         [row.id],
       );
@@ -3330,18 +3398,21 @@ app.get('/ms-sd/attachments/:id', async (req, res) => {
     if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
     const r = await pool.query(
       `SELECT id, record_id, file_name, file_mime, file_data, created_at,
-              (length(file_data) * 3 / 4)::bigint AS size_bytes
+              storage_backend, storage_key,
+              ${attachmentSizeBytesSql()} AS size_bytes
        FROM ms_sd_attachments WHERE id = $1`,
       [id],
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
     const a = r.rows[0];
+    const fileData = await loadAttachmentFileDataUrl(a);
+    if (!fileData) return res.status(404).json({ error: 'attachment_empty' });
     res.json({
       id: parseInt(a.id, 10),
       record_id: parseInt(a.record_id, 10),
       file_name: a.file_name,
       file_mime: a.file_mime,
-      file_data: a.file_data,
+      file_data: fileData,
       size_bytes: a.size_bytes != null ? parseInt(a.size_bytes, 10) : null,
       created_at: a.created_at,
     });
@@ -3408,11 +3479,28 @@ app.post('/ms-sd/records', async (req, res) => {
     );
     const recordId = parseInt(ins.rows[0].id, 10);
     for (const att of prepared) {
+      const stored = await storeModuleAttachmentBlob({
+        keyPrefix: 'ms-sd',
+        ownerId: recordId,
+        fileName: att.fileName,
+        fileMime: att.fileMime,
+        fileData: att.fileData,
+      });
       await pool.query(
         `INSERT INTO ms_sd_attachments (
-          record_id, file_name, file_mime, file_data, created_at
-        ) VALUES ($1,$2,$3,$4,$5)`,
-        [recordId, att.fileName, att.fileMime, att.fileData, createdAt],
+          record_id, file_name, file_mime, file_data, created_at,
+          storage_backend, storage_key, size_bytes
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          recordId,
+          att.fileName,
+          att.fileMime,
+          stored.file_data,
+          createdAt,
+          stored.storage_backend,
+          stored.storage_key,
+          stored.size_bytes,
+        ],
       );
     }
 
@@ -3498,6 +3586,14 @@ app.patch('/ms-sd/records/:id', async (req, res) => {
     for (const rawId of removeIds) {
       const attId = parseInt(rawId, 10);
       if (Number.isNaN(attId)) continue;
+      const oldAtt = await pool.query(
+        `SELECT storage_backend, storage_key FROM ms_sd_attachments
+         WHERE id = $1 AND record_id = $2`,
+        [attId, id],
+      );
+      if (oldAtt.rows.length > 0) {
+        await deleteAttachmentR2Object(oldAtt.rows[0]);
+      }
       await pool.query(
         'DELETE FROM ms_sd_attachments WHERE id = $1 AND record_id = $2',
         [attId, id],
@@ -3518,11 +3614,28 @@ app.patch('/ms-sd/records/:id', async (req, res) => {
       if (_estimateBase64PayloadBytes(fileData) > MS_SD_MAX_FILE_BYTES) {
         return res.status(400).json({ error: `file too large (max ${MS_SD_MAX_FILE_BYTES} bytes)` });
       }
+      const stored = await storeModuleAttachmentBlob({
+        keyPrefix: 'ms-sd',
+        ownerId: id,
+        fileName,
+        fileMime,
+        fileData,
+      });
       await pool.query(
         `INSERT INTO ms_sd_attachments (
-          record_id, file_name, file_mime, file_data, created_at
-        ) VALUES ($1,$2,$3,$4,$5)`,
-        [id, fileName, fileMime, fileData, now],
+          record_id, file_name, file_mime, file_data, created_at,
+          storage_backend, storage_key, size_bytes
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          id,
+          fileName,
+          fileMime,
+          stored.file_data,
+          now,
+          stored.storage_backend,
+          stored.storage_key,
+          stored.size_bytes,
+        ],
       );
     }
 
@@ -3550,6 +3663,7 @@ app.delete('/ms-sd/records/:id', async (req, res) => {
     }
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+    await purgeChildAttachmentsR2(pool, 'ms_sd_attachments', id);
     const del = await pool.query('DELETE FROM ms_sd_records WHERE id = $1 RETURNING id', [id]);
     if (del.rowCount === 0) return res.status(404).json({ error: 'not found' });
     res.json({ ok: true });
@@ -3612,7 +3726,7 @@ app.get('/mos-itp/records', async (req, res) => {
     for (const row of recs.rows) {
       const att = await pool.query(
         `SELECT id, record_id, file_name, file_mime, created_at,
-                length(file_data) AS data_len
+                ${attachmentSizeBytesSql()} AS size_bytes
          FROM mos_itp_attachments WHERE record_id = $1 ORDER BY id ASC`,
         [row.id],
       );
@@ -3630,18 +3744,21 @@ app.get('/mos-itp/attachments/:id', async (req, res) => {
     if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
     const r = await pool.query(
       `SELECT id, record_id, file_name, file_mime, file_data, created_at,
-              (length(file_data) * 3 / 4)::bigint AS size_bytes
+              storage_backend, storage_key,
+              ${attachmentSizeBytesSql()} AS size_bytes
        FROM mos_itp_attachments WHERE id = $1`,
       [id],
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
     const a = r.rows[0];
+    const fileData = await loadAttachmentFileDataUrl(a);
+    if (!fileData) return res.status(404).json({ error: 'attachment_empty' });
     res.json({
       id: parseInt(a.id, 10),
       record_id: parseInt(a.record_id, 10),
       file_name: a.file_name,
       file_mime: a.file_mime,
-      file_data: a.file_data,
+      file_data: fileData,
       size_bytes: a.size_bytes != null ? parseInt(a.size_bytes, 10) : null,
       created_at: a.created_at,
     });
@@ -3708,11 +3825,28 @@ app.post('/mos-itp/records', async (req, res) => {
     );
     const recordId = parseInt(ins.rows[0].id, 10);
     for (const att of prepared) {
+      const stored = await storeModuleAttachmentBlob({
+        keyPrefix: 'mos-itp',
+        ownerId: recordId,
+        fileName: att.fileName,
+        fileMime: att.fileMime,
+        fileData: att.fileData,
+      });
       await pool.query(
         `INSERT INTO mos_itp_attachments (
-          record_id, file_name, file_mime, file_data, created_at
-        ) VALUES ($1,$2,$3,$4,$5)`,
-        [recordId, att.fileName, att.fileMime, att.fileData, createdAt],
+          record_id, file_name, file_mime, file_data, created_at,
+          storage_backend, storage_key, size_bytes
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          recordId,
+          att.fileName,
+          att.fileMime,
+          stored.file_data,
+          createdAt,
+          stored.storage_backend,
+          stored.storage_key,
+          stored.size_bytes,
+        ],
       );
     }
 
@@ -3798,6 +3932,14 @@ app.patch('/mos-itp/records/:id', async (req, res) => {
     for (const rawId of removeIds) {
       const attId = parseInt(rawId, 10);
       if (Number.isNaN(attId)) continue;
+      const oldAtt = await pool.query(
+        `SELECT storage_backend, storage_key FROM mos_itp_attachments
+         WHERE id = $1 AND record_id = $2`,
+        [attId, id],
+      );
+      if (oldAtt.rows.length > 0) {
+        await deleteAttachmentR2Object(oldAtt.rows[0]);
+      }
       await pool.query(
         'DELETE FROM mos_itp_attachments WHERE id = $1 AND record_id = $2',
         [attId, id],
@@ -3818,11 +3960,28 @@ app.patch('/mos-itp/records/:id', async (req, res) => {
       if (_estimateBase64PayloadBytes(fileData) > MS_SD_MAX_FILE_BYTES) {
         return res.status(400).json({ error: `file too large (max ${MS_SD_MAX_FILE_BYTES} bytes)` });
       }
+      const stored = await storeModuleAttachmentBlob({
+        keyPrefix: 'mos-itp',
+        ownerId: id,
+        fileName,
+        fileMime,
+        fileData,
+      });
       await pool.query(
         `INSERT INTO mos_itp_attachments (
-          record_id, file_name, file_mime, file_data, created_at
-        ) VALUES ($1,$2,$3,$4,$5)`,
-        [id, fileName, fileMime, fileData, now],
+          record_id, file_name, file_mime, file_data, created_at,
+          storage_backend, storage_key, size_bytes
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          id,
+          fileName,
+          fileMime,
+          stored.file_data,
+          now,
+          stored.storage_backend,
+          stored.storage_key,
+          stored.size_bytes,
+        ],
       );
     }
 
@@ -3850,6 +4009,7 @@ app.delete('/mos-itp/records/:id', async (req, res) => {
     }
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+    await purgeChildAttachmentsR2(pool, 'mos_itp_attachments', id);
     const del = await pool.query('DELETE FROM mos_itp_records WHERE id = $1 RETURNING id', [id]);
     if (del.rowCount === 0) return res.status(404).json({ error: 'not found' });
     res.json({ ok: true });
