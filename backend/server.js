@@ -1,7 +1,15 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { formatArDateTimeEgypt } = require('./egypt_local_time');
+const {
+  isR2Configured,
+  stripBase64Payload,
+  r2PutObject,
+  r2GetObjectBuffer,
+  r2DeleteObject,
+} = require('./lib/r2');
 const { splitSqlChunks } = require('./scripts/lib/xlsx_project_locations');
 const {
   ensureShopDrawingTables,
@@ -1110,10 +1118,87 @@ async function ensureIrMirUploadsTable() {
     await pool.query(
       'CREATE INDEX IF NOT EXISTS idx_ir_mir_location_phase ON ir_mir_uploads(location_id, phase)',
     ).catch(() => {});
+    await pool.query(`
+      ALTER TABLE ir_mir_uploads
+        ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'db'
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE ir_mir_uploads
+        ADD COLUMN IF NOT EXISTS storage_key TEXT
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE ir_mir_uploads
+        ADD COLUMN IF NOT EXISTS size_bytes BIGINT
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE ir_mir_uploads
+        ALTER COLUMN file_data DROP NOT NULL
+    `).catch(() => {});
     console.log('ensureIrMirUploadsTable: ok');
   } catch (e) {
     console.warn('ensureIrMirUploadsTable:', e.message);
   }
+}
+
+function irMirSafeFileSuffix(name) {
+  const base = String(name || 'file').replace(/[^a-zA-Z0-9._-]+/g, '_');
+  return base.slice(0, 80) || 'file';
+}
+
+function irMirNewStorageKey(projectId, fileName) {
+  return `ir-mir/${projectId}/${crypto.randomUUID()}-${irMirSafeFileSuffix(fileName)}`;
+}
+
+async function irMirStoreFileBlob({ projectId, fileName, fileMime, fileData }) {
+  const rawB64 = stripBase64Payload(fileData);
+  const body = Buffer.from(rawB64, 'base64');
+  if (isR2Configured()) {
+    const key = irMirNewStorageKey(projectId, fileName);
+    await r2PutObject({
+      key,
+      body,
+      contentType: fileMime || 'application/octet-stream',
+    });
+    return {
+      storage_backend: 'r2',
+      storage_key: key,
+      file_data: null,
+      size_bytes: body.length,
+    };
+  }
+  const asDataUrl = String(fileData || '').trim().startsWith('data:')
+    ? String(fileData).trim()
+    : `data:${fileMime || 'application/octet-stream'};base64,${rawB64}`;
+  return {
+    storage_backend: 'db',
+    storage_key: null,
+    file_data: asDataUrl,
+    size_bytes: body.length,
+  };
+}
+
+async function irMirLoadFileDataUrl(row) {
+  const backend = String(row.storage_backend || 'db');
+  const mime = String(row.file_mime || 'application/octet-stream');
+  if (backend === 'r2' && row.storage_key) {
+    const buf = await r2GetObjectBuffer(row.storage_key);
+    return `data:${mime};base64,${buf.toString('base64')}`;
+  }
+  const raw = String(row.file_data || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('data:')) return raw;
+  return `data:${mime};base64,${stripBase64Payload(raw)}`;
+}
+
+function irMirSizeBytesSql(alias = '') {
+  const p = alias ? `${alias}.` : '';
+  return `COALESCE(
+    ${p}size_bytes,
+    CASE
+      WHEN ${p}file_data IS NULL OR length(${p}file_data) = 0 THEN 0
+      ELSE (length(${p}file_data) * 3 / 4)::bigint
+    END
+  )`;
 }
 
 
@@ -2934,7 +3019,7 @@ app.get('/ir-mir/uploads', async (req, res) => {
     let sql =
       `SELECT id, project_id, user_id, user_name, kind, mir_name, location_id, phase,
               file_name, file_mime, notes, created_at,
-              (length(file_data) * 3 / 4)::bigint AS size_bytes
+              ${irMirSizeBytesSql()} AS size_bytes
        FROM ir_mir_uploads WHERE project_id = $1`;
     const params = [projectId];
     let i = 2;
@@ -2990,12 +3075,15 @@ app.get('/ir-mir/uploads/:id', async (req, res) => {
     const r = await pool.query(
       `SELECT id, project_id, user_id, user_name, kind, mir_name, location_id, phase,
               file_name, file_mime, file_data, notes, created_at,
-              (length(file_data) * 3 / 4)::bigint AS size_bytes
+              storage_backend, storage_key,
+              ${irMirSizeBytesSql()} AS size_bytes
        FROM ir_mir_uploads WHERE id = $1`,
       [id],
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
     const row = r.rows[0];
+    const fileData = await irMirLoadFileDataUrl(row);
+    if (!fileData) return res.status(404).json({ error: 'attachment_empty' });
     res.json({
       id: parseInt(row.id, 10),
       project_id: parseInt(row.project_id, 10),
@@ -3007,7 +3095,7 @@ app.get('/ir-mir/uploads/:id', async (req, res) => {
       phase: row.phase,
       file_name: row.file_name,
       file_mime: row.file_mime,
-      file_data: row.file_data,
+      file_data: fileData,
       size_bytes: row.size_bytes != null ? parseInt(row.size_bytes, 10) : null,
       notes: row.notes,
       created_at: row.created_at,
@@ -3080,15 +3168,19 @@ app.post('/ir-mir/uploads', async (req, res) => {
       return res.status(403).json({ error: 'only site engineer or document controller can upload IR/MIR' });
     }
 
-    if (!fileData.startsWith('data:')) {
-      fileData = `data:${fileMime};base64,${fileData}`;
-    }
+    const stored = await irMirStoreFileBlob({
+      projectId,
+      fileName,
+      fileMime,
+      fileData,
+    });
 
     const ins = await pool.query(
       `INSERT INTO ir_mir_uploads (
         project_id, user_id, user_name, kind, mir_name, location_id, phase,
-        file_name, file_mime, file_data, notes, created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        file_name, file_mime, file_data, notes, created_at,
+        storage_backend, storage_key, size_bytes
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
       RETURNING id`,
       [
         projectId,
@@ -3100,9 +3192,12 @@ app.post('/ir-mir/uploads', async (req, res) => {
         phase,
         fileName,
         fileMime,
-        fileData,
+        stored.file_data,
         notes || null,
         new Date().toISOString(),
+        stored.storage_backend,
+        stored.storage_key,
+        stored.size_bytes,
       ],
     );
     const uploadId = parseInt(ins.rows[0].id, 10);
@@ -3144,6 +3239,15 @@ app.delete('/ir-mir/uploads/:id', async (req, res) => {
     }
     const id = parseInt(req.params.id, 10);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'invalid id' });
+    const existing = await pool.query(
+      `SELECT id, storage_backend, storage_key FROM ir_mir_uploads WHERE id = $1`,
+      [id],
+    );
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const old = existing.rows[0];
+    if (String(old.storage_backend) === 'r2' && old.storage_key) {
+      await r2DeleteObject(old.storage_key);
+    }
     const del = await pool.query('DELETE FROM ir_mir_uploads WHERE id = $1 RETURNING id', [
       id,
     ]);

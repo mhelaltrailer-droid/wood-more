@@ -10,6 +10,8 @@
 // لمرفق واحد عند الطلب.
 // =============================================================================
 
+const { r2GetObjectBuffer } = require('./lib/r2');
+
 const ATTACHMENT_VIEWER_ROLES = ['app_admin', 'operation_manager', 'site_engineer_manager', 'projects_manager'];
 
 /// الحد الأقصى لحجم مرفق يُسمح بإرجاعه في استجابة JSON واحدة.
@@ -241,7 +243,9 @@ const ATTACHMENT_SOURCES = {
   ir_mir: {
     async list(pool, recordId) {
       const r = await pool.query(
-        `SELECT kind, mir_name, phase, file_name, file_mime, length(file_data) AS data_len
+        `SELECT kind, mir_name, phase, file_name, file_mime, file_data,
+                storage_backend, size_bytes,
+                length(file_data) AS data_len
          FROM ir_mir_uploads WHERE id = $1`,
         [recordId],
       );
@@ -249,6 +253,10 @@ const ATTACHMENT_SOURCES = {
       const row = r.rows[0];
       const kindLabel = row.kind === 'mir' ? 'MIR' : 'IR';
       const suffix = row.mir_name || row.phase || '';
+      const fromCol = row.size_bytes != null ? parseInt(row.size_bytes, 10) : NaN;
+      const sizeBytes = Number.isFinite(fromCol)
+        ? fromCol
+        : Math.floor(((parseInt(row.data_len, 10) || 0) * 3) / 4);
       return {
         title: suffix ? `${kindLabel} — ${suffix}` : kindLabel,
         items: [
@@ -256,7 +264,7 @@ const ATTACHMENT_SOURCES = {
             id: 'file',
             file_name: row.file_name,
             mime_type: row.file_mime,
-            size_bytes: Math.floor(((parseInt(row.data_len, 10) || 0) * 3) / 4),
+            size_bytes: sizeBytes,
             kind: attKindForMime(row.file_mime),
             label: null,
             can_open: true,
@@ -266,11 +274,20 @@ const ATTACHMENT_SOURCES = {
     },
     async fetch(pool, recordId) {
       const r = await pool.query(
-        'SELECT file_name, file_mime, file_data FROM ir_mir_uploads WHERE id = $1',
+        `SELECT file_name, file_mime, file_data, storage_backend, storage_key
+         FROM ir_mir_uploads WHERE id = $1`,
         [recordId],
       );
       if (r.rows.length === 0) throw attErr(404, 'record_not_found');
       const row = r.rows[0];
+      if (String(row.storage_backend || 'db') === 'r2' && row.storage_key) {
+        const buf = await r2GetObjectBuffer(row.storage_key);
+        return {
+          file_name: row.file_name,
+          mime_type: row.file_mime || 'application/octet-stream',
+          data_base64: buf.toString('base64'),
+        };
+      }
       return attFileFromDataUrl(row.file_data, {
         fileName: row.file_name,
         fallbackMime: row.file_mime,

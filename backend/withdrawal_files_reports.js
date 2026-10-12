@@ -364,7 +364,13 @@ function registerWithdrawalFilesReportRoutes(app, pool) {
           u.user_id, u.user_name,
           UPPER(u.kind) AS kind_code,
           u.file_name, u.file_mime AS mime_type,
-          (length(u.file_data) * 3 / 4) AS size_bytes,
+          COALESCE(
+            u.size_bytes,
+            CASE
+              WHEN u.file_data IS NULL OR length(u.file_data) = 0 THEN 0
+              ELSE (length(u.file_data) * 3 / 4)
+            END
+          ) AS size_bytes,
           COALESCE(NULLIF(u.mir_name, ''), lp.path, '') AS context_label
         FROM ir_mir_uploads u
         INNER JOIN projects p ON p.id = u.project_id
