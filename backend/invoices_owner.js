@@ -1,4 +1,12 @@
+const crypto = require('crypto');
 const { formatArDateTimeEgypt } = require('./egypt_local_time');
+const {
+  isR2Configured,
+  stripBase64Payload,
+  r2PutObject,
+  r2GetObjectBuffer,
+  r2DeleteObject,
+} = require('./lib/r2');
 
 const IO_PRIMARY_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 /** منشئو Invoices (Owner) — بالبريد كما في قاعدة البيانات. */
@@ -10,6 +18,8 @@ const IO_CREATOR_EMAILS = new Set([
 /** حد مؤقت حتى Object Storage للمرفقات الكبيرة. */
 const IO_MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const IO_MAX_ATTACHMENTS = 4;
+const IO_STORAGE_DB = 'db';
+const IO_STORAGE_R2 = 'r2';
 
 const IO_STATUS = {
   PENDING_QS: 'pending_qs',
@@ -100,6 +110,22 @@ async function ensureInvoicesOwnerTables(pool) {
       );
     } catch (e) {
       console.warn('ensureInvoicesOwnerTables om_checklist_json:', e.message);
+    }
+    try {
+      await pool.query(`
+        ALTER TABLE invoices_owner_attachments
+          ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'db'
+      `);
+      await pool.query(`
+        ALTER TABLE invoices_owner_attachments
+          ADD COLUMN IF NOT EXISTS storage_key TEXT
+      `);
+      await pool.query(`
+        ALTER TABLE invoices_owner_attachments
+          ALTER COLUMN data_base64 DROP NOT NULL
+      `);
+    } catch (e) {
+      console.warn('ensureInvoicesOwnerTables attachment storage cols:', e.message);
     }
     console.log('ensureInvoicesOwnerTables: ok');
   } catch (e) {
@@ -486,25 +512,86 @@ async function ioCountAttachments(pool, invoiceId) {
   return r.rows[0]?.count ?? 0;
 }
 
+function ioSafeFileSuffix(name) {
+  const base = String(name || 'file').replace(/[^a-zA-Z0-9._-]+/g, '_');
+  return base.slice(0, 80) || 'file';
+}
+
+function ioNewStorageKey(invoiceId, fileName) {
+  return `invoices-owner/${invoiceId}/${crypto.randomUUID()}-${ioSafeFileSuffix(fileName)}`;
+}
+
+async function ioStoreAttachmentBlob({ invoiceId, name, mime, size, dataBase64 }) {
+  const rawB64 = stripBase64Payload(dataBase64);
+  if (isR2Configured()) {
+    const key = ioNewStorageKey(invoiceId, name);
+    const body = Buffer.from(rawB64, 'base64');
+    await r2PutObject({ key, body, contentType: mime });
+    return {
+      storage_backend: IO_STORAGE_R2,
+      storage_key: key,
+      data_base64: null,
+      size_bytes: size || body.length,
+    };
+  }
+  return {
+    storage_backend: IO_STORAGE_DB,
+    storage_key: null,
+    data_base64: rawB64,
+    size_bytes: size,
+  };
+}
+
+async function ioLoadAttachmentBase64(row) {
+  const backend = String(row.storage_backend || IO_STORAGE_DB);
+  if (backend === IO_STORAGE_R2 && row.storage_key) {
+    const buf = await r2GetObjectBuffer(row.storage_key);
+    return buf.toString('base64');
+  }
+  return stripBase64Payload(row.data_base64 || '');
+}
+
 async function ioInsertAttachments(pool, invoiceId, attachments, now) {
   for (const a of attachments) {
+    const name = String(a.file_name ?? a.fileName ?? 'file');
+    const mime = String(a.mime_type ?? a.mimeType ?? 'application/octet-stream');
+    const size = parseInt(String(a.size_bytes ?? a.sizeBytes ?? '0'), 10);
+    const stored = await ioStoreAttachmentBlob({
+      invoiceId,
+      name,
+      mime,
+      size,
+      dataBase64: String(a.data_base64 ?? a.dataBase64 ?? ''),
+    });
     await pool.query(
       `INSERT INTO invoices_owner_attachments (
-        invoice_id, file_name, mime_type, data_base64, size_bytes, created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        invoice_id, file_name, mime_type, data_base64, size_bytes, created_at,
+        storage_backend, storage_key
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
         invoiceId,
-        String(a.file_name ?? a.fileName ?? 'file'),
-        String(a.mime_type ?? a.mimeType ?? 'application/octet-stream'),
-        String(a.data_base64 ?? a.dataBase64 ?? ''),
-        parseInt(String(a.size_bytes ?? a.sizeBytes ?? '0'), 10),
+        name,
+        mime,
+        stored.data_base64,
+        stored.size_bytes,
         now,
+        stored.storage_backend,
+        stored.storage_key,
       ],
     );
   }
 }
 
 async function ioDeleteAttachments(pool, invoiceId) {
+  const existing = await pool.query(
+    `SELECT storage_backend, storage_key FROM invoices_owner_attachments WHERE invoice_id = $1`,
+    [invoiceId],
+  );
+  for (const row of existing.rows) {
+    if (String(row.storage_backend) === IO_STORAGE_R2 && row.storage_key) {
+      await r2DeleteObject(row.storage_key);
+    }
+  }
   await pool.query('DELETE FROM invoices_owner_attachments WHERE invoice_id = $1', [invoiceId]);
 }
 
@@ -773,15 +860,18 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const r = await pool.query(
-        `SELECT file_name, mime_type, data_base64 FROM invoices_owner_attachments
+        `SELECT file_name, mime_type, data_base64, storage_backend, storage_key
+         FROM invoices_owner_attachments
          WHERE id = $1 AND invoice_id = $2`,
         [attachmentId, invoiceId],
       );
       if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      const dataBase64 = await ioLoadAttachmentBase64(r.rows[0]);
+      if (!dataBase64) return res.status(404).json({ error: 'attachment_empty' });
       res.json({
         file_name: r.rows[0].file_name,
         mime_type: r.rows[0].mime_type,
-        data_base64: r.rows[0].data_base64,
+        data_base64: dataBase64,
       });
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
@@ -809,11 +899,28 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(400).json({ error: 'too_many_attachments' });
       }
       const now = new Date().toISOString();
+      const stored = await ioStoreAttachmentBlob({
+        invoiceId,
+        name: attCheck.name,
+        mime: attCheck.mime,
+        size: attCheck.size,
+        dataBase64: attCheck.data,
+      });
       await pool.query(
         `INSERT INTO invoices_owner_attachments (
-          invoice_id, file_name, mime_type, data_base64, size_bytes, created_at
-        ) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [invoiceId, attCheck.name, attCheck.mime, attCheck.data, attCheck.size, now],
+          invoice_id, file_name, mime_type, data_base64, size_bytes, created_at,
+          storage_backend, storage_key
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          invoiceId,
+          attCheck.name,
+          attCheck.mime,
+          stored.data_base64,
+          stored.size_bytes,
+          now,
+          stored.storage_backend,
+          stored.storage_key,
+        ],
       );
       await pool.query(
         `UPDATE invoices_owner SET updated_at = $1 WHERE id = $2`,
@@ -849,24 +956,45 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(403).json({ error: 'forbidden' });
       }
       const existing = await pool.query(
-        `SELECT id, file_name FROM invoices_owner_attachments
+        `SELECT id, file_name, storage_backend, storage_key FROM invoices_owner_attachments
          WHERE id = $1 AND invoice_id = $2`,
         [attachmentId, invoiceId],
       );
       if (existing.rows.length === 0) return res.status(404).json({ error: 'not found' });
-      const oldName = String(existing.rows[0].file_name || '');
+      const old = existing.rows[0];
+      const oldName = String(old.file_name || '');
       const attCheck = ioValidateSingleAttachment(b);
       if (attCheck.error) return res.status(400).json({ error: attCheck.error });
       const now = new Date().toISOString();
+      if (String(old.storage_backend) === IO_STORAGE_R2 && old.storage_key) {
+        await r2DeleteObject(old.storage_key);
+      }
       await pool.query(
         `DELETE FROM invoices_owner_attachments WHERE id = $1 AND invoice_id = $2`,
         [attachmentId, invoiceId],
       );
+      const stored = await ioStoreAttachmentBlob({
+        invoiceId,
+        name: attCheck.name,
+        mime: attCheck.mime,
+        size: attCheck.size,
+        dataBase64: attCheck.data,
+      });
       await pool.query(
         `INSERT INTO invoices_owner_attachments (
-          invoice_id, file_name, mime_type, data_base64, size_bytes, created_at
-        ) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [invoiceId, attCheck.name, attCheck.mime, attCheck.data, attCheck.size, now],
+          invoice_id, file_name, mime_type, data_base64, size_bytes, created_at,
+          storage_backend, storage_key
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          invoiceId,
+          attCheck.name,
+          attCheck.mime,
+          stored.data_base64,
+          stored.size_bytes,
+          now,
+          stored.storage_backend,
+          stored.storage_key,
+        ],
       );
       await pool.query(
         `UPDATE invoices_owner SET updated_at = $1 WHERE id = $2`,
@@ -1229,6 +1357,16 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
+      const existing = await pool.query(
+        `SELECT id, file_name, storage_backend, storage_key FROM invoices_owner_attachments
+         WHERE id = $1 AND invoice_id = $2`,
+        [attachmentId, invoiceId],
+      );
+      if (existing.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      const old = existing.rows[0];
+      if (String(old.storage_backend) === IO_STORAGE_R2 && old.storage_key) {
+        await r2DeleteObject(old.storage_key);
+      }
       const del = await pool.query(
         `DELETE FROM invoices_owner_attachments
          WHERE id = $1 AND invoice_id = $2
