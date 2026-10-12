@@ -48,6 +48,7 @@ class TomorrowWorkPlanScreen extends StatelessWidget {
       continueToFinancesOnNext: false,
       primaryWorkActionLabel: 'حفظ الخطة',
       workSavedSuccessMessage: 'تم حفظ الخطة',
+      enableLocalTextDraft: true,
     );
   }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -15,6 +16,7 @@ import '../models/daily_report_model.dart';
 import '../services/storage_service.dart';
 import '../services/route_persistence.dart';
 import '../services/last_project_persistence.dart';
+import '../services/tomorrow_work_plan_draft_persistence.dart';
 import 'home_screen.dart';
 
 /// قيمة ثابتة لخيار "أخرى" في قائمة المشروعات (id = 0 لا يوجد في قاعدة المشروعات)
@@ -100,6 +102,9 @@ class DetailedReportScreen extends StatefulWidget {
   /// زر «لا توجد خطة عمل» (خطة عمل الغد) — مهندس الموقع / المشرف العام.
   final bool enableNoWorkPlanOption;
 
+  /// مسودة نصية محلية صامتة (إنشاء خطة عمل الغد فقط): ما تم تنفيذه + تفاصيل الخطة.
+  final bool enableLocalTextDraft;
+
   const DetailedReportScreen({
     super.key,
     required this.user,
@@ -132,6 +137,7 @@ class DetailedReportScreen extends StatefulWidget {
     this.onReadOnlyProceedToFinances,
     this.editingReportId,
     this.enableNoWorkPlanOption = false,
+    this.enableLocalTextDraft = false,
   });
 
   @override
@@ -176,7 +182,24 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
 
   bool _persistingWorkOnly = false;
 
+  Timer? _localTextDraftDebounce;
+  bool _suppressLocalTextDraftSave = false;
+  bool _localTextDraftListenersAttached = false;
+
   bool get _isOtherProject => _selectedProject?.id == _otherProject.id;
+
+  /// مسودة محلية لإنشاء خطة غد فقط (ليست تعديلاً / عرضاً).
+  bool get _localTextDraftEnabled =>
+      widget.enableLocalTextDraft &&
+      widget.editingReportId == null &&
+      widget.initialReport == null &&
+      !widget.readOnly;
+
+  bool get _hasUnsavedLocalTextDraftContent {
+    if (!_localTextDraftEnabled) return false;
+    return _executedTodaySummaryController.text.trim().isNotEmpty ||
+        _summaryController.text.trim().isNotEmpty;
+  }
 
   String? get _initialProjectDisplayName {
     final fromInitial = widget.initialReport?.projectName?.trim();
@@ -221,10 +244,122 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       }
     }
     _loadData();
+    _attachLocalTextDraftListenersIfNeeded();
+  }
+
+  void _attachLocalTextDraftListenersIfNeeded() {
+    if (!_localTextDraftEnabled || _localTextDraftListenersAttached) return;
+    _localTextDraftListenersAttached = true;
+    _summaryController.addListener(_scheduleLocalTextDraftSave);
+    _executedTodaySummaryController.addListener(_scheduleLocalTextDraftSave);
+  }
+
+  void _scheduleLocalTextDraftSave() {
+    if (!_localTextDraftEnabled || _suppressLocalTextDraftSave) return;
+    // تحديث canPop لتنبيه الرجوع عند وجود نص.
+    if (mounted) setState(() {});
+    _localTextDraftDebounce?.cancel();
+    _localTextDraftDebounce = Timer(const Duration(milliseconds: 500), () {
+      _persistLocalTextDraftFor(_selectedProject);
+    });
+  }
+
+  Future<void> _persistLocalTextDraftFor(ProjectModel? project) async {
+    if (!_localTextDraftEnabled || project == null) return;
+    try {
+      await saveTomorrowWorkPlanTextDraft(
+        userId: widget.user.id,
+        projectId: project.id,
+        executedTodaySummary: _executedTodaySummaryController.text,
+        tomorrowPlanDetails: _summaryController.text,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _maybeRestoreLocalTextDraft() async {
+    if (!_localTextDraftEnabled) return;
+    final project = _selectedProject;
+    if (project == null) return;
+    TomorrowWorkPlanTextDraft? draft;
+    try {
+      draft = await getTomorrowWorkPlanTextDraft(
+        userId: widget.user.id,
+        projectId: project.id,
+      );
+    } catch (_) {
+      return;
+    }
+    if (draft == null || !mounted) return;
+
+    // ج: لا نكتب فوق بيانات غير فارغة (من السيرفر أو ما كتبه المستخدم).
+    final fillExecuted = _executedTodaySummaryController.text.trim().isEmpty &&
+        draft.executedTodaySummary.trim().isNotEmpty;
+    final fillDetails = _summaryController.text.trim().isEmpty &&
+        draft.tomorrowPlanDetails.trim().isNotEmpty;
+    if (!fillExecuted && !fillDetails) return;
+
+    _suppressLocalTextDraftSave = true;
+    if (fillExecuted) {
+      _executedTodaySummaryController.text = draft.executedTodaySummary;
+    }
+    if (fillDetails) {
+      _summaryController.text = draft.tomorrowPlanDetails;
+    }
+    _suppressLocalTextDraftSave = false;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _clearLocalTextDraftForSelectedProject() async {
+    final project = _selectedProject;
+    if (!_localTextDraftEnabled || project == null) return;
+    try {
+      await clearTomorrowWorkPlanTextDraft(
+        userId: widget.user.id,
+        projectId: project.id,
+      );
+    } catch (_) {}
+  }
+
+  Future<bool> _confirmLeaveWithUnsavedLocalTexts() async {
+    if (!_hasUnsavedLocalTextDraftContent) return true;
+    await _persistLocalTextDraftFor(_selectedProject);
+    if (!mounted) return false;
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('نص غير محفوظ'),
+        content: const Text(
+          'لديك مسودة غير مرسلة. يمكنك الخروج وستُستعاد عند العودة، أو البقاء لإكمال الكتابة.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('البقاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF1B5E20),
+            ),
+            child: const Text('الخروج'),
+          ),
+        ],
+      ),
+    );
+    return leave == true;
   }
 
   @override
   void dispose() {
+    _localTextDraftDebounce?.cancel();
+    if (_localTextDraftListenersAttached) {
+      _summaryController.removeListener(_scheduleLocalTextDraftSave);
+      _executedTodaySummaryController.removeListener(_scheduleLocalTextDraftSave);
+    }
+    // حفظ أخير قبل التخلّص من الشاشة (مثلاً قتل المسار).
+    if (_localTextDraftEnabled && _selectedProject != null) {
+      unawaited(_persistLocalTextDraftFor(_selectedProject));
+    }
     _summaryController.dispose();
     _executedTodaySummaryController.dispose();
     _otherProjectNameController.dispose();
@@ -319,6 +454,8 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       if (!_initialReportApplied && widget.initialReport != null) {
         await _applyInitialReport(widget.initialReport!);
         _initialReportApplied = true;
+      } else if (_localTextDraftEnabled) {
+        await _maybeRestoreLocalTextDraft();
       }
       if (loadError != null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -988,6 +1125,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
       } else {
         await _db.addDetailedReport(report);
       }
+      await _clearLocalTextDraftForSelectedProject();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -2147,7 +2285,16 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
           )
         : null;
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_hasUnsavedLocalTextDraftContent,
+      onPopInvokedWithResult: (bool didPop, dynamic result) async {
+        if (didPop) return;
+        final leave = await _confirmLeaveWithUnsavedLocalTexts();
+        if (leave && mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(widget.appBarTitle),
         backgroundColor: const Color(0xFF1B5E20),
@@ -2253,7 +2400,11 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                 ],
                 onChanged: _lockProjectAndDate
                     ? null
-                    : (v) {
+                    : (v) async {
+                        final previous = _selectedProject;
+                        if (_localTextDraftEnabled && previous != null) {
+                          await _persistLocalTextDraftFor(previous);
+                        }
                         setState(() {
                           _selectedProject = v;
                           _workSiteRows = [
@@ -2267,9 +2418,18 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
                           _zones = [];
                           _buildingsCache.clear();
                           _loadingStructure = false;
+                          if (_localTextDraftEnabled) {
+                            _suppressLocalTextDraftSave = true;
+                            _summaryController.clear();
+                            _executedTodaySummaryController.clear();
+                            _suppressLocalTextDraftSave = false;
+                          }
                         });
                         if (v != null && v.id != _otherProject.id) {
-                          _loadStructureForProject(v.id);
+                          await _loadStructureForProject(v.id);
+                        }
+                        if (_localTextDraftEnabled) {
+                          await _maybeRestoreLocalTextDraft();
                         }
                       },
                 validator: (v) => v == null ? 'المشروع إلزامي' : null,
@@ -2756,6 +2916,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 
