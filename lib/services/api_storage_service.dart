@@ -3709,13 +3709,18 @@ class ApiStorageService {
   }
 
   /// إنشاء بيانات صرف (بنود منفردة). [autoApprove]=true لمدير المشروعات (خصم فوري).
+  /// [expenseDate] يوم الصرف الفعلي (افتراضي اليوم؛ لا يقبل مستقبلاً على الخادم).
   Future<List<int>> createExpenseStatements({
     required int userId,
     int? projectId,
     String? projectName,
     required List<ExpenseItem> expenses,
     bool autoApprove = false,
+    DateTime? expenseDate,
   }) async {
+    final day = expenseDate ?? DateTime.now();
+    final ymd =
+        '${day.year.toString().padLeft(4, '0')}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
     final uri = Uri.parse(_path('expense-statements'));
     final r = await http.post(
       uri,
@@ -3726,6 +3731,7 @@ class ApiStorageService {
           'projectName': projectName.trim(),
         'expenses': expenses.map((e) => e.toJson()).toList(),
         'autoApprove': autoApprove,
+        'expenseDate': ymd,
       }),
       headers: _reqHeaders({'Content-Type': 'application/json'}),
     );

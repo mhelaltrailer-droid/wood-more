@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../models/user_model.dart';
 import '../models/detailed_report_model.dart';
 import '../models/daily_report_model.dart';
@@ -11,7 +12,7 @@ import '../services/storage_service.dart';
 import '../utils/full_screen_image.dart';
 import 'home_screen.dart';
 
-const int _kMaxExpenseItems = 4;
+const int _kMaxExpenseItems = 6;
 
 const ProjectModel _otherProject = ProjectModel(
   id: ReportsSysModel.otherProjectId,
@@ -94,6 +95,7 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
   ProjectModel? _selectedProject;
   final _otherProjectController = TextEditingController();
   double _balance = 0;
+  late DateTime _expenseDate;
 
   bool get _isOtherProject => _selectedProject?.id == _otherProject.id;
 
@@ -105,6 +107,8 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    _expenseDate = DateTime(now.year, now.month, now.day);
     final existing = widget.report.expenses.where(_expenseHasContent).take(_kMaxExpenseItems).toList();
     if (existing.isEmpty) {
       _expenses = [ExpenseItem()];
@@ -117,6 +121,25 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
     if (widget.showProjectSelector) {
       _loadProjects();
     }
+  }
+
+  Future<void> _pickExpenseDate() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _expenseDate.isAfter(today) ? today : _expenseDate,
+      firstDate: DateTime(2020),
+      lastDate: today,
+      locale: const Locale('ar'),
+      helpText: 'تاريخ الصرف',
+      cancelText: 'إلغاء',
+      confirmText: 'تأكيد',
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _expenseDate = DateTime(picked.year, picked.month, picked.day);
+    });
   }
 
   @override
@@ -219,6 +242,7 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
         projectName: projectName,
         expenses: toSave,
         autoApprove: widget.autoApprove,
+        expenseDate: _expenseDate,
       );
 
       if (!mounted) return;
@@ -326,6 +350,26 @@ class _DetailedReportFinancesScreenState extends State<DetailedReportFinancesScr
                 ? 'أدخل بند الصرف ثم أضف المزيد عند الحاجة (حتى $_kMaxExpenseItems بنود). يُحفظ معتمداً ويُخصم من رصيدك مباشرة.'
                 : 'أدخل بند الصرف ثم أضف المزيد عند الحاجة (حتى $_kMaxExpenseItems بنود). لن يُخصم من رصيدك إلا بعد اعتماد مدير المشروعات.',
             style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+          InkWell(
+            onTap: _saving ? null : _pickExpenseDate,
+            child: InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'تاريخ الصرف',
+                border: OutlineInputBorder(),
+                suffixIcon: Icon(Icons.calendar_today),
+              ),
+              child: Text(
+                DateFormat('yyyy/MM/dd', 'ar').format(_expenseDate),
+                style: const TextStyle(fontSize: 16),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'افتراضي اليوم — يمكن تغييره لأي يوم سابق فقط',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
           ),
           const SizedBox(height: 16),
           ...List.generate(_expenses.length, (i) {

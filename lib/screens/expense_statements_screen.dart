@@ -248,7 +248,7 @@ class _ExpenseStatementsScreenState extends State<ExpenseStatementsScreen> {
   }
 
   Widget _buildBody() {
-    final dateFmt = DateFormat('yyyy/MM/dd HH:mm', 'ar');
+    final dayFmt = DateFormat('yyyy/MM/dd', 'ar');
     return _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -323,7 +323,7 @@ class _ExpenseStatementsScreenState extends State<ExpenseStatementsScreen> {
                                     style: const TextStyle(fontWeight: FontWeight.w600),
                                   ),
                                   Text(
-                                    'التاريخ: ${dateFmt.format(item.createdAt.toLocal())}',
+                                    item.datesLabelAr(dayFormat: dayFmt),
                                     style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                                   ),
                                   if (item.isRejected &&

@@ -42,6 +42,10 @@ class CustodyExpenseLogEntry {
   /// مرحلة حدث الصرف في السجل (null لحركات الرصيد).
   final CustodyExpensePhase? expensePhase;
 
+  /// يوم الصرف الفعلي (إن وُجد) ويوم إدخال البيان في النظام.
+  final DateTime? expenseDate;
+  final DateTime? enteredAt;
+
   const CustodyExpenseLogEntry({
     required this.key,
     required this.category,
@@ -61,6 +65,8 @@ class CustodyExpenseLogEntry {
     this.rejectionReason,
     this.respondedByName,
     this.expensePhase,
+    this.expenseDate,
+    this.enteredAt,
   });
 
   bool get isBalance => category == CustodyLogCategory.balance;
@@ -139,6 +145,31 @@ class CustodyExpenseLogEntry {
       if (reason != null && reason.isNotEmpty) return 'سبب الرفض: $reason';
     }
     return null;
+  }
+
+  /// نص تواريخ الصرف/الإدخال عندما يختلفان (أو سطر موحّد إن تطابقا).
+  String? datesLabelAr({String Function(DateTime)? formatDay}) {
+    if (isBalance || expenseDate == null) return null;
+    String fmt(DateTime d) {
+      if (formatDay != null) return formatDay(d);
+      final local = d;
+      final y = local.year.toString().padLeft(4, '0');
+      final m = local.month.toString().padLeft(2, '0');
+      final day = local.day.toString().padLeft(2, '0');
+      return '$y/$m/$day';
+    }
+
+    final spent = DateTime(expenseDate!.year, expenseDate!.month, expenseDate!.day);
+    final enteredSrc = enteredAt ?? occurredAt;
+    final entered = DateTime(
+      enteredSrc.toLocal().year,
+      enteredSrc.toLocal().month,
+      enteredSrc.toLocal().day,
+    );
+    if (spent == entered) {
+      return 'تم الصرف والإدخال يوم: ${fmt(spent)}';
+    }
+    return 'تم الصرف يوم: ${fmt(spent)}\nتم الإدخال يوم: ${fmt(entered)}';
   }
 
   bool matchesUser(int userId) =>

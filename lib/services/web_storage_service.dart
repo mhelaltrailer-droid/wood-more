@@ -3183,6 +3183,7 @@ class WebStorageService {
     String? projectName,
     required List<ExpenseItem> expenses,
     bool autoApprove = false,
+    DateTime? expenseDate,
   }) async =>
       throw UnsupportedError('بيانات الصرف تتطلب وضع API');
 

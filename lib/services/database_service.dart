@@ -55,7 +55,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 42,
+      version: 43,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -473,6 +473,13 @@ class DatabaseService {
         );
       } catch (_) {}
     }
+    if (oldVersion < 43) {
+      try {
+        await db.execute(
+          'ALTER TABLE expense_statements ADD COLUMN expense_date TEXT',
+        );
+      } catch (_) {}
+    }
   }
 
   Future<void> _createExpenseStatementsTable(Database db) async {
@@ -494,6 +501,7 @@ class DatabaseService {
         responded_by_user_name TEXT,
         responded_at TEXT,
         created_at TEXT NOT NULL,
+        expense_date TEXT,
         source TEXT NOT NULL DEFAULT 'engineer',
         FOREIGN KEY (submitter_user_id) REFERENCES users (id),
         FOREIGN KEY (balance_user_id) REFERENCES users (id)
@@ -4338,6 +4346,7 @@ class DatabaseService {
     String? projectName,
     required List<ExpenseItem> expenses,
     bool autoApprove = false,
+    DateTime? expenseDate,
   }) async {
     final db = await database;
     final users = await db.query('users', where: 'id = ?', whereArgs: [userId]);
@@ -4357,6 +4366,16 @@ class DatabaseService {
         (projectName == null || projectName.trim().isEmpty)) {
       throw Exception('اختر المشروع');
     }
+    final today = DateTime.now();
+    final todayOnly = DateTime(today.year, today.month, today.day);
+    final expenseDay = expenseDate == null
+        ? todayOnly
+        : DateTime(expenseDate.year, expenseDate.month, expenseDate.day);
+    if (expenseDay.isAfter(todayOnly)) {
+      throw Exception('لا يمكن اختيار تاريخ صرف مستقبلي');
+    }
+    final expenseYmd =
+        '${expenseDay.year.toString().padLeft(4, '0')}-${expenseDay.month.toString().padLeft(2, '0')}-${expenseDay.day.toString().padLeft(2, '0')}';
     final resolvedProjectId =
         (projectId != null && projectId > 0) ? projectId : null;
     final resolvedProjectName = projectName?.trim();
@@ -4387,6 +4406,7 @@ class DatabaseService {
         'responded_by_user_name': autoApprove ? user['name'] : null,
         'responded_at': autoApprove ? now : null,
         'created_at': now,
+        'expense_date': expenseYmd,
         'source': source,
       });
       ids.add(id);

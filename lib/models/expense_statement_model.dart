@@ -1,3 +1,5 @@
+import 'package:intl/intl.dart';
+
 /// بيان صرف عهدة (بند واحد) — بانتظار الاعتماد / معتمد / مرفوض
 class ExpenseStatementModel {
   static const String statusPending = 'pending';
@@ -23,6 +25,9 @@ class ExpenseStatementModel {
   final String? respondedByUserName;
   final DateTime? respondedAt;
   final DateTime createdAt;
+
+  /// يوم الصرف الفعلي (تاريخ فقط، بدون وقت).
+  final DateTime expenseDate;
   final String source;
 
   const ExpenseStatementModel({
@@ -42,12 +47,25 @@ class ExpenseStatementModel {
     this.respondedByUserName,
     this.respondedAt,
     required this.createdAt,
+    required this.expenseDate,
     this.source = 'engineer',
   });
 
   bool get isPending => status == statusPending;
   bool get isApproved => status == statusApproved;
   bool get isRejected => status == statusRejected;
+
+  DateTime get expenseDateOnly =>
+      DateTime(expenseDate.year, expenseDate.month, expenseDate.day);
+
+  DateTime get createdDateOnly {
+    final c = createdAt.toLocal();
+    return DateTime(c.year, c.month, c.day);
+  }
+
+  /// هل يوم الصرف يختلف عن يوم إدخال البيان في النظام.
+  bool get expenseDateDiffersFromCreated =>
+      expenseDateOnly != createdDateOnly;
 
   String get statusLabelAr {
     switch (status) {
@@ -58,6 +76,40 @@ class ExpenseStatementModel {
       default:
         return 'بانتظار الاعتماد';
     }
+  }
+
+  /// نص عرض التواريخ: سطر واحد إن تطابقا، وسطران إن اختلفا.
+  String datesLabelAr({DateFormat? dayFormat}) {
+    final fmt = dayFormat ?? DateFormat('yyyy/MM/dd', 'ar');
+    final spent = fmt.format(expenseDateOnly);
+    if (!expenseDateDiffersFromCreated) {
+      return 'تم الصرف والإدخال يوم: $spent';
+    }
+    final entered = fmt.format(createdDateOnly);
+    return 'تم الصرف يوم: $spent\nتم الإدخال يوم: $entered';
+  }
+
+  static DateTime _dateOnlyFromCreated(DateTime created) {
+    final c = created.toLocal();
+    return DateTime(c.year, c.month, c.day);
+  }
+
+  static DateTime _parseExpenseDate(dynamic raw, DateTime createdAt) {
+    final fallback = _dateOnlyFromCreated(createdAt);
+    if (raw == null) return fallback;
+    final s = raw.toString().trim();
+    if (s.isEmpty) return fallback;
+    final ymd = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(s);
+    if (ymd != null) {
+      return DateTime(
+        int.parse(ymd.group(1)!),
+        int.parse(ymd.group(2)!),
+        int.parse(ymd.group(3)!),
+      );
+    }
+    final parsed = DateTime.tryParse(s);
+    if (parsed == null) return fallback;
+    return DateTime(parsed.year, parsed.month, parsed.day);
   }
 
   factory ExpenseStatementModel.fromMap(Map<String, dynamic> map) {
@@ -78,6 +130,12 @@ class ExpenseStatementModel {
       return DateTime.tryParse(v.toString());
     }
 
+    final createdAt = pDate(map['created_at'] ?? map['createdAt']) ?? DateTime.now();
+    final expenseDate = _parseExpenseDate(
+      map['expense_date'] ?? map['expenseDate'],
+      createdAt,
+    );
+
     return ExpenseStatementModel(
       id: pInt(map['id']) ?? 0,
       submitterUserId: pInt(map['submitter_user_id'] ?? map['submitterUserId']) ?? 0,
@@ -97,7 +155,8 @@ class ExpenseStatementModel {
       respondedByUserName: map['responded_by_user_name']?.toString() ??
           map['respondedByUserName']?.toString(),
       respondedAt: pDate(map['responded_at'] ?? map['respondedAt']),
-      createdAt: pDate(map['created_at'] ?? map['createdAt']) ?? DateTime.now(),
+      createdAt: createdAt,
+      expenseDate: expenseDate,
       source: (map['source'] ?? 'engineer').toString(),
     );
   }

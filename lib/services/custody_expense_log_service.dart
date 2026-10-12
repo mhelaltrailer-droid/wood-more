@@ -102,6 +102,8 @@ Future<CustodyExpenseLog> loadCustodyExpenseLog() async {
             ? ExpenseStatementModel.statusPending
             : s.status,
         expensePhase: CustodyExpensePhase.submitted,
+        expenseDate: s.expenseDate,
+        enteredAt: s.createdAt,
       ),
     );
 
@@ -129,6 +131,8 @@ Future<CustodyExpenseLog> loadCustodyExpenseLog() async {
           expensePhase: s.isApproved
               ? CustodyExpensePhase.approved
               : CustodyExpensePhase.rejected,
+          expenseDate: s.expenseDate,
+          enteredAt: s.createdAt,
         ),
       );
     }

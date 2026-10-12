@@ -36,6 +36,49 @@ function esParseAmount(raw) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** تاريخ اليوم UTC+3 تقريباً كافٍ للتحقق من «لا مستقبلي»؛ العميل يرسل YYYY-MM-DD. */
+function esTodayYmd() {
+  const now = new Date();
+  const egypt = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+  const y = egypt.getUTCFullYear();
+  const m = String(egypt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(egypt.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** تاريخ الصرف YYYY-MM-DD. فارغ → اليوم. مستقبلي → خطأ. */
+function esNormalizeExpenseDate(raw) {
+  const today = esTodayYmd();
+  let s = String(raw ?? '').trim();
+  if (!s) return { ok: true, value: today };
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) s = s.slice(0, 10);
+  else {
+    const parsed = new Date(s);
+    if (Number.isNaN(parsed.getTime())) {
+      return { ok: false, error: 'تاريخ الصرف غير صالح' };
+    }
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    s = `${y}-${m}-${d}`;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return { ok: false, error: 'تاريخ الصرف غير صالح' };
+  }
+  if (s > today) {
+    return { ok: false, error: 'لا يمكن اختيار تاريخ صرف مستقبلي' };
+  }
+  return { ok: true, value: s };
+}
+
+function esExpenseDateFromRow(row) {
+  const raw = String(row.expense_date || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const created = String(row.created_at || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(created)) return created.slice(0, 10);
+  return esTodayYmd();
+}
+
 function esRowToJson(row) {
   return {
     id: parseInt(row.id, 10),
@@ -57,6 +100,7 @@ function esRowToJson(row) {
     responded_by_user_name: row.responded_by_user_name || null,
     responded_at: row.responded_at || null,
     created_at: row.created_at,
+    expense_date: esExpenseDateFromRow(row),
     source: row.source || 'engineer',
   };
 }
@@ -166,6 +210,7 @@ async function ensureExpenseStatementsTable(pool) {
         responded_by_user_name TEXT,
         responded_at TEXT,
         created_at TEXT NOT NULL,
+        expense_date TEXT,
         source TEXT NOT NULL DEFAULT 'engineer'
       )
     `);
@@ -177,6 +222,10 @@ async function ensureExpenseStatementsTable(pool) {
       `CREATE INDEX IF NOT EXISTS idx_expense_statements_created
        ON expense_statements (created_at DESC)`,
     );
+    await pool.query(`
+      ALTER TABLE expense_statements
+        ADD COLUMN IF NOT EXISTS expense_date TEXT
+    `).catch(() => {});
     console.log('ensureExpenseStatementsTable: ok');
   } catch (e) {
     console.warn('ensureExpenseStatementsTable:', e.message);
@@ -251,6 +300,14 @@ function registerExpenseStatementsRoutes(
         return res.status(400).json({ error: 'اختر المشروع' });
       }
 
+      const expenseDateRaw =
+        b.expenseDate ?? b.expense_date ?? items[0]?.expense_date ?? items[0]?.expenseDate;
+      const expenseDateCheck = esNormalizeExpenseDate(expenseDateRaw);
+      if (!expenseDateCheck.ok) {
+        return res.status(400).json({ error: expenseDateCheck.error });
+      }
+      const expenseDate = expenseDateCheck.value;
+
       const now = new Date().toISOString();
       const status = autoApprove ? STATUS_APPROVED : STATUS_PENDING;
       const source = autoApprove ? 'manager_direct' : 'engineer';
@@ -263,8 +320,8 @@ function registerExpenseStatementsRoutes(
             balance_user_id, project_id, project_name,
             description, amount, image_path, status,
             responded_by_user_id, responded_by_user_name, responded_at,
-            created_at, source
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+            created_at, source, expense_date
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
           RETURNING id`,
           [
             userId,
@@ -282,6 +339,7 @@ function registerExpenseStatementsRoutes(
             autoApprove ? now : null,
             now,
             source,
+            expenseDate,
           ],
         );
         const id = parseInt(ins.rows[0].id, 10);

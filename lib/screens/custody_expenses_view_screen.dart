@@ -508,6 +508,25 @@ class _MovementsLogTabState extends State<_MovementsLogTab> {
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                   ),
                   if (!e.isBalance) ...[
+                    Builder(
+                      builder: (_) {
+                        final dayFmt = DateFormat('yyyy/MM/dd', 'ar');
+                        final dates = e.datesLabelAr(
+                          formatDay: (d) => dayFmt.format(d),
+                        );
+                        if (dates == null) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            dates,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade700,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                     if (project.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 6),
