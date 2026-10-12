@@ -343,11 +343,29 @@ async function ensureReportsSysTables() {
         report_id INTEGER NOT NULL REFERENCES reports_sys(id) ON DELETE CASCADE,
         file_name TEXT NOT NULL,
         mime_type TEXT NOT NULL,
-        data_base64 TEXT NOT NULL,
+        data_base64 TEXT,
         size_bytes INTEGER NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        storage_backend TEXT NOT NULL DEFAULT 'db',
+        storage_key TEXT
       )
     `);
+    try {
+      await pool.query(`
+        ALTER TABLE reports_sys_attachments
+          ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'db'
+      `);
+      await pool.query(`
+        ALTER TABLE reports_sys_attachments
+          ADD COLUMN IF NOT EXISTS storage_key TEXT
+      `);
+      await pool.query(`
+        ALTER TABLE reports_sys_attachments
+          ALTER COLUMN data_base64 DROP NOT NULL
+      `);
+    } catch (e) {
+      console.warn('ensureReportsSysTables attachment storage cols:', e.message);
+    }
     await pool.query(`
       CREATE TABLE IF NOT EXISTS reports_sys_actions (
         id SERIAL PRIMARY KEY,
@@ -393,6 +411,97 @@ async function ensureReportsSysTables() {
   } catch (e) {
     console.warn('ensureReportsSysTables:', e.message);
   }
+}
+
+async function reportsSysStoreAttachmentBlob({
+  reportId,
+  fileName,
+  mimeType,
+  sizeBytes,
+  dataBase64,
+}) {
+  const rawB64 = stripBase64Payload(dataBase64);
+  const body = Buffer.from(rawB64, 'base64');
+  if (isR2Configured()) {
+    const key = `reports-sys/${reportId}/${crypto.randomUUID()}-${attachmentSafeFileSuffix(fileName)}`;
+    await r2PutObject({
+      key,
+      body,
+      contentType: mimeType || 'application/octet-stream',
+    });
+    return {
+      storage_backend: 'r2',
+      storage_key: key,
+      data_base64: null,
+      size_bytes: sizeBytes || body.length,
+    };
+  }
+  return {
+    storage_backend: 'db',
+    storage_key: null,
+    data_base64: rawB64,
+    size_bytes: sizeBytes || body.length,
+  };
+}
+
+async function reportsSysLoadAttachmentBase64(row) {
+  if (String(row.storage_backend || 'db') === 'r2' && row.storage_key) {
+    const buf = await r2GetObjectBuffer(row.storage_key);
+    return buf.toString('base64');
+  }
+  return stripBase64Payload(row.data_base64 || '');
+}
+
+async function reportsSysDeleteAttachments(pool, reportId) {
+  const existing = await pool.query(
+    `SELECT storage_backend, storage_key FROM reports_sys_attachments WHERE report_id = $1`,
+    [reportId],
+  );
+  for (const row of existing.rows) {
+    await deleteAttachmentR2Object(row);
+  }
+  await pool.query('DELETE FROM reports_sys_attachments WHERE report_id = $1', [
+    reportId,
+  ]);
+}
+
+async function reportsSysInsertAttachment(pool, reportId, att, now) {
+  const fileName = String(att.fileName ?? att.file_name ?? 'file').trim();
+  const mimeType = String(
+    att.mimeType ?? att.mime_type ?? 'application/octet-stream',
+  );
+  const dataBase64 = String(att.dataBase64 ?? att.data_base64 ?? '');
+  const sizeBytes = parseInt(String(att.sizeBytes ?? att.size_bytes ?? '0'), 10);
+  if (!dataBase64) return false;
+  if (sizeBytes > REPORTS_SYS_MAX_ATTACHMENT_BYTES) {
+    const err = new Error('attachment_too_large');
+    err.code = 'attachment_too_large';
+    throw err;
+  }
+  const stored = await reportsSysStoreAttachmentBlob({
+    reportId,
+    fileName,
+    mimeType,
+    sizeBytes,
+    dataBase64,
+  });
+  await pool.query(
+    `INSERT INTO reports_sys_attachments (
+      report_id, file_name, mime_type, data_base64, size_bytes, created_at,
+      storage_backend, storage_key
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [
+      reportId,
+      fileName,
+      mimeType,
+      stored.data_base64,
+      stored.size_bytes,
+      now,
+      stored.storage_backend,
+      stored.storage_key,
+    ],
+  );
+  return true;
 }
 
 async function reportsSysNotifyPrimaryAdmin(pool, fields) {
@@ -5863,6 +5972,7 @@ app.delete('/reports-sys/:id', async (req, res) => {
     );
     if (existing.rows.length === 0) return res.status(404).json({ error: 'not found' });
 
+    await reportsSysDeleteAttachments(pool, id);
     await pool.query('DELETE FROM reports_sys WHERE id = $1', [id]);
 
     await reportsSysNotifyPrimaryAdmin(pool, {
@@ -5887,15 +5997,17 @@ app.get('/reports-sys/:id/attachments/:attachmentId', async (req, res) => {
       return res.status(400).json({ error: 'invalid' });
     }
     const r = await pool.query(
-      `SELECT file_name, mime_type, data_base64 FROM reports_sys_attachments
+      `SELECT file_name, mime_type, data_base64, storage_backend, storage_key
+       FROM reports_sys_attachments
        WHERE id = $1 AND report_id = $2`,
       [attachmentId, reportId],
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const dataBase64 = await reportsSysLoadAttachmentBase64(r.rows[0]);
     res.json({
       file_name: r.rows[0].file_name,
       mime_type: r.rows[0].mime_type,
-      data_base64: r.rows[0].data_base64,
+      data_base64: dataBase64,
     });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -6043,22 +6155,17 @@ app.put('/reports-sys/:id', async (req, res) => {
 
     let savedAttachmentsCount = 0;
     if (Array.isArray(b.attachments)) {
-      await pool.query('DELETE FROM reports_sys_attachments WHERE report_id = $1', [id]);
-      for (const att of b.attachments) {
-        const fileName = String(att.fileName ?? att.file_name ?? 'file').trim();
-        const mimeType = String(att.mimeType ?? att.mime_type ?? 'application/octet-stream');
-        const dataBase64 = String(att.dataBase64 ?? att.data_base64 ?? '');
-        const sizeBytes = parseInt(String(att.sizeBytes ?? att.size_bytes ?? '0'), 10);
-        if (!dataBase64) continue;
-        if (sizeBytes > REPORTS_SYS_MAX_ATTACHMENT_BYTES) {
+      await reportsSysDeleteAttachments(pool, id);
+      try {
+        for (const att of b.attachments) {
+          const inserted = await reportsSysInsertAttachment(pool, id, att, now);
+          if (inserted) savedAttachmentsCount += 1;
+        }
+      } catch (attErr) {
+        if (attErr && attErr.code === 'attachment_too_large') {
           return res.status(400).json({ error: 'attachment_too_large' });
         }
-        await pool.query(
-          `INSERT INTO reports_sys_attachments (report_id, file_name, mime_type, data_base64, size_bytes, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
-          [id, fileName, mimeType, dataBase64, sizeBytes, now],
-        );
-        savedAttachmentsCount += 1;
+        throw attErr;
       }
     }
 
@@ -6436,14 +6543,23 @@ app.post('/reports-sys/:id/relaunch', async (req, res) => {
     );
     const newId = parseInt(ins.rows[0].id, 10);
     const oldAtt = await pool.query(
-      'SELECT file_name, mime_type, data_base64, size_bytes FROM reports_sys_attachments WHERE report_id = $1',
+      `SELECT file_name, mime_type, data_base64, size_bytes, storage_backend, storage_key
+       FROM reports_sys_attachments WHERE report_id = $1`,
       [sourceId],
     );
     for (const a of oldAtt.rows) {
-      await pool.query(
-        `INSERT INTO reports_sys_attachments (report_id, file_name, mime_type, data_base64, size_bytes, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [newId, a.file_name, a.mime_type, a.data_base64, a.size_bytes, now],
+      const dataBase64 = await reportsSysLoadAttachmentBase64(a);
+      if (!dataBase64) continue;
+      await reportsSysInsertAttachment(
+        pool,
+        newId,
+        {
+          file_name: a.file_name,
+          mime_type: a.mime_type,
+          data_base64: dataBase64,
+          size_bytes: a.size_bytes,
+        },
+        now,
       );
     }
     await reportsSysInsertAction(pool, {

@@ -28,10 +28,19 @@ CREATE TABLE IF NOT EXISTS reports_sys_attachments (
   report_id INTEGER NOT NULL REFERENCES reports_sys(id) ON DELETE CASCADE,
   file_name TEXT NOT NULL,
   mime_type TEXT NOT NULL,
-  data_base64 TEXT NOT NULL,
+  data_base64 TEXT,
   size_bytes INTEGER NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  storage_backend TEXT NOT NULL DEFAULT 'db',
+  storage_key TEXT
 );
+
+ALTER TABLE reports_sys_attachments
+  ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'db';
+ALTER TABLE reports_sys_attachments
+  ADD COLUMN IF NOT EXISTS storage_key TEXT;
+ALTER TABLE reports_sys_attachments
+  ALTER COLUMN data_base64 DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS reports_sys_actions (
   id SERIAL PRIMARY KEY,

@@ -355,12 +355,21 @@ const ATTACHMENT_SOURCES = {
       const id = attParseId(attachmentId);
       if (id == null) throw attErr(400, 'invalid_attachment_id');
       const r = await pool.query(
-        `SELECT file_name, mime_type, data_base64 FROM reports_sys_attachments
+        `SELECT file_name, mime_type, data_base64, storage_backend, storage_key
+         FROM reports_sys_attachments
          WHERE id = $1 AND report_id = $2`,
         [id, recordId],
       );
       if (r.rows.length === 0) throw attErr(404, 'attachment_not_found');
       const row = r.rows[0];
+      if (String(row.storage_backend || 'db') === 'r2' && row.storage_key) {
+        const buf = await r2GetObjectBuffer(row.storage_key);
+        return {
+          file_name: row.file_name,
+          mime_type: row.mime_type || 'application/octet-stream',
+          data_base64: buf.toString('base64'),
+        };
+      }
       return attFileFromDataUrl(row.data_base64, {
         fileName: row.file_name,
         fallbackMime: row.mime_type,
