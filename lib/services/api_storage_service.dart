@@ -576,7 +576,7 @@ class ApiStorageService {
     return InvoiceStructureProjectState.fromMap(data);
   }
 
-  Future<String> setInvoiceStructureMeasureType({
+  Future<Map<String, dynamic>> setInvoiceStructureMeasureType({
     required int userId,
     required int projectId,
     required String measureType,
@@ -596,8 +596,58 @@ class ApiStorageService {
     }
     final decoded = r.body.isEmpty
         ? <String, dynamic>{}
-        : jsonDecode(r.body) as Map<String, dynamic>;
-    return (decoded['measure_type'] ?? measureType).toString();
+        : Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+    return decoded;
+  }
+
+  /// نسخ هيكلة المشروعات → هيكلة المستخلصات لمشروع واحد (إن كانت فارغة).
+  Future<Map<String, dynamic>> importInvoiceStructureFromProject({
+    required int userId,
+    required int projectId,
+    bool onlyIfEmpty = true,
+    bool force = false,
+  }) async {
+    final uri = Uri.parse(_path('invoice-structure/import-from-project'));
+    final r = await http.post(
+      uri,
+      body: jsonEncode({
+        'userId': userId,
+        'projectId': projectId,
+        'onlyIfEmpty': onlyIfEmpty,
+        'force': force,
+      }),
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+    );
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(
+        r,
+        path: 'invoice-structure/import-from-project',
+      );
+    }
+    return r.body.isEmpty
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+  }
+
+  /// نسخ هيكلة المشروعات لكل المشاريع التي لا تملك مواقع مستخلصات بعد.
+  Future<Map<String, dynamic>> importInvoiceStructureFromAllProjects({
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('invoice-structure/import-from-project-all'));
+    final r = await http.post(
+      uri,
+      body: jsonEncode({'userId': userId}),
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+    );
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(
+        r,
+        path: 'invoice-structure/import-from-project-all',
+      );
+    }
+    return r.body.isEmpty
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(r.body) as Map);
   }
 
   Future<int> addInvoiceStructureLocation({

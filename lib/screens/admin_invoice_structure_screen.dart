@@ -153,21 +153,29 @@ class _AdminInvoiceStructureScreenState
       return;
     }
     try {
-      await _api.setInvoiceStructureMeasureType(
+      final result = await _api.setInvoiceStructureMeasureType(
         userId: widget.admin.id,
         projectId: _selectedProject!.id,
         measureType: chosen,
       );
       if (!mounted) return;
       setState(() => _measureType = chosen);
+      final importMap = result['import'] is Map
+          ? Map<String, dynamic>.from(result['import'] as Map)
+          : null;
+      final imported = (importMap?['imported'] is num)
+          ? (importMap!['imported'] as num).toInt()
+          : 0;
+      final skipped = importMap?['skipped'] == true;
+      final msg = imported > 0
+          ? 'تم اعتماد ${invoiceStructureMeasureLabel(chosen)} — واستيراد $imported موقعاً من هيكلة المشروعات'
+          : skipped
+              ? 'تم اعتماد ${invoiceStructureMeasureLabel(chosen)}'
+              : 'تم اعتماد ${invoiceStructureMeasureLabel(chosen)} — لا توجد مواقع في هيكلة المشروعات للاستيراد';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'تم اعتماد: ${invoiceStructureMeasureLabel(chosen)}',
-          ),
-          backgroundColor: Colors.green,
-        ),
+        SnackBar(content: Text(msg), backgroundColor: Colors.green),
       );
+      await _loadStructure();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -178,6 +186,100 @@ class _AdminInvoiceStructureScreenState
         _measureType = null;
         _flatList = [];
       });
+    }
+  }
+
+  Future<void> _importFromProjectStructure() async {
+    if (_selectedProject == null || !_isApi) return;
+    try {
+      setState(() => _loading = true);
+      final r = await _api.importInvoiceStructureFromProject(
+        userId: widget.admin.id,
+        projectId: _selectedProject!.id,
+        onlyIfEmpty: true,
+      );
+      if (!mounted) return;
+      final imported =
+          r['imported'] is num ? (r['imported'] as num).toInt() : 0;
+      final skipped = r['skipped'] == true;
+      final reason = r['reason']?.toString();
+      String msg;
+      if (imported > 0) {
+        msg = 'تم استيراد $imported موقعاً من هيكلة المشروعات';
+      } else if (reason == 'already_has_locations') {
+        msg = 'هيكلة المستخلصات تحتوي مواقع بالفعل — لم يُستورد شيء';
+      } else if (reason == 'no_source_locations') {
+        msg = 'لا توجد مواقع في هيكلة المشروعات لهذا المشروع';
+      } else {
+        msg = skipped ? 'لم يُستورد شيء' : 'تم';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: imported > 0 ? Colors.green : Colors.orange,
+        ),
+      );
+      await _loadStructure();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ الاستيراد: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  Future<void> _importFromAllProjects() async {
+    if (!_isApi) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: const Text(
+          'استيراد هيكلة المشروعات الحالية إلى هيكلة المستخلصات لكل المشاريع التي لا تملك مواقع مستخلصات بعد؟\nيمكن تعديلها لاحقاً لكل مشروع.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('استيراد الكل'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      setState(() => _loading = true);
+      final r = await _api.importInvoiceStructureFromAllProjects(
+        userId: widget.admin.id,
+      );
+      if (!mounted) return;
+      final projects =
+          r['imported_projects'] is num ? (r['imported_projects'] as num).toInt() : 0;
+      final nodes =
+          r['imported_nodes'] is num ? (r['imported_nodes'] as num).toInt() : 0;
+      final skipped =
+          r['skipped'] is num ? (r['skipped'] as num).toInt() : 0;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'تم: $projects مشروعاً ($nodes موقعاً). تخطي: $skipped',
+          ),
+          backgroundColor: Colors.green,
+        ),
+      );
+      if (_selectedProject != null) {
+        await _loadStructure(promptIfNeeded: false);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -596,6 +698,12 @@ class _AdminInvoiceStructureScreenState
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            OutlinedButton.icon(
+              onPressed: _loading ? null : _importFromAllProjects,
+              icon: const Icon(Icons.cloud_download_outlined),
+              label: const Text('استيراد هيكلة كل المشروعات'),
+            ),
+            const SizedBox(height: 12),
             DropdownButtonFormField<ProjectModel?>(
               value: _selectedProject,
               decoration: const InputDecoration(
@@ -658,6 +766,12 @@ class _AdminInvoiceStructureScreenState
                 label: const Text('إضافة موقع عمل (جذر)'),
                 onPressed: () => _addNode(parentId: null, type: 'work_site'),
               ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _loading ? null : _importFromProjectStructure,
+                icon: const Icon(Icons.download_outlined),
+                label: const Text('استيراد من هيكلة المشروعات'),
+              ),
               const SizedBox(height: 16),
               if (_loading)
                 const Center(
@@ -672,7 +786,7 @@ class _AdminInvoiceStructureScreenState
                     padding: EdgeInsets.all(24),
                     child: Center(
                       child: Text(
-                        'لا توجد مواقع بعد.\nأضف موقعاً فرعياً أو موقع عمل، ويمكن التفرع بلا حد (فرعي داخل فرعي، وعمل داخل عمل).',
+                        'لا توجد مواقع بعد.\nاضغط «استيراد من هيكلة المشروعات» أو أضف موقعاً يدوياً، ثم عدّل حسب المستخلصات.',
                         textAlign: TextAlign.center,
                       ),
                     ),

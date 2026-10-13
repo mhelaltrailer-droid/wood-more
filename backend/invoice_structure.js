@@ -77,6 +77,94 @@ function locationRowToJson(row) {
   };
 }
 
+/**
+ * نسخ شجرة project_locations → invoice_structure_locations لنفس المشروع.
+ * فقط الاسم/النوع/الترتيب/الأب — بدون أمتار أو أسعار.
+ */
+async function importProjectLocationsToInvoiceStructure(
+  pool,
+  projectId,
+  { onlyIfEmpty = true } = {},
+) {
+  const countR = await pool.query(
+    `SELECT COUNT(*)::int AS c
+     FROM invoice_structure_locations
+     WHERE project_id = $1`,
+    [projectId],
+  );
+  const existingCount = countR.rows[0]?.c || 0;
+  if (onlyIfEmpty && existingCount > 0) {
+    return {
+      project_id: projectId,
+      imported: 0,
+      skipped: true,
+      reason: 'already_has_locations',
+      existing_count: existingCount,
+    };
+  }
+
+  const src = await pool.query(
+    `SELECT id, parent_id, name, type, display_order
+     FROM project_locations
+     WHERE project_id = $1
+     ORDER BY display_order, id`,
+    [projectId],
+  );
+  if (!src.rows.length) {
+    return {
+      project_id: projectId,
+      imported: 0,
+      skipped: true,
+      reason: 'no_source_locations',
+    };
+  }
+
+  const byParent = new Map();
+  for (const row of src.rows) {
+    const key = row.parent_id == null ? 'root' : String(row.parent_id);
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(row);
+  }
+
+  const idMap = new Map();
+  const queue = [...(byParent.get('root') || [])];
+  let imported = 0;
+
+  while (queue.length) {
+    const row = queue.shift();
+    const newParentId =
+      row.parent_id == null ? null : idMap.get(parseInt(row.parent_id, 10));
+    if (row.parent_id != null && newParentId == null) {
+      continue;
+    }
+    const type = row.type === 'work_site' ? 'work_site' : 'folder';
+    const ins = await pool.query(
+      `INSERT INTO invoice_structure_locations (
+        project_id, parent_id, name, type, display_order
+      ) VALUES ($1, $2, $3, $4, $5)
+      RETURNING id`,
+      [
+        projectId,
+        newParentId ?? null,
+        row.name || '',
+        type,
+        parseInt(row.display_order, 10) || 0,
+      ],
+    );
+    idMap.set(parseInt(row.id, 10), parseInt(ins.rows[0].id, 10));
+    imported += 1;
+    const kids = byParent.get(String(row.id)) || [];
+    queue.push(...kids);
+  }
+
+  return {
+    project_id: projectId,
+    imported,
+    skipped: false,
+    source_count: src.rows.length,
+  };
+}
+
 async function ensureInvoiceStructureTables(pool) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS invoice_structure_projects (
@@ -202,9 +290,104 @@ function registerInvoiceStructureRoutes(app, pool) {
          VALUES ($1, $2)`,
         [projectId, measureType],
       );
+
+      // عند أول اعتماد للنوع: انسخ هيكلة المشروعات إن كانت شجرة المستخلصات فارغة
+      const imported = await importProjectLocationsToInvoiceStructure(
+        pool,
+        projectId,
+        { onlyIfEmpty: true },
+      );
+
       return res.json({
         project_id: projectId,
         measure_type: measureType,
+        import: imported,
+      });
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  /** استيراد هيكلة المشروعات لمشروع واحد → هيكلة المستخلصات */
+  app.post('/invoice-structure/import-from-project', async (req, res) => {
+    try {
+      const user = await requireAppAdmin(pool, req, res);
+      if (!user) return;
+
+      const projectId = parseInt(
+        String(req.body.projectId ?? req.body.project_id ?? ''),
+        10,
+      );
+      if (Number.isNaN(projectId)) {
+        return res.status(400).json({ error: 'projectId required' });
+      }
+      const onlyIfEmpty = req.body.onlyIfEmpty !== false;
+      const force = req.body.force === true;
+
+      const proj = await pool.query('SELECT id FROM projects WHERE id = $1', [
+        projectId,
+      ]);
+      if (!proj.rows.length) {
+        return res.status(404).json({ error: 'project not found' });
+      }
+
+      if (force) {
+        await pool.query(
+          `DELETE FROM invoice_structure_locations WHERE project_id = $1`,
+          [projectId],
+        );
+      }
+
+      const result = await importProjectLocationsToInvoiceStructure(
+        pool,
+        projectId,
+        { onlyIfEmpty: force ? false : onlyIfEmpty },
+      );
+      return res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  /** استيراد هيكلة المشروعات لكل المشاريع التي لا تملك مواقع مستخلصات بعد */
+  app.post('/invoice-structure/import-from-project-all', async (req, res) => {
+    try {
+      const user = await requireAppAdmin(pool, req, res);
+      if (!user) return;
+
+      const projects = await pool.query(
+        `SELECT id, name FROM projects ORDER BY id`,
+      );
+      const results = [];
+      let importedProjects = 0;
+      let importedNodes = 0;
+      let skipped = 0;
+
+      for (const p of projects.rows) {
+        const projectId = parseInt(p.id, 10);
+        const r = await importProjectLocationsToInvoiceStructure(
+          pool,
+          projectId,
+          { onlyIfEmpty: true },
+        );
+        results.push({
+          project_id: projectId,
+          project_name: p.name || '',
+          ...r,
+        });
+        if (r.skipped) skipped += 1;
+        else {
+          importedProjects += 1;
+          importedNodes += r.imported || 0;
+        }
+      }
+
+      return res.json({
+        projects_total: projects.rows.length,
+        imported_projects: importedProjects,
+        imported_nodes: importedNodes,
+        skipped,
+        results,
       });
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
@@ -399,4 +582,5 @@ function registerInvoiceStructureRoutes(app, pool) {
 module.exports = {
   ensureInvoiceStructureTables,
   registerInvoiceStructureRoutes,
+  importProjectLocationsToInvoiceStructure,
 };
