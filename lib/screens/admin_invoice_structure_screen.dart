@@ -107,7 +107,6 @@ class _AdminInvoiceStructureScreenState
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Text('نوع قياس المستخلصات'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -634,7 +633,7 @@ class _AdminInvoiceStructureScreenState
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'نوع القياس: ${invoiceStructureMeasureLabel(_measureType)}',
+                          invoiceStructureMeasureLabel(_measureType),
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                       ),
