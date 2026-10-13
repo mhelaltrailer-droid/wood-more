@@ -4327,6 +4327,9 @@ async function ensureEngineerCustodyActorColumns() {
     await pool.query(
       `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS document_path TEXT`,
     );
+    await pool.query(
+      `ALTER TABLE engineer_custody ADD COLUMN IF NOT EXISTS balance_after NUMERIC`,
+    );
   } catch (e) {
     console.warn('ensureEngineerCustodyActorColumns:', e.message);
   }
@@ -4405,11 +4408,25 @@ app.post('/balance-movement', async (req, res) => {
       const a = await pool.query('SELECT role FROM users WHERE id = $1', [actorUserId]);
       if (a.rows.length) actorRole = a.rows[0].role || null;
     }
+    // الرصيد بعد الحركة: من الطلب إن وُجد، وإلا الرصيد الحالي في engineer_balance (بعد تحديث العميل).
+    let balanceAfter = null;
+    const rawAfter = b.balanceAfter ?? b.balance_after;
+    if (rawAfter != null && rawAfter !== '') {
+      const parsed = parseFloat(rawAfter);
+      if (Number.isFinite(parsed)) balanceAfter = parsed;
+    }
+    if (balanceAfter == null) {
+      const bal = await pool.query(
+        'SELECT balance FROM engineer_balance WHERE user_id = $1',
+        [userId],
+      );
+      balanceAfter = bal.rows.length ? parseFloat(bal.rows[0].balance) || 0 : 0;
+    }
     await pool.query(
       `INSERT INTO engineer_custody
-         (user_id, amount, created_at, note, movement_type, actor_user_id, actor_user_name, actor_role)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [userId, Number.isFinite(amount) ? amount : 0, now, note, type, actorUserId, actorUserName, actorRole]
+         (user_id, amount, created_at, note, movement_type, actor_user_id, actor_user_name, actor_role, balance_after)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [userId, Number.isFinite(amount) ? amount : 0, now, note, type, actorUserId, actorUserName, actorRole, balanceAfter]
     );
 
     // إشعار مهندس الموقع فقط عند إضافة/سحب رصيد
@@ -4461,6 +4478,10 @@ app.get('/custody', async (req, res) => {
       if (row.actor_user_id != null) out.actor_user_id = parseInt(row.actor_user_id);
       if (row.actor_user_name != null) out.actor_user_name = row.actor_user_name;
       if (row.actor_role != null) out.actor_role = row.actor_role;
+      if (row.balance_after != null && row.balance_after !== '') {
+        const ba = parseFloat(row.balance_after);
+        if (Number.isFinite(ba)) out.balance_after = ba;
+      }
       return out;
     };
     res.json(r.rows.map(mapRow));

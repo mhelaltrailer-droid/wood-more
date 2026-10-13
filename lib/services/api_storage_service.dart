@@ -1124,6 +1124,7 @@ class ApiStorageService {
     int? actorUserId,
     String? actorUserName,
     String? actorRole,
+    double? balanceAfter,
   }) async {
     try {
       await _postVoid('balance-movement', {
@@ -1136,6 +1137,7 @@ class ApiStorageService {
           'actorUserName': actorUserName.trim(),
         if (actorRole != null && actorRole.trim().isNotEmpty)
           'actorRole': actorRole.trim(),
+        if (balanceAfter != null) 'balanceAfter': balanceAfter,
       });
     } catch (_) {}
   }
@@ -1148,6 +1150,9 @@ class ApiStorageService {
       if (!m.containsKey('movement_type') && m.containsKey('movementType'))
         m['movement_type'] = m['movementType'];
       m['movement_type'] ??= 'custody';
+      if (!m.containsKey('balance_after') && m.containsKey('balanceAfter')) {
+        m['balance_after'] = m['balanceAfter'];
+      }
       return m;
     }).toList();
   }

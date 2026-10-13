@@ -55,7 +55,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 43,
+      version: 44,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -480,6 +480,18 @@ class DatabaseService {
         );
       } catch (_) {}
     }
+    if (oldVersion < 44) {
+      try {
+        await db.execute(
+          'ALTER TABLE engineer_custody ADD COLUMN balance_after REAL',
+        );
+      } catch (_) {}
+      try {
+        await db.execute(
+          'ALTER TABLE expense_statements ADD COLUMN balance_after REAL',
+        );
+      } catch (_) {}
+    }
   }
 
   Future<void> _createExpenseStatementsTable(Database db) async {
@@ -503,6 +515,7 @@ class DatabaseService {
         created_at TEXT NOT NULL,
         expense_date TEXT,
         source TEXT NOT NULL DEFAULT 'engineer',
+        balance_after REAL,
         FOREIGN KEY (submitter_user_id) REFERENCES users (id),
         FOREIGN KEY (balance_user_id) REFERENCES users (id)
       )
@@ -550,6 +563,7 @@ class DatabaseService {
         actor_user_id INTEGER,
         actor_user_name TEXT,
         actor_role TEXT,
+        balance_after REAL,
         FOREIGN KEY (user_id) REFERENCES users (id)
       )
     ''');
@@ -1572,6 +1586,7 @@ class DatabaseService {
     int? actorUserId,
     String? actorUserName,
     String? actorRole,
+    double? balanceAfter,
   }) async {
     final db = await database;
     final now = DateTime.now().toIso8601String();
@@ -1585,6 +1600,7 @@ class DatabaseService {
       'actor_user_id': actorUserId,
       'actor_user_name': actorUserName?.trim(),
       'actor_role': actorRole?.trim(),
+      'balance_after': balanceAfter,
     });
     final users = await db.query('users', where: 'id = ?', whereArgs: [userId]);
     if (users.isEmpty) return;
@@ -1632,6 +1648,9 @@ class DatabaseService {
             'actor_user_id': r['actor_user_id'],
             'actor_user_name': r['actor_user_name'],
             'actor_role': r['actor_role'],
+            'balance_after': r['balance_after'] != null
+                ? (r['balance_after'] as num).toDouble()
+                : null,
           },
         )
         .toList();
@@ -4412,7 +4431,14 @@ class DatabaseService {
       ids.add(id);
       if (autoApprove && amount > 0) {
         final current = await getEngineerBalance(userId);
-        await setEngineerBalance(userId, current - amount);
+        final after = current - amount;
+        await setEngineerBalance(userId, after);
+        await db.update(
+          'expense_statements',
+          {'balance_after': after},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
       }
     }
     if (!autoApprove) {
@@ -4500,6 +4526,12 @@ class DatabaseService {
     final description = (row['description'] ?? '').toString();
 
     if (approve) {
+      double? balanceAfter;
+      if (amount > 0) {
+        final current = await getEngineerBalance(balanceUserId);
+        balanceAfter = current - amount;
+        await setEngineerBalance(balanceUserId, balanceAfter);
+      }
       await db.update(
         'expense_statements',
         {
@@ -4508,14 +4540,11 @@ class DatabaseService {
           'responded_by_user_name': actor['name'],
           'responded_at': now,
           'rejection_reason': null,
+          if (balanceAfter != null) 'balance_after': balanceAfter,
         },
         where: 'id = ?',
         whereArgs: [statementId],
       );
-      if (amount > 0) {
-        final current = await getEngineerBalance(balanceUserId);
-        await setEngineerBalance(balanceUserId, current - amount);
-      }
       await _wrNotifyUser(
         db,
         submitterId,

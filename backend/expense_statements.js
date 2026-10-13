@@ -102,6 +102,10 @@ function esRowToJson(row) {
     created_at: row.created_at,
     expense_date: esExpenseDateFromRow(row),
     source: row.source || 'engineer',
+    balance_after:
+      row.balance_after != null && row.balance_after !== ''
+        ? parseFloat(row.balance_after)
+        : null,
   };
 }
 
@@ -162,18 +166,21 @@ async function esNotifyApprover(pool, fields) {
   );
 }
 
+/** يخصم من الرصيد ويعيد الرصيد بعد الخصم (لعمود balance_after). */
 async function esDeductBalance(pool, userId, amount) {
-  if (!(amount > 0)) return;
   const bal = await pool.query(
     'SELECT balance FROM engineer_balance WHERE user_id = $1',
     [userId],
   );
   const current = bal.rows.length ? parseFloat(bal.rows[0].balance) || 0 : 0;
+  if (!(amount > 0)) return current;
+  const next = current - amount;
   await pool.query(
     `INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2)
      ON CONFLICT (user_id) DO UPDATE SET balance = $2`,
-    [userId, current - amount],
+    [userId, next],
   );
+  return next;
 }
 
 async function esRestoreBalance(pool, userId, amount) {
@@ -225,6 +232,10 @@ async function ensureExpenseStatementsTable(pool) {
     await pool.query(`
       ALTER TABLE expense_statements
         ADD COLUMN IF NOT EXISTS expense_date TEXT
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE expense_statements
+        ADD COLUMN IF NOT EXISTS balance_after NUMERIC
     `).catch(() => {});
     console.log('ensureExpenseStatementsTable: ok');
   } catch (e) {
@@ -345,7 +356,11 @@ function registerExpenseStatementsRoutes(
         const id = parseInt(ins.rows[0].id, 10);
         ids.push(id);
         if (autoApprove && item.amount > 0) {
-          await esDeductBalance(pool, userId, item.amount);
+          const after = await esDeductBalance(pool, userId, item.amount);
+          await pool.query(
+            'UPDATE expense_statements SET balance_after = $1 WHERE id = $2',
+            [after, id],
+          );
         }
       }
 
@@ -477,7 +492,11 @@ function registerExpenseStatementsRoutes(
           [STATUS_APPROVED, actorId, actorName, now, id],
         );
         if (amount > 0) {
-          await esDeductBalance(pool, balanceUserId, amount);
+          const after = await esDeductBalance(pool, balanceUserId, amount);
+          await pool.query(
+            'UPDATE expense_statements SET balance_after = $1 WHERE id = $2',
+            [after, id],
+          );
         }
         await safeNotify('expense_statement_approved', async () => {
           await esNotifyUser(pool, submitterId, {

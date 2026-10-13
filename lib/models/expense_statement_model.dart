@@ -30,6 +30,9 @@ class ExpenseStatementModel {
   final DateTime expenseDate;
   final String source;
 
+  /// رصيد المهندس بعد الاعتماد/الخصم — null للحركات القديمة قبل إضافة العمود.
+  final double? balanceAfter;
+
   const ExpenseStatementModel({
     required this.id,
     required this.submitterUserId,
@@ -49,6 +52,7 @@ class ExpenseStatementModel {
     required this.createdAt,
     required this.expenseDate,
     this.source = 'engineer',
+    this.balanceAfter,
   });
 
   bool get isPending => status == statusPending;
@@ -158,6 +162,12 @@ class ExpenseStatementModel {
       createdAt: createdAt,
       expenseDate: expenseDate,
       source: (map['source'] ?? 'engineer').toString(),
+      balanceAfter: () {
+        final raw = map['balance_after'] ?? map['balanceAfter'];
+        if (raw == null) return null;
+        if (raw is num) return raw.toDouble();
+        return double.tryParse(raw.toString());
+      }(),
     );
   }
 }

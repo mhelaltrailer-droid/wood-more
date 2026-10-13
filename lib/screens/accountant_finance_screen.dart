@@ -4,8 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart' as pdf;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import '../models/expense_statement_model.dart';
 import '../models/user_model.dart';
-import '../models/daily_report_model.dart';
 import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
@@ -25,6 +25,13 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
   List<UserModel> _users = [];
   Map<int, double> _balances = {};
   bool _loading = true;
+
+  /// منفّذو الإضافة/السحب المسموح ظهور حركاتهم في التقرير.
+  static const _reportActorEmails = {
+    'ah-amin',
+    'abdelrhmanellaithy828@gmail.com',
+  };
+  static const _aminEmail = 'ah-amin';
 
   /// مستخدمون لا يظهرون في قائمة أرصدة المستخدمين (بالبريد).
   static const _hiddenFromBalancesEmails = {
@@ -125,7 +132,8 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       if (isSelf) {
         // إضافة رصيد ذاتي للمحاسب فقط (بدون خصم من أي أحد)
         final current = await _db.getEngineerBalance(user.id);
-        await _db.setEngineerBalance(user.id, current + amount);
+        final after = current + amount;
+        await _db.setEngineerBalance(user.id, after);
         await _db.addBalanceMovement(
           user.id,
           amount,
@@ -134,6 +142,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
           actorUserId: widget.currentUser.id,
           actorUserName: widget.currentUser.name,
           actorRole: widget.currentUser.role,
+          balanceAfter: after,
         );
       } else {
         final actorBalance = await _db.getEngineerBalance(widget.currentUser.id);
@@ -146,7 +155,8 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
           return;
         }
         final currentUser = await _db.getEngineerBalance(user.id);
-        await _db.setEngineerBalance(user.id, currentUser + amount);
+        final after = currentUser + amount;
+        await _db.setEngineerBalance(user.id, after);
         await _db.setEngineerBalance(widget.currentUser.id, actorBalance - amount);
         await _db.addBalanceMovement(
           user.id,
@@ -156,6 +166,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
           actorUserId: widget.currentUser.id,
           actorUserName: widget.currentUser.name,
           actorRole: widget.currentUser.role,
+          balanceAfter: after,
         );
       }
       _load();
@@ -204,7 +215,8 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
         return;
       }
       final actorBalance = await _db.getEngineerBalance(widget.currentUser.id);
-      await _db.setEngineerBalance(user.id, currentUser - amount);
+      final after = currentUser - amount;
+      await _db.setEngineerBalance(user.id, after);
       await _db.setEngineerBalance(widget.currentUser.id, actorBalance + amount);
       await _db.addBalanceMovement(
         user.id,
@@ -214,6 +226,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
         actorUserId: widget.currentUser.id,
         actorUserName: widget.currentUser.name,
         actorRole: widget.currentUser.role,
+        balanceAfter: after,
       );
       _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم سحب الرصيد'), backgroundColor: Colors.green));
@@ -222,37 +235,111 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
     }
   }
 
+  bool _isAminUser(UserModel u) =>
+      u.email.trim().toLowerCase() == _aminEmail;
+
+  bool _isAllowedReportActor({
+    required int? actorUserId,
+    required Map<int, String> emailById,
+  }) {
+    if (actorUserId == null) return false;
+    final email = emailById[actorUserId];
+    return email != null && _reportActorEmails.contains(email);
+  }
+
+  double? _parseBalanceAfter(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is num) return raw.toDouble();
+    return double.tryParse(raw.toString());
+  }
+
   Future<void> _showCreateReport() async {
     DateTime dateFrom = DateTime.now().subtract(const Duration(days: 30));
     DateTime dateTo = DateTime.now();
+    // null = الكل
+    UserModel? selectedEngineer;
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialog) => AlertDialog(
-          title: const Text('تقرير الحركات المالية - تحديد المدة'),
+          title: const Text('تقرير الحركات المالية'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                const Text('المهندس', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                InputDecorator(
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int?>(
+                      value: selectedEngineer?.id,
+                      isExpanded: true,
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('الكل'),
+                        ),
+                        ..._users.map(
+                          (u) => DropdownMenuItem<int?>(
+                            value: u.id,
+                            child: Text(u.name),
+                          ),
+                        ),
+                      ],
+                      onChanged: (id) {
+                        setDialog(() {
+                          if (id == null) {
+                            selectedEngineer = null;
+                            return;
+                          }
+                          UserModel? found;
+                          for (final u in _users) {
+                            if (u.id == id) {
+                              found = u;
+                              break;
+                            }
+                          }
+                          selectedEngineer = found;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 const Text('من تاريخ', style: TextStyle(fontWeight: FontWeight.bold)),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(DateFormat('yyyy/MM/dd', 'ar').format(dateFrom)),
                   trailing: const Icon(Icons.calendar_today),
                   onTap: () async {
-                    final d = await showDatePicker(context: ctx, initialDate: dateFrom, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
+                    final d = await showDatePicker(
+                      context: ctx,
+                      initialDate: dateFrom,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
                     if (d != null) setDialog(() => dateFrom = d);
                   },
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
                 const Text('إلى تاريخ', style: TextStyle(fontWeight: FontWeight.bold)),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(DateFormat('yyyy/MM/dd', 'ar').format(dateTo)),
                   trailing: const Icon(Icons.calendar_today),
                   onTap: () async {
-                    final d = await showDatePicker(context: ctx, initialDate: dateTo, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
+                    final d = await showDatePicker(
+                      context: ctx,
+                      initialDate: dateTo,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
                     if (d != null) setDialog(() => dateTo = d);
                   },
                 ),
@@ -267,62 +354,107 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       ),
     );
     if (ok != true || !mounted) return;
+
     final from = DateTime(dateFrom.year, dateFrom.month, dateFrom.day);
     final toEnd = DateTime(dateTo.year, dateTo.month, dateTo.day, 23, 59, 59);
+    final filterAll = selectedEngineer == null;
+    final filterAmin =
+        selectedEngineer != null && _isAminUser(selectedEngineer!);
 
-    // حركات العهدة في المدة
+    final allUsers = List<UserModel>.from(await _db.getUsers() as List);
+    final emailById = {
+      for (final u in allUsers) u.id: u.email.trim().toLowerCase(),
+    };
+    final nameById = {for (final u in allUsers) u.id: u.name};
+
     final custodyRecords = await _db.getCustodyRecords(userId: null);
-    final custodyInPeriod = custodyRecords.where((e) {
-      final dt = DateTime.parse(e['created_at'] as String);
-      return !dt.isBefore(from) && !dt.isAfter(toEnd);
-    }).toList();
+    final combined = <Map<String, dynamic>>[];
 
-    // مصروفات التقارير اليومية في المدة (لضبط الأرصدة)
-    final dailyReports = await _db.getDailyReports(dateFrom: from, dateTo: toEnd);
-    final expenseMovements = <Map<String, dynamic>>[];
-    for (final r in dailyReports) {
-      for (final e in r.expenses) {
-        final amt = double.tryParse(e.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
-        if (e.description.trim().isEmpty && amt == 0) continue;
-        expenseMovements.add({
+    for (final e in custodyRecords) {
+      final movementType = (e['movement_type'] as String?) ?? 'custody';
+      if (movementType != 'add_balance' && movementType != 'withdraw_balance') {
+        continue;
+      }
+      final createdRaw = e['created_at'] as String?;
+      if (createdRaw == null) continue;
+      final dt = DateTime.tryParse(createdRaw);
+      if (dt == null || dt.isBefore(from) || dt.isAfter(toEnd)) continue;
+
+      final actorId = e['actor_user_id'] is int
+          ? e['actor_user_id'] as int
+          : int.tryParse('${e['actor_user_id'] ?? ''}');
+      if (!_isAllowedReportActor(actorUserId: actorId, emailById: emailById)) {
+        continue;
+      }
+
+      final targetId = e['user_id'] is int
+          ? e['user_id'] as int
+          : int.tryParse('${e['user_id'] ?? ''}');
+      if (targetId == null) continue;
+
+      if (filterAmin) {
+        // ah-amin: كل ما نفّذه كمنفّذ (حتى على مهندسين آخرين)
+        if (actorId != selectedEngineer!.id) continue;
+      } else if (!filterAll) {
+        // مهندس معيّن: حركات تخص رصيده فقط
+        if (targetId != selectedEngineer!.id) continue;
+      }
+
+      combined.add({
+        'type': movementType,
+        'created_at': createdRaw,
+        'user_id': targetId,
+        'user_name': nameById[targetId],
+        'note': (e['note'] as String?)?.trim().isNotEmpty == true
+            ? e['note']
+            : '—',
+        'amount': (e['amount'] as num).toDouble(),
+        'balance_after': _parseBalanceAfter(e['balance_after']),
+      });
+    }
+
+    // بيانات الصرف المعتمدة — لا تُدرج عند اختيار ah-amin (لا يدخل بيانات صرف)
+    if (!filterAmin) {
+      final statements = await _db.getExpenseStatements(
+        statuses: [ExpenseStatementModel.statusApproved],
+      );
+      for (final s in statements) {
+        if (!s.isApproved) continue;
+        final created = s.createdAt;
+        if (created.isBefore(from) || created.isAfter(toEnd)) continue;
+        if (!filterAll && s.balanceUserId != selectedEngineer!.id) continue;
+
+        // ترتيب زمني حسب لحظة الاعتماد (وقت الخصم)، مع الإبقاء على فلترة created_at
+        final sortAt = s.respondedAt ?? s.createdAt;
+        combined.add({
           'type': 'expense',
-          'created_at': DateTime(r.reportDate.year, r.reportDate.month, r.reportDate.day).toIso8601String(),
-          'user_id': r.userId,
-          'user_name': r.userName,
-          'note': e.description.trim().isEmpty ? '—' : e.description,
-          'amount': amt,
+          'created_at': sortAt.toIso8601String(),
+          'user_id': s.balanceUserId,
+          'user_name': nameById[s.balanceUserId] ?? s.submitterUserName,
+          'note': s.description.trim().isEmpty ? '—' : s.description,
+          'amount': s.amount,
+          'balance_after': s.balanceAfter,
         });
       }
     }
 
-    // دمج الحركات (عهدة + إضافة رصيد + سحب رصيد + صرف تقارير يومية) وترتيب حسب التاريخ
-    final combined = <Map<String, dynamic>>[];
-    for (final e in custodyInPeriod) {
-      combined.add({
-        'type': e['movement_type'] as String? ?? 'custody',
-        'created_at': e['created_at'] as String,
-        'user_id': e['user_id'],
-        'user_name': null,
-        'note': e['note'] as String? ?? '—',
-        'amount': (e['amount'] as num).toDouble(),
-      });
-    }
-    for (final e in expenseMovements) {
-      combined.add(e);
-    }
-    combined.sort((a, b) => (a['created_at'] as String).compareTo(b['created_at'] as String));
+    combined.sort(
+      (a, b) =>
+          (a['created_at'] as String).compareTo(b['created_at'] as String),
+    );
 
-    final userNames = {for (var u in _users) u.id: u.name};
+    final filterLabel = filterAll
+        ? 'الكل'
+        : (selectedEngineer?.name ?? '—');
+
     if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => _AccountantFinanceReportScreen(
           dateFrom: dateFrom,
           dateTo: dateTo,
+          filterLabel: filterLabel,
           movements: combined,
-          userNames: userNames,
-          users: _users,
-          balances: Map.from(_balances),
         ),
       ),
     );
@@ -549,34 +681,36 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
 class _AccountantFinanceReportScreen extends StatelessWidget {
   final DateTime dateFrom;
   final DateTime dateTo;
+  final String filterLabel;
   final List<Map<String, dynamic>> movements;
-  final Map<int, String> userNames;
-  final List<UserModel> users;
-  final Map<int, double> balances;
 
   const _AccountantFinanceReportScreen({
     required this.dateFrom,
     required this.dateTo,
+    required this.filterLabel,
     required this.movements,
-    required this.userNames,
-    required this.users,
-    required this.balances,
   });
 
   String _userName(Map<String, dynamic> e) {
-    final id = e['user_id'] as int?;
-    if (id == null) return '—';
     final fromMap = e['user_name'] as String?;
-    if (fromMap != null && fromMap.isNotEmpty) return fromMap;
-    return userNames[id] ?? '—';
+    if (fromMap != null && fromMap.trim().isNotEmpty) return fromMap;
+    return '—';
   }
 
   String _typeLabel(Map<String, dynamic> e) {
     final t = e['type'] as String?;
-    if (t == 'expense') return 'صرف';
+    if (t == 'expense') return 'صرف معتمد';
     if (t == 'add_balance') return 'إضافة رصيد';
     if (t == 'withdraw_balance') return 'سحب رصيد';
-    return 'عهدة';
+    return '—';
+  }
+
+  String _balanceAfterLabel(Map<String, dynamic> e) {
+    final raw = e['balance_after'];
+    if (raw == null) return '—';
+    if (raw is num) return raw.toStringAsFixed(2);
+    final parsed = double.tryParse(raw.toString());
+    return parsed?.toStringAsFixed(2) ?? '—';
   }
 
   Future<void> _exportPdf(BuildContext context) async {
@@ -589,88 +723,109 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
       final logoBytes = await rootBundle.load('assets/images/logo.png');
       logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
     } catch (_) {}
+    final logo = logoImage;
     final doc = pw.Document();
     doc.addPage(
-      pw.Page(
+      pw.MultiPage(
         theme: theme,
         pageFormat: pdf.PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        build: (ctx) => pw.Directionality(
-          textDirection: pw.TextDirection.rtl,
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-            children: [
-              if (logoImage != null)
-                pw.Center(
-                  child: pw.Container(
-                    height: 48,
-                    margin: const pw.EdgeInsets.only(bottom: 8),
-                    child: pw.Image(logoImage!, fit: pw.BoxFit.contain),
-                  ),
-                ),
-              pw.Container(
-                padding: const pw.EdgeInsets.symmetric(vertical: 10),
-                decoration: pw.BoxDecoration(
-                  color: pdf.PdfColors.green50,
-                  borderRadius: pw.BorderRadius.circular(8),
-                  border: pw.Border.all(color: pdf.PdfColors.green800),
-                ),
-                child: pw.Center(
-                  child: pw.Text(
-                    'تقرير الحركات المالية (عهدة + مصروفات) | Finance Report',
-                    textDirection: pw.TextDirection.rtl,
-                    style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: pdf.PdfColors.green900),
-                  ),
+        margin: const pw.EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        build: (ctx) => [
+          if (logo != null)
+            pw.Center(
+              child: pw.Container(
+                height: 48,
+                margin: const pw.EdgeInsets.only(bottom: 8),
+                child: pw.Image(logo, fit: pw.BoxFit.contain),
+              ),
+            ),
+          pw.Container(
+            padding: const pw.EdgeInsets.symmetric(vertical: 10),
+            decoration: pw.BoxDecoration(
+              color: pdf.PdfColors.green50,
+              borderRadius: pw.BorderRadius.circular(8),
+              border: pw.Border.all(color: pdf.PdfColors.green800),
+            ),
+            child: pw.Center(
+              child: pw.Text(
+                'تقرير الحركات المالية (إضافة/سحب + صرف معتمد)',
+                textDirection: pw.TextDirection.rtl,
+                style: pw.TextStyle(
+                  fontSize: 13,
+                  fontWeight: pw.FontWeight.bold,
+                  color: pdf.PdfColors.green900,
                 ),
               ),
-              pw.SizedBox(height: 6),
-              pw.Text('من ${dateFormat.format(dateFrom)} إلى ${dateFormat.format(dateTo)}', textDirection: pw.TextDirection.rtl, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
-              pw.SizedBox(height: 10),
-              pw.Table(
-                border: pw.TableBorder.all(width: 0.5),
-                columnWidths: {0: const pw.FlexColumnWidth(0.8), 1: const pw.FlexColumnWidth(1), 2: const pw.FlexColumnWidth(1.2), 3: const pw.FlexColumnWidth(1.8), 4: const pw.FlexColumnWidth(1)},
+            ),
+          ),
+          pw.SizedBox(height: 6),
+          pw.Text(
+            'المهندس: $filterLabel',
+            textDirection: pw.TextDirection.rtl,
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+          ),
+          pw.Text(
+            'من ${dateFormat.format(dateFrom)} إلى ${dateFormat.format(dateTo)}',
+            textDirection: pw.TextDirection.rtl,
+            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+          ),
+          pw.SizedBox(height: 10),
+          pw.Table(
+            border: pw.TableBorder.all(width: 0.5),
+            columnWidths: {
+              0: const pw.FlexColumnWidth(0.9),
+              1: const pw.FlexColumnWidth(0.9),
+              2: const pw.FlexColumnWidth(1.2),
+              3: const pw.FlexColumnWidth(1.6),
+              4: const pw.FlexColumnWidth(0.8),
+              5: const pw.FlexColumnWidth(0.9),
+            },
+            children: [
+              pw.TableRow(
+                decoration: const pw.BoxDecoration(color: pdf.PdfColors.grey300),
                 children: [
-                  pw.TableRow(
-                    decoration: const pw.BoxDecoration(color: pdf.PdfColors.grey300),
-                    children: [
-                      _cell('النوع', true),
-                      _cell('التاريخ', true),
-                      _cell('المستخدم', true),
-                      _cell('البيان', true),
-                      _cell('المبلغ', true),
-                    ],
-                  ),
-                  ...movements.map((e) {
-                    final dt = DateTime.parse(e['created_at'] as String);
-                    return pw.TableRow(
-                      children: [
-                        _cell(_typeLabel(e), false),
-                        _cell(dateFormat.format(dt), false),
-                        _cell(_userName(e), false),
-                        _cell(e['note'] as String? ?? '—', false),
-                        _cell((e['amount'] as num).toStringAsFixed(2), false),
-                      ],
-                    );
-                  }),
+                  _cell('النوع', true),
+                  _cell('التاريخ', true),
+                  _cell('المهندس', true),
+                  _cell('البيان', true),
+                  _cell('المبلغ', true),
+                  _cell('الرصيد بعد', true),
                 ],
               ),
+              ...movements.map((e) {
+                final dt = DateTime.parse(e['created_at'] as String);
+                return pw.TableRow(
+                  children: [
+                    _cell(_typeLabel(e), false),
+                    _cell(dateFormat.format(dt), false),
+                    _cell(_userName(e), false),
+                    _cell(e['note'] as String? ?? '—', false),
+                    _cell((e['amount'] as num).toStringAsFixed(2), false),
+                    _cell(_balanceAfterLabel(e), false),
+                  ],
+                );
+              }),
             ],
           ),
-        ),
+        ],
       ),
     );
     final bytes = await doc.save();
-    await Printing.sharePdf(bytes: bytes, filename: 'تقرير_مالي_${dateFormat.format(dateFrom)}_${dateFormat.format(dateTo)}.pdf');
+    await Printing.sharePdf(
+      bytes: bytes,
+      filename:
+          'تقرير_مالي_${dateFormat.format(dateFrom)}_${dateFormat.format(dateTo)}.pdf',
+    );
   }
 
   static pw.Widget _cell(String text, bool isHeader) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 5),
       child: pw.Text(
         text,
         textDirection: pw.TextDirection.rtl,
         style: pw.TextStyle(
-          fontSize: 9,
+          fontSize: 8,
           fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal,
           color: isHeader ? pdf.PdfColors.green900 : pdf.PdfColors.black,
         ),
@@ -686,28 +841,53 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
         title: const Text('تقرير الحركات المالية'),
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text('من ${dateFormat.format(dateFrom)} إلى ${dateFormat.format(dateTo)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(
+            'المهندس: $filterLabel',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          Text(
+            'من ${dateFormat.format(dateFrom)} إلى ${dateFormat.format(dateTo)}',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
-          const Text('الحركات تشمل: عهدة + إضافة رصيد + سحب رصيد + مصروفات التقارير اليومية', style: TextStyle(fontSize: 12, color: Colors.grey)),
+          const Text(
+            'الحركات تشمل: إضافة/سحب رصيد (ah-amin + مدير المشروعات) + بيانات الصرف المعتمدة',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
           const SizedBox(height: 16),
           if (movements.isEmpty)
-            const Center(child: Padding(padding: EdgeInsets.all(24), child: Text('لا توجد حركات في المدة المحددة')))
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('لا توجد حركات في المدة المحددة'),
+              ),
+            )
           else
             ...movements.map((e) {
               final dt = DateTime.parse(e['created_at'] as String);
               final uname = _userName(e);
               final typeLabel = _typeLabel(e);
+              final balAfter = _balanceAfterLabel(e);
               return Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
                   title: Text(e['note'] as String? ?? '—'),
-                  subtitle: Text('${dateFormat.format(dt)} • $uname • $typeLabel'),
-                  trailing: Text((e['amount'] as num).toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text(
+                    '${dateFormat.format(dt)} • $uname • $typeLabel\nالرصيد بعد الحركة: $balAfter',
+                  ),
+                  isThreeLine: true,
+                  trailing: Text(
+                    (e['amount'] as num).toStringAsFixed(2),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
               );
             }),

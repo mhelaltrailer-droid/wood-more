@@ -681,6 +681,7 @@ class WebStorageService {
     int? actorUserId,
     String? actorUserName,
     String? actorRole,
+    double? balanceAfter,
   }) async {
     await _initData();
     final prefs = await _prefs;
@@ -702,6 +703,7 @@ class WebStorageService {
       'actor_user_id': actorUserId,
       'actor_user_name': actorUserName?.trim(),
       'actor_role': actorRole?.trim(),
+      'balance_after': balanceAfter,
     });
     await prefs.setString(_engineerCustodyKey, jsonEncode(list));
   }
@@ -730,6 +732,9 @@ class WebStorageService {
             'actor_user_id': e['actor_user_id'],
             'actor_user_name': e['actor_user_name'],
             'actor_role': e['actor_role'],
+            'balance_after': e['balance_after'] != null
+                ? (e['balance_after'] as num).toDouble()
+                : null,
           },
         )
         .toList();
