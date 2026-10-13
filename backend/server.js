@@ -39,6 +39,10 @@ const {
   ensureContInvoicesTables,
   registerContInvoicesRoutes,
 } = require('./cont_invoices');
+const {
+  ensureInvoiceStructureTables,
+  registerInvoiceStructureRoutes,
+} = require('./invoice_structure');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -2010,6 +2014,7 @@ async function ensureHomeIconsVisibilitySetting() {
         meetings: true,
         invoices_owner: true,
         cont_invoices: true,
+        invoice_structure: true,
       },
       document_controller: {
         ir_mir: true,
@@ -8020,6 +8025,7 @@ registerAttachmentRoutes(app, pool);
 registerWithdrawalFilesReportRoutes(app, pool);
 registerMeetingsRoutes(app, pool, { runNotificationSafely });
 registerContInvoicesRoutes(app, pool);
+registerInvoiceStructureRoutes(app, pool);
 
 async function ensureProjectsMainContractor() {
   await pool.query(
@@ -8237,6 +8243,7 @@ async function runStartupMigrations() {
     () => ensureProjectsDashboardTables(pool),
     () => ensureExpenseStatementsTable(pool),
     () => ensureContInvoicesTables(pool),
+    () => ensureInvoiceStructureTables(pool),
     ensureEngineerCustodyActorColumns,
     ensureIrMirUploadsTable,
     ensureMsSdTables,

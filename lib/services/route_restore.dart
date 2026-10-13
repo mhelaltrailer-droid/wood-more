@@ -43,6 +43,8 @@ import '../screens/meetings_screen.dart';
 import '../screens/invoices_owner_hub_screen.dart';
 import '../screens/cont_invoices_hub_screen.dart';
 import '../core/cont_invoices_constants.dart';
+import '../screens/admin_invoice_structure_screen.dart';
+import '../core/invoice_structure_constants.dart';
 import 'route_persistence.dart';
 
 /// Build the screen for a given route name (for restore after refresh). Returns null if unknown.
@@ -173,6 +175,8 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return InvoicesOwnerHubScreen(currentUser: user);
     case contInvoicesRouteName:
       return ContInvoicesHubScreen(currentUser: user);
+    case invoiceStructureRouteName:
+      return AdminInvoiceStructureScreen(admin: user);
     default:
       return null;
   }

@@ -5,6 +5,8 @@ import '../screens/accountant_finance_screen.dart';
 import '../screens/activity_logs_screen.dart';
 import '../screens/admin_dashboard_screen.dart';
 import '../screens/admin_project_structure_screen.dart';
+import '../screens/admin_invoice_structure_screen.dart';
+import '../core/invoice_structure_constants.dart';
 import '../screens/attendance_reports_screen.dart';
 import '../screens/attendance_screen.dart';
 import '../screens/contractor_report_screen.dart';
@@ -394,6 +396,18 @@ class HomeIconBuilder {
             MaterialPageRoute(
               builder: (_) => AdminProjectStructureScreen(admin: user),
             ),
+          ),
+        );
+      case invoiceStructureIconId:
+        return _lightCard(
+          icon: Icons.account_tree_outlined,
+          title: invoiceStructureHomeLabel,
+          subtitle:
+              'هيكلة تكميلية للمستخلصات (Flooring / WPC) — مواقع فرعية وأماكن عمل',
+          onTap: () => pushAndSaveRoute(
+            context,
+            invoiceStructureRouteName,
+            AdminInvoiceStructureScreen(admin: user),
           ),
         );
       case 'admin_dashboard':

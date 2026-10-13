@@ -96,6 +96,11 @@ class IconVisibilityService {
     label: 'Cont-Invoices',
   );
 
+  static const HomeIconItem invoiceStructureIcon = HomeIconItem(
+    id: 'invoice_structure',
+    label: 'هيكلة المستخلصات',
+  );
+
   static const HomeIconItem managerCustodyExpensesIcon = HomeIconItem(
     id: 'manager_custody_expenses',
     label: 'العهد/تقارير المصروفات',
@@ -248,6 +253,7 @@ class IconVisibilityService {
       documentControlIcon,
       HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
       HomeIconItem(id: 'admin_project_structure', label: 'هيكلة المشروعات'),
+      invoiceStructureIcon,
       HomeIconItem(id: 'admin_dashboard', label: 'لوح التحكم'),
       HomeIconItem(id: 'activity_logs', label: 'سجل الحركة'),
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),

@@ -39,6 +39,7 @@ import '../models/reports_sys_model.dart';
 import '../models/shop_drawing_model.dart';
 import '../models/invoices_owner_model.dart';
 import '../models/cont_invoice_model.dart';
+import '../models/invoice_structure_location_model.dart';
 import '../models/app_release_info_model.dart';
 import '../models/projects_dashboard_note_model.dart';
 import '../models/projects_dashboard_sheet_model.dart';
@@ -562,6 +563,103 @@ class ApiStorageService {
 
   Future<void> deleteProjectLocation(int id) async {
     await _delete('project-locations/$id');
+  }
+
+  // ——— هيكلة المستخلصات (مستقلة عن project_locations) ———
+  Future<InvoiceStructureProjectState> getInvoiceStructure({
+    required int userId,
+    required int projectId,
+  }) async {
+    final data = await _get(
+      'invoice-structure?userId=$userId&projectId=$projectId',
+    );
+    return InvoiceStructureProjectState.fromMap(data);
+  }
+
+  Future<String> setInvoiceStructureMeasureType({
+    required int userId,
+    required int projectId,
+    required String measureType,
+  }) async {
+    final uri = Uri.parse(_path('invoice-structure/measure-type'));
+    final r = await http.post(
+      uri,
+      body: jsonEncode({
+        'userId': userId,
+        'projectId': projectId,
+        'measureType': measureType,
+      }),
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+    );
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'invoice-structure/measure-type');
+    }
+    final decoded = r.body.isEmpty
+        ? <String, dynamic>{}
+        : jsonDecode(r.body) as Map<String, dynamic>;
+    return (decoded['measure_type'] ?? measureType).toString();
+  }
+
+  Future<int> addInvoiceStructureLocation({
+    required int userId,
+    required int projectId,
+    int? parentId,
+    required String name,
+    required String type,
+    int displayOrder = 0,
+    double? totalMeters,
+    double? meterPrice,
+    double? unitValue,
+  }) async {
+    return _post('invoice-structure/locations', {
+      'userId': userId,
+      'projectId': projectId,
+      'parentId': parentId,
+      'name': name,
+      'type': type,
+      'display_order': displayOrder,
+      'total_meters': totalMeters,
+      'meter_price': meterPrice,
+      'unit_value': unitValue,
+    });
+  }
+
+  Future<void> updateInvoiceStructureLocation({
+    required int userId,
+    required int id,
+    String? name,
+    int? displayOrder,
+    double? totalMeters,
+    double? meterPrice,
+    double? unitValue,
+    bool clearFlooringFields = false,
+    bool clearUnitValue = false,
+  }) async {
+    final body = <String, dynamic>{'userId': userId};
+    if (name != null) body['name'] = name;
+    if (displayOrder != null) body['display_order'] = displayOrder;
+    if (clearFlooringFields) {
+      body['total_meters'] = totalMeters;
+      body['meter_price'] = meterPrice;
+    }
+    if (clearUnitValue) {
+      body['unit_value'] = unitValue;
+    }
+    if (body.length <= 1) return;
+    await _put('invoice-structure/locations/$id', body);
+  }
+
+  Future<void> deleteInvoiceStructureLocation({
+    required int userId,
+    required int id,
+  }) async {
+    final uri = Uri.parse(_path('invoice-structure/locations/$id')).replace(
+      queryParameters: {'userId': '$userId'},
+    );
+    final r = await http.delete(uri, headers: _reqHeaders());
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'invoice-structure/locations/$id');
+    }
   }
 
   Future<List<BuildingModel>> getBuildings(int zoneId) async {
