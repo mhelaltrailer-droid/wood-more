@@ -124,7 +124,7 @@ class _AdminInvoiceStructureScreenState
                 backgroundColor: const Color(0xFF1B5E20),
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              child: const Text('Flooring\n(أمتار)'),
+              child: const Text('Flooring'),
             ),
             const SizedBox(height: 10),
             FilledButton.tonal(
@@ -132,7 +132,7 @@ class _AdminInvoiceStructureScreenState
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              child: const Text('WPC\n(Units)'),
+              child: const Text('WPC'),
             ),
           ],
         ),
