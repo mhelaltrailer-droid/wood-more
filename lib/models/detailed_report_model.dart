@@ -42,6 +42,12 @@ bool isManualWorkLocationsAttachment(DetailedReportAttachment a) =>
 bool isReportMetadataAttachment(DetailedReportAttachment a) =>
     isExecutedTodaySummaryAttachment(a) || isManualWorkLocationsAttachment(a);
 
+/// خطة العمل لم تعد تقبل صور/ملفات مستخدم — يُبقى metadata الداخلي فقط.
+List<DetailedReportAttachment> metadataOnlyDetailedReportAttachments(
+  List<DetailedReportAttachment> attachments,
+) =>
+    attachments.where(isReportMetadataAttachment).toList();
+
 /// ملفات المستخدم الحقيقية فقط (بدون مرفقات البيانات الداخلية + صور المصروفات).
 int countDetailedReportUserFiles({
   required List<DetailedReportAttachment> attachments,

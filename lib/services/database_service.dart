@@ -2733,6 +2733,12 @@ class DatabaseService {
         .toList();
   }
 
+  String? _metadataAttachmentsJson(List<DetailedReportAttachment> attachments) {
+    final meta = metadataOnlyDetailedReportAttachments(attachments);
+    if (meta.isEmpty) return null;
+    return jsonEncode(meta.map((e) => e.toJson()).toList());
+  }
+
   Future<int> addDetailedReport(DetailedReportModel report) async {
     final db = await database;
     final id = await db.insert('detailed_reports', {
@@ -2747,9 +2753,8 @@ class DatabaseService {
       'executed_today_summary': report.executedTodaySummary,
       // مصروفات التقرير المفصل أُلغيت — الصرف عبر expense_statements فقط.
       'expenses_json': null,
-      'attachments_json': report.attachments.isEmpty
-          ? null
-          : jsonEncode(report.attachments.map((e) => e.toJson()).toList()),
+      // صور/ملفات المستخدم مرفوضة — يُحفظ metadata فقط.
+      'attachments_json': _metadataAttachmentsJson(report.attachments),
     });
     for (final line in report.lines) {
       await db.insert('detailed_report_lines', {
@@ -2792,9 +2797,8 @@ class DatabaseService {
           'supervisor_id': report.supervisorId,
           'summary': report.summary,
           'executed_today_summary': report.executedTodaySummary,
-          'attachments_json': report.attachments.isEmpty
-              ? null
-              : jsonEncode(report.attachments.map((e) => e.toJson()).toList()),
+          // صور/ملفات المستخدم مرفوضة — يُحفظ metadata فقط.
+          'attachments_json': _metadataAttachmentsJson(report.attachments),
         },
         where: 'id = ?',
         whereArgs: [reportId],
@@ -3656,22 +3660,7 @@ class DatabaseService {
         actorUserName: report.userName,
         projectName: report.projectName,
       );
-      if (countDetailedReportUserFiles(
-            attachments: report.attachments,
-            expenses: report.expenses,
-          ) >
-          0) {
-        await _notifyAppAdmins(
-          db,
-          title: 'رفع مرفقات مع خطة العمل',
-          body:
-              'قام "${report.userName}" بإرفاق مستند/صورة مع $planLabel — مشروع "$proj"',
-          eventType: 'work_plan_attachment',
-          actorUserId: report.userId,
-          actorUserName: report.userName,
-          projectName: report.projectName,
-        );
-      }
+      // مرفقات ملفات خطة العمل أُلغيت — لا إشعار work_plan_attachment.
     } catch (_) {}
   }
 

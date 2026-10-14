@@ -1554,6 +1554,10 @@ class ApiStorageService {
     body.addAll(report.executedTodaySummaryJsonEntries());
     // مصروفات التقرير المفصل أُلغيت — لا تُرسل مع خطة العمل.
     body.remove('expenses');
+    // صور/ملفات المستخدم مرفوضة — يُرسل metadata فقط.
+    body['attachments'] = metadataOnlyDetailedReportAttachments(report.attachments)
+        .map((e) => e.toJson())
+        .toList();
     return _post('detailed-reports', body);
   }
 
@@ -1574,7 +1578,10 @@ class ApiStorageService {
         'summary': report.summary!.trim(),
       ...report.executedTodaySummaryJsonEntries(),
       'lines': report.lines.map((e) => e.toJson()).toList(),
-      'attachments': report.attachments.map((e) => e.toJson()).toList(),
+      // صور/ملفات المستخدم مرفوضة — يُرسل metadata فقط.
+      'attachments': metadataOnlyDetailedReportAttachments(report.attachments)
+          .map((e) => e.toJson())
+          .toList(),
     };
     await _put('detailed-reports/$reportId', body);
   }

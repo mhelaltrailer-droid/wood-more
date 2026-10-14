@@ -1015,21 +1015,21 @@ const DETAILED_REPORT_METADATA_ATTACHMENT_NAMES = new Set([
   '__manual_work_locations__',
 ]);
 
-/// يحصي الملفات الحقيقية المرفقة بتقرير مفصل: مرفقات التقرير + صور بنود الصرف.
-function countDetailedReportFiles(body) {
-  const attachments = Array.isArray(body.attachments) ? body.attachments : [];
-  const realAttachments = attachments.filter(
+/// خطة العمل لم تعد تقبل صور/ملفات مستخدم (حتى من عميل قديم).
+/// يُبقى فقط مرفقات الـ metadata الداخلية داخل attachments_json.
+function sanitizeDetailedReportAttachments(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments.filter(
     (a) =>
       a &&
       typeof a === 'object' &&
-      a.data &&
-      !DETAILED_REPORT_METADATA_ATTACHMENT_NAMES.has(String(a.name ?? '')),
-  ).length;
-  const expenses = Array.isArray(body.expenses) ? body.expenses : [];
-  const expenseImages = expenses.filter(
-    (e) => e && typeof e === 'object' && e.image_path,
-  ).length;
-  return realAttachments + expenseImages;
+      DETAILED_REPORT_METADATA_ATTACHMENT_NAMES.has(String(a.name ?? '')),
+  );
+}
+
+function attachmentsJsonForDetailedReport(attachments) {
+  const kept = sanitizeDetailedReportAttachments(attachments);
+  return kept.length > 0 ? JSON.stringify(kept) : null;
 }
 
 async function notifyAppAdminsWorkPlanSaved(pool, {
@@ -1038,9 +1038,6 @@ async function notifyAppAdminsWorkPlanSaved(pool, {
   projectName,
   reportDatetime,
   isUpdate = false,
-  hasAttachments = false,
-  reportId = null,
-  attachmentCount = null,
   noWorkPlan = false,
   summary = null,
 }) {
@@ -1091,18 +1088,7 @@ async function notifyAppAdminsWorkPlanSaved(pool, {
     actorUserName: userName,
     projectName: projectName || null,
   });
-  if (hasAttachments) {
-    await notifyFileUpload(pool, userId, userName, {
-      title: 'رفع مرفقات مع خطة العمل',
-      body:
-        `قام "${userName}" بإرفاق مستند/صورة مع ${planLabel} — مشروع "${proj}"`,
-      eventType: 'work_plan_attachment',
-      projectName: projectName || null,
-      attachmentSource: reportId != null ? 'detailed_report' : null,
-      attachmentRecordId: reportId,
-      attachmentCount,
-    });
-  }
+  // مرفقات ملفات خطة العمل أُلغيت — لا إشعار work_plan_attachment حتى لو أرسل عميل قديم ملفات.
 }
 
 const MS_SD_MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -4708,8 +4694,8 @@ app.post('/detailed-reports', async (req, res) => {
 
     // مصروفات التقرير المفصل أُلغيت: الصرف فقط عبر expense_statements (اعتماد مدير المشروعات ثم الخصم).
     const expensesJson = null;
-    const attachmentsJson = (b.attachments != null && Array.isArray(b.attachments) && b.attachments.length > 0)
-      ? JSON.stringify(b.attachments) : null;
+    // صور/ملفات المستخدم مرفوضة — حتى من نسخة قديمة؛ يُحفظ metadata فقط إن وُجد.
+    const attachmentsJson = attachmentsJsonForDetailedReport(b.attachments);
     const r = await pool.query(
       'INSERT INTO detailed_reports (user_id, user_name, report_datetime, project_id, project_name, supervisor_id, created_at, summary, executed_today_summary, expenses_json, attachments_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id',
       [b.userId, b.userName, reportDatetime, projectId, projectName, b.supervisorId || null, now, summary, executedTodaySummary, expensesJson, attachmentsJson]
@@ -4727,16 +4713,12 @@ app.post('/detailed-reports', async (req, res) => {
         [reportId, contractorId, line.contractorWorkersCount ?? 0, line.selfWorkersCount ?? 0, zoneId, buildingId, locationId, (line.manualWorkLocation != null && String(line.manualWorkLocation).trim() !== '') ? String(line.manualWorkLocation).trim() : null, line.phaseId, line.workersCount]
       );
     }
-    const hasAttachments = countDetailedReportFiles(b) > 0;
     await notifyAppAdminsWorkPlanSaved(pool, {
       userId: b.userId,
       userName: b.userName,
       projectName: projectName,
       reportDatetime,
       isUpdate: false,
-      hasAttachments,
-      reportId,
-      attachmentCount: countDetailedReportFiles(b),
       noWorkPlan,
       summary,
     });
@@ -4865,8 +4847,8 @@ app.put('/detailed-reports/:id', async (req, res) => {
     const executedTodaySummary = parseExecutedTodaySummaryFromBody(b);
     const projectId = b.projectId != null ? parseInt(b.projectId, 10) : null;
     const projectName = (b.projectName != null && String(b.projectName).trim() !== '') ? String(b.projectName).trim() : null;
-    const attachmentsJson = (b.attachments != null && Array.isArray(b.attachments) && b.attachments.length > 0)
-      ? JSON.stringify(b.attachments) : null;
+    // صور/ملفات المستخدم مرفوضة — حتى من نسخة قديمة؛ يُحفظ metadata فقط إن وُجد.
+    const attachmentsJson = attachmentsJsonForDetailedReport(b.attachments);
     await pool.query('BEGIN');
     try {
       await pool.query('DELETE FROM detailed_report_lines WHERE detailed_report_id = $1', [id]);
@@ -4902,16 +4884,12 @@ app.put('/detailed-reports/:id', async (req, res) => {
         );
       }
       await pool.query('COMMIT');
-      const hasAttachments = countDetailedReportFiles(b) > 0;
       await notifyAppAdminsWorkPlanSaved(pool, {
         userId: b.userId,
         userName: b.userName,
         projectName: projectName,
         reportDatetime: b.reportDatetime || new Date().toISOString(),
         isUpdate: true,
-        hasAttachments,
-        reportId: id,
-        attachmentCount: countDetailedReportFiles(b),
       });
       res.json({ ok: true });
     } catch (err) {
