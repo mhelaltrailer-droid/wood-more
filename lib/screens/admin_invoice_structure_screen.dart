@@ -229,60 +229,6 @@ class _AdminInvoiceStructureScreenState
     }
   }
 
-  Future<void> _importFromAllProjects() async {
-    if (!_isApi) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        content: const Text(
-          'استيراد هيكلة المشروعات الحالية إلى هيكلة المستخلصات لكل المشاريع التي لا تملك مواقع مستخلصات بعد؟\nيمكن تعديلها لاحقاً لكل مشروع.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('استيراد الكل'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    try {
-      setState(() => _loading = true);
-      final r = await _api.importInvoiceStructureFromAllProjects(
-        userId: widget.admin.id,
-      );
-      if (!mounted) return;
-      final projects =
-          r['imported_projects'] is num ? (r['imported_projects'] as num).toInt() : 0;
-      final nodes =
-          r['imported_nodes'] is num ? (r['imported_nodes'] as num).toInt() : 0;
-      final skipped =
-          r['skipped'] is num ? (r['skipped'] as num).toInt() : 0;
-      setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'تم: $projects مشروعاً ($nodes موقعاً). تخطي: $skipped',
-          ),
-          backgroundColor: Colors.green,
-        ),
-      );
-      if (_selectedProject != null) {
-        await _loadStructure(promptIfNeeded: false);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-
   List<InvoiceStructureLocationModel> _childrenOf(int? parentId) {
     return _flatList.where((e) => e.parentId == parentId).toList()
       ..sort(
@@ -698,12 +644,6 @@ class _AdminInvoiceStructureScreenState
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            OutlinedButton.icon(
-              onPressed: _loading ? null : _importFromAllProjects,
-              icon: const Icon(Icons.cloud_download_outlined),
-              label: const Text('استيراد هيكلة كل المشروعات'),
-            ),
-            const SizedBox(height: 12),
             DropdownButtonFormField<ProjectModel?>(
               value: _selectedProject,
               decoration: const InputDecoration(
