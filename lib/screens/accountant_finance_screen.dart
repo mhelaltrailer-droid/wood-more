@@ -770,36 +770,37 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
             style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
           ),
           pw.SizedBox(height: 10),
-          // ترتيب RTL (يمين→يسار): التاريخ | الاسم | البيان | المبلغ | الحركة
+          // pw.Table يرسم LTR (يسار→يمين)، لذلك نعكس ترتيب العناصر
+          // ليظهر بصرياً يمين→يسار: التاريخ | الاسم | البيان | المبلغ | الحركة
           pw.Table(
             border: pw.TableBorder.all(width: 0.5),
             columnWidths: {
-              0: const pw.FlexColumnWidth(0.95),
-              1: const pw.FlexColumnWidth(1.2),
+              0: const pw.FlexColumnWidth(1.0),
+              1: const pw.FlexColumnWidth(0.85),
               2: const pw.FlexColumnWidth(1.8),
-              3: const pw.FlexColumnWidth(0.85),
-              4: const pw.FlexColumnWidth(1.0),
+              3: const pw.FlexColumnWidth(1.2),
+              4: const pw.FlexColumnWidth(0.95),
             },
             children: [
               pw.TableRow(
                 decoration: const pw.BoxDecoration(color: pdf.PdfColors.grey300),
                 children: [
-                  _cell('التاريخ', true),
-                  _cell('الاسم', true),
-                  _cell('البيان', true),
-                  _cell('المبلغ', true),
                   _cell('الحركة', true),
+                  _cell('المبلغ', true),
+                  _cell('البيان', true),
+                  _cell('الاسم', true),
+                  _cell('التاريخ', true),
                 ],
               ),
               ...movements.map((e) {
                 final dt = DateTime.parse(e['created_at'] as String);
                 return pw.TableRow(
                   children: [
-                    _cell(dateFormat.format(dt), false),
-                    _cell(_userName(e), false),
-                    _cell(e['note'] as String? ?? '—', false),
-                    _cell((e['amount'] as num).toStringAsFixed(2), false),
                     _cell(_typeLabel(e), false),
+                    _cell((e['amount'] as num).toStringAsFixed(2), false),
+                    _cell(e['note'] as String? ?? '—', false),
+                    _cell(_userName(e), false),
+                    _cell(dateFormat.format(dt), false),
                   ],
                 );
               }),
@@ -807,9 +808,9 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
                 decoration: const pw.BoxDecoration(color: pdf.PdfColors.grey200),
                 children: [
                   _cell('', true),
-                  _cell('', true),
-                  _cell('الاجمالي', true),
                   _cell(totalLabel, true),
+                  _cell('الاجمالي', true),
+                  _cell('', true),
                   _cell('', true),
                 ],
               ),
