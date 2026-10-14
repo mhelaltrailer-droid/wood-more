@@ -699,22 +699,22 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
 
   String _typeLabel(Map<String, dynamic> e) {
     final t = e['type'] as String?;
-    if (t == 'expense') return 'صرف معتمد';
+    if (t == 'expense') return 'بيان صرف';
     if (t == 'add_balance') return 'إضافة رصيد';
     if (t == 'withdraw_balance') return 'سحب رصيد';
     return '—';
   }
 
-  String _balanceAfterLabel(Map<String, dynamic> e) {
-    final raw = e['balance_after'];
-    if (raw == null) return '—';
-    if (raw is num) return raw.toStringAsFixed(2);
-    final parsed = double.tryParse(raw.toString());
-    return parsed?.toStringAsFixed(2) ?? '—';
-  }
+  double get _totalAmount => movements.fold<double>(
+        0,
+        (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0),
+      );
+
+  // عمود «الرصيد بعد» مخفي مؤقتاً — التخزين في الخلفية ما زال يعمل.
 
   Future<void> _exportPdf(BuildContext context) async {
     final dateFormat = DateFormat('yyyy/MM/dd', 'ar');
+    final totalLabel = _totalAmount.toStringAsFixed(2);
     final fontBase = await PdfGoogleFonts.tajawalRegular();
     final fontBold = await PdfGoogleFonts.tajawalBold();
     final theme = pw.ThemeData.withFont(base: fontBase, bold: fontBold);
@@ -770,41 +770,49 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
             style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
           ),
           pw.SizedBox(height: 10),
+          // ترتيب RTL (يمين→يسار): التاريخ | الاسم | البيان | المبلغ | الحركة
           pw.Table(
             border: pw.TableBorder.all(width: 0.5),
             columnWidths: {
-              0: const pw.FlexColumnWidth(0.9),
-              1: const pw.FlexColumnWidth(0.9),
-              2: const pw.FlexColumnWidth(1.2),
-              3: const pw.FlexColumnWidth(1.6),
-              4: const pw.FlexColumnWidth(0.8),
-              5: const pw.FlexColumnWidth(0.9),
+              0: const pw.FlexColumnWidth(0.95),
+              1: const pw.FlexColumnWidth(1.2),
+              2: const pw.FlexColumnWidth(1.8),
+              3: const pw.FlexColumnWidth(0.85),
+              4: const pw.FlexColumnWidth(1.0),
             },
             children: [
               pw.TableRow(
                 decoration: const pw.BoxDecoration(color: pdf.PdfColors.grey300),
                 children: [
-                  _cell('النوع', true),
                   _cell('التاريخ', true),
-                  _cell('المهندس', true),
+                  _cell('الاسم', true),
                   _cell('البيان', true),
                   _cell('المبلغ', true),
-                  _cell('الرصيد بعد', true),
+                  _cell('الحركة', true),
                 ],
               ),
               ...movements.map((e) {
                 final dt = DateTime.parse(e['created_at'] as String);
                 return pw.TableRow(
                   children: [
-                    _cell(_typeLabel(e), false),
                     _cell(dateFormat.format(dt), false),
                     _cell(_userName(e), false),
                     _cell(e['note'] as String? ?? '—', false),
                     _cell((e['amount'] as num).toStringAsFixed(2), false),
-                    _cell(_balanceAfterLabel(e), false),
+                    _cell(_typeLabel(e), false),
                   ],
                 );
               }),
+              pw.TableRow(
+                decoration: const pw.BoxDecoration(color: pdf.PdfColors.grey200),
+                children: [
+                  _cell('', true),
+                  _cell('', true),
+                  _cell('الاجمالي', true),
+                  _cell(totalLabel, true),
+                  _cell('', true),
+                ],
+              ),
             ],
           ),
         ],
@@ -833,9 +841,35 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
     );
   }
 
+  Widget _screenHeaderCell(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+      ),
+    );
+  }
+
+  Widget _screenCell(String text, {bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('yyyy/MM/dd', 'ar');
+    final totalLabel = _totalAmount.toStringAsFixed(2);
     return Scaffold(
       appBar: AppBar(
         title: const Text('تقرير الحركات المالية'),
@@ -871,26 +905,62 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
               ),
             )
           else
-            ...movements.map((e) {
-              final dt = DateTime.parse(e['created_at'] as String);
-              final uname = _userName(e);
-              final typeLabel = _typeLabel(e);
-              final balAfter = _balanceAfterLabel(e);
-              return Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  title: Text(e['note'] as String? ?? '—'),
-                  subtitle: Text(
-                    '${dateFormat.format(dt)} • $uname • $typeLabel\nالرصيد بعد الحركة: $balAfter',
-                  ),
-                  isThreeLine: true,
-                  trailing: Text(
-                    (e['amount'] as num).toStringAsFixed(2),
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: MediaQuery.sizeOf(context).width - 32,
                 ),
-              );
-            }),
+                child: Table(
+                  border: TableBorder.all(color: Colors.grey.shade400),
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  columnWidths: const {
+                    0: FlexColumnWidth(1.1),
+                    1: FlexColumnWidth(1.3),
+                    2: FlexColumnWidth(2.0),
+                    3: FlexColumnWidth(1.0),
+                    4: FlexColumnWidth(1.2),
+                  },
+                  children: [
+                    TableRow(
+                      decoration: BoxDecoration(color: Colors.grey.shade300),
+                      children: [
+                        _screenHeaderCell('التاريخ'),
+                        _screenHeaderCell('الاسم'),
+                        _screenHeaderCell('البيان'),
+                        _screenHeaderCell('المبلغ'),
+                        _screenHeaderCell('الحركة'),
+                      ],
+                    ),
+                    ...movements.map((e) {
+                      final dt = DateTime.parse(e['created_at'] as String);
+                      return TableRow(
+                        children: [
+                          _screenCell(dateFormat.format(dt)),
+                          _screenCell(_userName(e)),
+                          _screenCell(e['note'] as String? ?? '—'),
+                          _screenCell(
+                            (e['amount'] as num).toStringAsFixed(2),
+                            bold: true,
+                          ),
+                          _screenCell(_typeLabel(e)),
+                        ],
+                      );
+                    }),
+                    TableRow(
+                      decoration: BoxDecoration(color: Colors.grey.shade200),
+                      children: [
+                        _screenCell(''),
+                        _screenCell(''),
+                        _screenCell('الاجمالي', bold: true),
+                        _screenCell(totalLabel, bold: true),
+                        _screenCell(''),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
           if (movements.isNotEmpty) ...[
             const SizedBox(height: 24),
             FilledButton.icon(
