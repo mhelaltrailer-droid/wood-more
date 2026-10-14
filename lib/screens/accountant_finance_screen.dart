@@ -443,17 +443,12 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
           (a['created_at'] as String).compareTo(b['created_at'] as String),
     );
 
-    final filterLabel = filterAll
-        ? 'الكل'
-        : (selectedEngineer?.name ?? '—');
-
     if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => _AccountantFinanceReportScreen(
           dateFrom: dateFrom,
           dateTo: dateTo,
-          filterLabel: filterLabel,
           movements: combined,
         ),
       ),
@@ -681,13 +676,11 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
 class _AccountantFinanceReportScreen extends StatelessWidget {
   final DateTime dateFrom;
   final DateTime dateTo;
-  final String filterLabel;
   final List<Map<String, dynamic>> movements;
 
   const _AccountantFinanceReportScreen({
     required this.dateFrom,
     required this.dateTo,
-    required this.filterLabel,
     required this.movements,
   });
 
@@ -758,16 +751,13 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
               ),
             ),
           ),
-          pw.SizedBox(height: 6),
-          pw.Text(
-            'المهندس: $filterLabel',
-            textDirection: pw.TextDirection.rtl,
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
-          ),
-          pw.Text(
-            'من ${dateFormat.format(dateFrom)} إلى ${dateFormat.format(dateTo)}',
-            textDirection: pw.TextDirection.rtl,
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+          pw.SizedBox(height: 8),
+          pw.Center(
+            child: pw.Text(
+              'من ${dateFormat.format(dateFrom)} إلى ${dateFormat.format(dateTo)}',
+              textDirection: pw.TextDirection.rtl,
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11),
+            ),
           ),
           pw.SizedBox(height: 10),
           // pw.Table يرسم LTR (يسار→يمين)، لذلك نعكس ترتيب العناصر
@@ -884,18 +874,12 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(
-            'المهندس: $filterLabel',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          Text(
-            'من ${dateFormat.format(dateFrom)} إلى ${dateFormat.format(dateTo)}',
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'الحركات تشمل: إضافة/سحب رصيد (ah-amin + مدير المشروعات) + بيانات الصرف المعتمدة',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+          Center(
+            child: Text(
+              'من ${dateFormat.format(dateFrom)} إلى ${dateFormat.format(dateTo)}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              textAlign: TextAlign.center,
+            ),
           ),
           const SizedBox(height: 16),
           if (movements.isEmpty)
