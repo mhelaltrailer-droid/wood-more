@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -446,7 +446,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       FilledButton.icon(
                         onPressed: _reports.isEmpty ? null : _exportPdf,
                         icon: const Icon(Icons.picture_as_pdf, size: 20),
-                        label: const Text('تصدير PDF'),
+                        label: const Text('Export PDF'),
                         style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), padding: const EdgeInsets.symmetric(vertical: 14)),
                       ),
                       const SizedBox(height: 12),
@@ -469,7 +469,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       child: FilledButton.icon(
                         onPressed: _reports.isEmpty ? null : _exportPdf,
                         icon: const Icon(Icons.picture_as_pdf),
-                        label: const Text('تصدير PDF'),
+                        label: const Text('Export PDF'),
                         style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), padding: const EdgeInsets.symmetric(vertical: 14)),
                       ),
                     ),

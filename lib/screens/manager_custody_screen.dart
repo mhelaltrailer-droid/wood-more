@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -375,7 +375,7 @@ class _CustodyReportScreen extends StatelessWidget {
             const SizedBox(height: 24),
             FilledButton.icon(
               icon: const Icon(Icons.picture_as_pdf),
-              label: const Text('تصدير PDF'),
+              label: const Text('Export PDF'),
               onPressed: () => _exportPdf(context),
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF1B5E20),

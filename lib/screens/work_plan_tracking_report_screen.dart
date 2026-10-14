@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -951,7 +951,7 @@ class _WorkPlanTrackingReportScreenState
           if (_hasSearched && _rows.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.picture_as_pdf),
-              tooltip: 'تصدير PDF',
+              tooltip: 'Export PDF',
               onPressed: _loading ? null : _exportPdf,
             ),
         ],
@@ -1167,7 +1167,7 @@ class _WorkPlanTrackingReportScreenState
                     FilledButton.icon(
                       onPressed: _loading ? null : _exportPdf,
                       icon: const Icon(Icons.picture_as_pdf),
-                      label: const Text('تصدير PDF'),
+                      label: const Text('Export PDF'),
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFF1B5E20),
                         padding: const EdgeInsets.symmetric(vertical: 14),

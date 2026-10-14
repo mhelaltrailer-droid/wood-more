@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -548,7 +548,7 @@ class _WorkerHoursReportScreenState extends State<WorkerHoursReportScreen> {
             FilledButton.icon(
               onPressed: _exportPdf,
               icon: const Icon(Icons.picture_as_pdf),
-              label: const Text('تصدير PDF'),
+              label: const Text('Export PDF'),
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF1B5E20),
               ),

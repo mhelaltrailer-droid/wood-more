@@ -1,4 +1,4 @@
-import 'dart:ui' as ui;
+﻿import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -637,7 +637,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
         actions: [
           if (_hasSearched && _rows.isNotEmpty)
             IconButton(
-              tooltip: 'تصدير PDF',
+              tooltip: 'Export PDF',
               onPressed: _loading ? null : _exportPdf,
               icon: const Icon(Icons.picture_as_pdf),
             ),
@@ -749,7 +749,7 @@ class _WeeklyReportScreenState extends State<WeeklyReportScreen> {
                     FilledButton.icon(
                       onPressed: _loading ? null : _exportPdf,
                       icon: const Icon(Icons.picture_as_pdf),
-                      label: const Text('تصدير PDF'),
+                      label: const Text('Export PDF'),
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFF1B5E20),
                         padding: const EdgeInsets.symmetric(vertical: 14),

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -431,7 +431,7 @@ class _AttendanceReportsScreenState extends State<AttendanceReportsScreen> {
                                   FilledButton.icon(
                                     onPressed: _displayRecords.isEmpty ? null : _exportPdf,
                                     icon: const Icon(Icons.picture_as_pdf),
-                                    label: const Text('تصدير PDF'),
+                                    label: const Text('Export PDF'),
                                     style: FilledButton.styleFrom(
                                       backgroundColor: const Color(0xFF1B5E20),
                                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),

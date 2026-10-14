@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -471,7 +471,7 @@ class _AggregatedDetailedDailyReportScreenState extends State<AggregatedDetailed
           if (_rows.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.picture_as_pdf),
-              tooltip: 'تصدير PDF',
+              tooltip: 'Export PDF',
               onPressed: _exportPdf,
             ),
         ],
@@ -623,7 +623,7 @@ class _AggregatedDetailedDailyReportScreenState extends State<AggregatedDetailed
               FilledButton.icon(
                 onPressed: _exportPdf,
                 icon: const Icon(Icons.picture_as_pdf),
-                label: const Text('تصدير PDF'),
+                label: const Text('Export PDF'),
                 style: FilledButton.styleFrom(
                   backgroundColor: const Color(0xFF1B5E20),
                   padding: const EdgeInsets.symmetric(vertical: 14),

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart' as pdf;
@@ -950,7 +950,7 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
             const SizedBox(height: 24),
             FilledButton.icon(
               icon: const Icon(Icons.picture_as_pdf),
-              label: const Text('تصدير PDF'),
+              label: const Text('Export PDF'),
               onPressed: () => _exportPdf(context),
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF1B5E20),

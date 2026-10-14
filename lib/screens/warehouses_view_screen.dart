@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -284,7 +284,7 @@ class _WarehousesViewScreenState extends State<WarehousesViewScreen>
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.picture_as_pdf),
-                  label: Text(exporting ? 'جاري التصدير…' : 'تصدير PDF'),
+                  label: Text(exporting ? 'جاري التصدير…' : 'Export PDF'),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF1B5E20),
                   ),

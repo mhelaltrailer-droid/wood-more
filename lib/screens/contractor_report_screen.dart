@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -271,7 +271,7 @@ class _ContractorReportScreenState extends State<ContractorReportScreen> {
                   ),
                 )),
             const SizedBox(height: 12),
-            FilledButton.icon(onPressed: _exportPdf, icon: const Icon(Icons.picture_as_pdf), label: const Text('تصدير PDF'), style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1B5E20))),
+            FilledButton.icon(onPressed: _exportPdf, icon: const Icon(Icons.picture_as_pdf), label: const Text('Export PDF'), style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1B5E20))),
           ],
         ],
       ),
