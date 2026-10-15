@@ -26,6 +26,9 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
   Map<int, double> _balances = {};
   bool _loading = true;
 
+  /// أثناء إضافة/سحب/ضبط رصيد — مؤشر خفيف على بطاقة المستخدم فقط.
+  int? _busyUserId;
+
   /// منفّذو الإضافة/السحب المسموح ظهور حركاتهم في التقرير.
   static const _reportActorEmails = {
     'ah-amin',
@@ -128,10 +131,12 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('أدخل مبلغاً صحيحاً')));
       return;
     }
+    if (_busyUserId != null) return;
+    setState(() => _busyUserId = user.id);
     try {
       if (isSelf) {
         // إضافة رصيد ذاتي للمحاسب فقط (بدون خصم من أي أحد)
-        final current = await _db.getEngineerBalance(user.id);
+        final current = _balances[user.id] ?? 0;
         final after = current + amount;
         await _db.setEngineerBalance(user.id, after);
         await _db.addBalanceMovement(
@@ -144,20 +149,27 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
           actorRole: widget.currentUser.role,
           balanceAfter: after,
         );
+        if (!mounted) return;
+        setState(() {
+          _balances[user.id] = after;
+          _busyUserId = null;
+        });
       } else {
-        final actorBalance = await _db.getEngineerBalance(widget.currentUser.id);
+        final actorBalance = _balances[widget.currentUser.id] ?? 0;
         if (actorBalance < amount) {
           if (mounted) {
+            setState(() => _busyUserId = null);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('رصيدك الحالي ${actorBalance.toStringAsFixed(2)} أقل من المبلغ المطلوب'), backgroundColor: Colors.orange),
             );
           }
           return;
         }
-        final currentUser = await _db.getEngineerBalance(user.id);
+        final currentUser = _balances[user.id] ?? 0;
         final after = currentUser + amount;
+        final actorAfter = actorBalance - amount;
         await _db.setEngineerBalance(user.id, after);
-        await _db.setEngineerBalance(widget.currentUser.id, actorBalance - amount);
+        await _db.setEngineerBalance(widget.currentUser.id, actorAfter);
         await _db.addBalanceMovement(
           user.id,
           amount,
@@ -168,11 +180,25 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
           actorRole: widget.currentUser.role,
           balanceAfter: after,
         );
+        if (!mounted) return;
+        setState(() {
+          _balances[user.id] = after;
+          _balances[widget.currentUser.id] = actorAfter;
+          _busyUserId = null;
+        });
       }
-      _load();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت إضافة الرصيد'), backgroundColor: Colors.green));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تمت إضافة الرصيد'), backgroundColor: Colors.green),
+        );
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
+      if (mounted) {
+        setState(() => _busyUserId = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
@@ -204,20 +230,24 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('أدخل مبلغاً صحيحاً')));
       return;
     }
+    if (_busyUserId != null) return;
+    setState(() => _busyUserId = user.id);
     try {
-      final currentUser = await _db.getEngineerBalance(user.id);
+      final currentUser = _balances[user.id] ?? 0;
       if (currentUser < amount) {
         if (mounted) {
+          setState(() => _busyUserId = null);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('رصيد ${user.name} غير كافٍ (${currentUser.toStringAsFixed(2)})'), backgroundColor: Colors.orange),
           );
         }
         return;
       }
-      final actorBalance = await _db.getEngineerBalance(widget.currentUser.id);
+      final actorBalance = _balances[widget.currentUser.id] ?? 0;
       final after = currentUser - amount;
+      final actorAfter = actorBalance + amount;
       await _db.setEngineerBalance(user.id, after);
-      await _db.setEngineerBalance(widget.currentUser.id, actorBalance + amount);
+      await _db.setEngineerBalance(widget.currentUser.id, actorAfter);
       await _db.addBalanceMovement(
         user.id,
         amount,
@@ -228,10 +258,22 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
         actorRole: widget.currentUser.role,
         balanceAfter: after,
       );
-      _load();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم سحب الرصيد'), backgroundColor: Colors.green));
+      if (!mounted) return;
+      setState(() {
+        _balances[user.id] = after;
+        _balances[widget.currentUser.id] = actorAfter;
+        _busyUserId = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم سحب الرصيد'), backgroundColor: Colors.green),
+      );
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red));
+      if (mounted) {
+        setState(() => _busyUserId = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
@@ -525,22 +567,27 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       }
       return;
     }
+    if (_busyUserId != null) return;
+    setState(() => _busyUserId = user.id);
     try {
       // تعيين مباشر فقط — بدون addBalanceMovement حتى لا تظهر في سجل الحركات.
       await _db.setEngineerBalance(user.id, value);
-      await _load();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'تم ضبط رصيد ${user.name} إلى ${value.toStringAsFixed(2)}',
-            ),
-            backgroundColor: Colors.green,
+      if (!mounted) return;
+      setState(() {
+        _balances[user.id] = value;
+        _busyUserId = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'تم ضبط رصيد ${user.name} إلى ${value.toStringAsFixed(2)}',
           ),
-        );
-      }
+          backgroundColor: Colors.green,
+        ),
+      );
     } catch (e) {
       if (mounted) {
+        setState(() => _busyUserId = null);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('خطأ: $e'), backgroundColor: Colors.red),
         );
@@ -589,6 +636,8 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                       !(widget.currentUser.hasSiteEngineerManagerPrivileges &&
                           u.isAccountant);
                   final showWithdraw = !isPrimaryBalanceEditor && !isSelf;
+                  final isBusy = _busyUserId == u.id;
+                  final actionsEnabled = _busyUserId == null;
                   return Card(
                     margin: const EdgeInsets.only(bottom: 12),
                     child: Padding(
@@ -622,31 +671,44 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                                   ],
                                 ),
                               ),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (showSetBalance)
-                                    TextButton.icon(
-                                      icon: const Icon(Icons.edit, size: 20),
-                                      label: const Text('ضبط رصيد'),
-                                      onPressed: () => _setBalanceDirect(u),
-                                    ),
-                                  if (showAdd)
-                                    TextButton.icon(
-                                      icon: const Icon(Icons.add, size: 20),
-                                      label: const Text('إضافة رصيد'),
-                                      onPressed: () => _addBalance(u),
-                                    ),
-                                  if (showWithdraw) ...[
-                                    if (showAdd) const SizedBox(width: 8),
-                                    TextButton.icon(
-                                      icon: const Icon(Icons.remove, size: 20),
-                                      label: const Text('سحب رصيد'),
-                                      onPressed: () => _withdrawBalance(u),
-                                    ),
+                              if (isBusy)
+                                const SizedBox(
+                                  width: 28,
+                                  height: 28,
+                                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                                )
+                              else
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (showSetBalance)
+                                      TextButton.icon(
+                                        icon: const Icon(Icons.edit, size: 20),
+                                        label: const Text('ضبط رصيد'),
+                                        onPressed: actionsEnabled
+                                            ? () => _setBalanceDirect(u)
+                                            : null,
+                                      ),
+                                    if (showAdd)
+                                      TextButton.icon(
+                                        icon: const Icon(Icons.add, size: 20),
+                                        label: const Text('إضافة رصيد'),
+                                        onPressed: actionsEnabled
+                                            ? () => _addBalance(u)
+                                            : null,
+                                      ),
+                                    if (showWithdraw) ...[
+                                      if (showAdd) const SizedBox(width: 8),
+                                      TextButton.icon(
+                                        icon: const Icon(Icons.remove, size: 20),
+                                        label: const Text('سحب رصيد'),
+                                        onPressed: actionsEnabled
+                                            ? () => _withdrawBalance(u)
+                                            : null,
+                                      ),
+                                    ],
                                   ],
-                                ],
-                              ),
+                                ),
                             ],
                           ),
                         ],
