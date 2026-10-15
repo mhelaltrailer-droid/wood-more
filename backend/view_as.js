@@ -17,6 +17,7 @@ const VIEW_AS_ALLOWED_ROLES = new Set([
   'op_coordinator',
   'qs',
   'finance',
+  'purchaser',
 ]);
 
 function normEmail(email) {

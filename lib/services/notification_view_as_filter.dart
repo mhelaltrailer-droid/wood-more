@@ -65,6 +65,12 @@ bool isNotificationVisibleForViewAsRole({
           t.contains('expense') ||
           t.contains('custody') ||
           t.startsWith('invoices_owner');
+    case 'purchaser':
+      return t == 'balance_added' ||
+          t == 'balance_withdrawn' ||
+          t.contains('expense') ||
+          t.contains('custody') ||
+          t.contains('attendance');
     case 'finance':
     case 'qs':
     case 'technical_office':

@@ -21,6 +21,7 @@ class IconVisibilityService {
   static const String roleOpCoordinator = 'op_coordinator';
   static const String roleQs = 'qs';
   static const String roleFinance = 'finance';
+  static const String rolePurchaser = 'purchaser';
 
   static const HomeIconItem meetingsIcon = HomeIconItem(
     id: 'meetings',
@@ -149,6 +150,7 @@ class IconVisibilityService {
     roleOpCoordinator: 'Op-Coordinator',
     roleQs: 'QS',
     roleFinance: 'Finance',
+    rolePurchaser: 'Purchaser',
   };
 
   static const Map<String, List<HomeIconItem>> roleIcons = {
@@ -160,6 +162,10 @@ class IconVisibilityService {
     ],
     roleFinance: [
       invoicesOwnerIcon,
+    ],
+    rolePurchaser: [
+      HomeIconItem(id: 'engineer_finances', label: 'العهدة/المصروفات'),
+      HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),
     ],
     roleTechnicalOffice: [
       ..._shopDrawingOnlyHomeIcons,

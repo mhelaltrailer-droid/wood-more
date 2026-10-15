@@ -2029,6 +2029,10 @@ async function ensureHomeIconsVisibilitySetting() {
       finance: {
         invoices_owner: true,
       },
+      purchaser: {
+        engineer_finances: true,
+        attendance: true,
+      },
     };
 
     function mergeHomeIconsVisibilityDefaults(existing) {
@@ -2325,7 +2329,7 @@ app.put('/users/:id/home-icon-order', async (req, res) => {
 app.put('/home-icons-visibility/:role', async (req, res) => {
   try {
     const role = String(req.params.role || '').trim();
-    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'projects_manager', 'general_supervisor', 'operation_manager', 'app_admin', 'accountant', 'document_controller', 'technical_office', 'top_management', 'op_coordinator', 'qs', 'finance']);
+    const allowedRoles = new Set(['site_engineer', 'site_engineer_manager', 'projects_manager', 'general_supervisor', 'operation_manager', 'app_admin', 'accountant', 'document_controller', 'technical_office', 'top_management', 'op_coordinator', 'qs', 'finance', 'purchaser']);
     if (!allowedRoles.has(role)) return res.status(400).json({ error: 'invalid role' });
 
     const requesterEmail = String(req.body?.requesterEmail || '').trim().toLowerCase();

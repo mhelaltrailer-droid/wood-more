@@ -99,6 +99,10 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
                       value: 'finance',
                       child: Text(UserModel.financeRoleLabel),
                     ),
+                    DropdownMenuItem(
+                      value: 'purchaser',
+                      child: Text(UserModel.purchaserRoleLabel),
+                    ),
                     DropdownMenuItem(value: 'app_admin', child: Text('مسؤول التطبيق')),
                   ],
                   onChanged: (v) => setDialog(() => role = v ?? role),
@@ -183,6 +187,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     if (r == 'op_coordinator') return UserModel.opCoordinatorRoleLabel;
     if (r == 'qs') return UserModel.qsRoleLabel;
     if (r == 'finance') return UserModel.financeRoleLabel;
+    if (r == 'purchaser') return UserModel.purchaserRoleLabel;
     if (r == 'app_admin') return 'مسؤول التطبيق';
     return r;
   }

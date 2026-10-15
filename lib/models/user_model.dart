@@ -13,6 +13,7 @@ class UserModel {
   static const String opCoordinatorRoleLabel = 'Op-Coordinator';
   static const String qsRoleLabel = 'QS';
   static const String financeRoleLabel = 'Finance';
+  static const String purchaserRoleLabel = 'Purchaser';
   static const String primaryAppAdminEmail = 'mouhammedhelal@gmail.com';
   /// محاسب Invoices (Owner) — Ah.Amin فقط من دور المحاسب.
   static const String invoicesOwnerAccountantEmail = 'ah-amin';
@@ -21,6 +22,7 @@ class UserModel {
   static const String roleProjectsManager = 'projects_manager';
   static const String roleQs = 'qs';
   static const String roleFinance = 'finance';
+  static const String rolePurchaser = 'purchaser';
 
   final int id;
   final String name;
@@ -79,6 +81,7 @@ class UserModel {
   bool get isOpCoordinator => role == 'op_coordinator';
   bool get isQs => role == roleQs;
   bool get isFinance => role == roleFinance;
+  bool get isPurchaser => role == rolePurchaser;
   bool get isSiteEngineerManager => role == 'site_engineer_manager';
   bool get isProjectsManager => role == roleProjectsManager;
 
