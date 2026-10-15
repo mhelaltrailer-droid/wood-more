@@ -442,16 +442,23 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
         if (targetId != selectedEngineer!.id) continue;
       }
 
+      final note = (e['note'] as String?)?.trim().isNotEmpty == true
+          ? (e['note'] as String).trim()
+          : '—';
+      // إضافة ذاتية: المنفّذ = المستهدف + add_balance (أو نص البيان المعروف)
+      final isSelfAdd = movementType == 'add_balance' &&
+          ((actorId != null && actorId == targetId) ||
+              note == 'إضافة رصيد ذاتي');
+
       combined.add({
         'type': movementType,
         'created_at': createdRaw,
         'user_id': targetId,
         'user_name': nameById[targetId],
-        'note': (e['note'] as String?)?.trim().isNotEmpty == true
-            ? e['note']
-            : '—',
+        'note': note,
         'amount': (e['amount'] as num).toDouble(),
         'balance_after': _parseBalanceAfter(e['balance_after']),
+        'is_self_add': isSelfAdd,
       });
     }
 
@@ -760,9 +767,20 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
     return '—';
   }
 
+  /// الاجمالي يستثني الإضافة الذاتية (تظهر في الجدول فقط لتجنّب العدّ المزدوج).
+  bool _countsTowardTotal(Map<String, dynamic> e) {
+    if (e['is_self_add'] == true) return false;
+    final note = (e['note'] as String?)?.trim() ?? '';
+    if (note == 'إضافة رصيد ذاتي') return false;
+    return true;
+  }
+
   double get _totalAmount => movements.fold<double>(
         0,
-        (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0),
+        (sum, e) {
+          if (!_countsTowardTotal(e)) return sum;
+          return sum + ((e['amount'] as num?)?.toDouble() ?? 0);
+        },
       );
 
   // عمود «الرصيد بعد» مخفي مؤقتاً — التخزين في الخلفية ما زال يعمل.
