@@ -563,6 +563,7 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     final canDownloadAttachments = user.canDownloadInvoicesOwnerAttachments(
       status: d.status,
       currentAssigneeUserId: d.currentAssigneeUserId,
+      createdByUserId: d.createdByUserId,
     );
     final canRemoveAttachment = canManage || canAssigneeAttachments;
 

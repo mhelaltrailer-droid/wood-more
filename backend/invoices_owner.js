@@ -338,7 +338,7 @@ function ioIsCurrentAssignee(user, row) {
   return assigneeId === parseInt(user.id, 10);
 }
 
-/** تنزيل/تعديل المرفقات: المسند إليه فقط قبل الاعتماد والتسليم للمرحلة التالية. */
+/** تعديل المرفقات: المسند إليه فقط قبل الاعتماد والتسليم للمرحلة التالية. */
 function ioCanManageAttachmentsAsAssignee(user, row) {
   if (!user || !row) return false;
   const status = String(row.status || '').trim();
@@ -349,7 +349,17 @@ function ioCanManageAttachmentsAsAssignee(user, row) {
   return ioCanActOnStatus(user, status, row);
 }
 
+/**
+ * تنزيل المرفقات:
+ * - قبل الاعتماد: المسند إليه فقط
+ * - بعد الاعتماد النهائي: كل من يطلع على المستخلص (المتداولون)
+ */
 function ioCanDownloadAttachments(user, row) {
+  if (!user || !row) return false;
+  const status = String(row.status || '').trim();
+  if (status === IO_STATUS.APPROVED) {
+    return ioCanViewInvoice(user, row);
+  }
   return ioCanManageAttachmentsAsAssignee(user, row);
 }
 

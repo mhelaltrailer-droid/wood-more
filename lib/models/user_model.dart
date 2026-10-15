@@ -272,13 +272,22 @@ class UserModel {
   }) =>
       currentAssigneeUserId != null && currentAssigneeUserId == id;
 
-  /// تنزيل المرفقات — المسند إليه فقط قبل الاعتماد.
+  /// تنزيل المرفقات:
+  /// - قبل الاعتماد: المسند إليه فقط
+  /// - بعد الاعتماد النهائي: كل المتداولين (اطلاع + تنزيل فقط)
   bool canDownloadInvoicesOwnerAttachments({
     required String status,
     required int? currentAssigneeUserId,
+    int? createdByUserId,
   }) {
-    if (status == invoicesOwnerStatusApproved ||
-        status == invoicesOwnerStatusReturnedCreator) {
+    if (status == invoicesOwnerStatusApproved) {
+      if (!canAccessInvoicesOwner) return false;
+      if (isInvoicesOwnerAhAminOnlyViewer) {
+        return createdByUserId != null && createdByUserId == id;
+      }
+      return true;
+    }
+    if (status == invoicesOwnerStatusReturnedCreator) {
       return false;
     }
     if (!isInvoicesOwnerCurrentAssignee(
@@ -293,11 +302,18 @@ class UserModel {
   bool canManageInvoicesOwnerAttachmentsAsAssignee({
     required String status,
     required int? currentAssigneeUserId,
-  }) =>
-      canDownloadInvoicesOwnerAttachments(
-        status: status,
-        currentAssigneeUserId: currentAssigneeUserId,
-      );
+  }) {
+    if (status == invoicesOwnerStatusApproved ||
+        status == invoicesOwnerStatusReturnedCreator) {
+      return false;
+    }
+    if (!isInvoicesOwnerCurrentAssignee(
+      currentAssigneeUserId: currentAssigneeUserId,
+    )) {
+      return false;
+    }
+    return canActOnInvoicesOwnerStatus(status);
+  }
 
   /// أيقونة Reports-SYS في الواجهة الرئيسية.
   bool get canAccessReportsSysHomeIcon => canParticipateInReportsSys;
