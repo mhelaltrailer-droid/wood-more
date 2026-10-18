@@ -10,3 +10,17 @@ const List<String> contInvoicesUnitOptions = [
   'مقط',
   'يومية',
 ];
+
+const String contLineKindExecution = 'execution';
+const String contLineKindHoliday = 'holiday';
+const String contLineKindTransport = 'transport';
+const String contLineKindDeduction = 'deduction';
+const String contLineKindNoteOnOther = 'note_on_other';
+
+const List<String> contDeductionKindOptions = [
+  'مقطوعية',
+  'تركيب وزر',
+  'معالجة',
+  'أخرى',
+];
+

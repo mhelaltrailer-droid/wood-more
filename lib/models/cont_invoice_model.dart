@@ -14,55 +14,102 @@ class ContInvoiceLineModel {
   final int? id;
   final int sortOrder;
   final int? itemNo;
+  final String lineKind;
+  final int? structureLocationId;
   final String locationLabel;
   final String description;
   final String unit;
   final double prevQty;
   final double currentQty;
+  final double baseQty;
   final double unitPrice;
+  final double prevPercent;
   final double percent;
+  final String deductionKind;
+  final int? counterpartyContractorId;
+  final String counterpartyContractorName;
 
   const ContInvoiceLineModel({
     this.id,
     this.sortOrder = 0,
     this.itemNo,
+    this.lineKind = 'execution',
+    this.structureLocationId,
     this.locationLabel = '',
     this.description = '',
     this.unit = 'عدد',
     this.prevQty = 0,
     this.currentQty = 0,
+    this.baseQty = 0,
     this.unitPrice = 0,
+    this.prevPercent = 0,
     this.percent = 100,
+    this.deductionKind = '',
+    this.counterpartyContractorId,
+    this.counterpartyContractorName = '',
   });
 
-  double get totalQty => prevQty + currentQty;
+  bool get isExecution => lineKind == 'execution';
 
-  double get lineTotal =>
-      double.parse((totalQty * unitPrice * (percent / 100)).toStringAsFixed(2));
+  double get totalQty =>
+      baseQty > 0 ? baseQty : (prevQty + currentQty);
+
+  double get baseAmount => totalQty * unitPrice;
+
+  /// مستحق هذه الفاتورة لبند التنفيذ = فرق النسب × الأساس.
+  double get executionDue {
+    final delta = (percent - prevPercent).clamp(0, 1000);
+    return double.parse((baseAmount * (delta / 100)).toStringAsFixed(2));
+  }
+
+  double get lineTotal {
+    if (lineKind == 'execution') return executionDue;
+    final amt = unitPrice.abs();
+    if (lineKind == 'deduction') {
+      return double.parse((-amt).toStringAsFixed(2));
+    }
+    return double.parse(amt.toStringAsFixed(2));
+  }
 
   ContInvoiceLineModel copyWith({
     int? id,
     int? sortOrder,
     int? itemNo,
+    String? lineKind,
+    int? structureLocationId,
     String? locationLabel,
     String? description,
     String? unit,
     double? prevQty,
     double? currentQty,
+    double? baseQty,
     double? unitPrice,
+    double? prevPercent,
     double? percent,
+    String? deductionKind,
+    int? counterpartyContractorId,
+    String? counterpartyContractorName,
   }) {
     return ContInvoiceLineModel(
       id: id ?? this.id,
       sortOrder: sortOrder ?? this.sortOrder,
       itemNo: itemNo ?? this.itemNo,
+      lineKind: lineKind ?? this.lineKind,
+      structureLocationId: structureLocationId ?? this.structureLocationId,
       locationLabel: locationLabel ?? this.locationLabel,
       description: description ?? this.description,
       unit: unit ?? this.unit,
       prevQty: prevQty ?? this.prevQty,
       currentQty: currentQty ?? this.currentQty,
+      baseQty: baseQty ?? this.baseQty,
       unitPrice: unitPrice ?? this.unitPrice,
+      prevPercent: prevPercent ?? this.prevPercent,
       percent: percent ?? this.percent,
+      deductionKind: deductionKind ?? this.deductionKind,
+      counterpartyContractorId:
+          counterpartyContractorId ?? this.counterpartyContractorId,
+      counterpartyContractorName:
+          counterpartyContractorName ?? this.counterpartyContractorName,
     );
   }
 
@@ -70,30 +117,55 @@ class ContInvoiceLineModel {
         if (id != null) 'id': id,
         'sort_order': sortOrder,
         'item_no': itemNo,
+        'line_kind': lineKind,
+        'structure_location_id': structureLocationId,
         'location_label': locationLabel,
         'description': description,
         'unit': unit,
         'prev_qty': prevQty,
         'current_qty': currentQty,
         'total_qty': totalQty,
+        'base_qty': totalQty,
         'unit_price': unitPrice,
+        'prev_percent': prevPercent,
         'percent': percent,
+        'deduction_kind': deductionKind,
+        'counterparty_contractor_id': counterpartyContractorId,
+        'counterparty_contractor_name': counterpartyContractorName,
+        'amount': unitPrice.abs(),
         'line_total': lineTotal,
       };
 
   factory ContInvoiceLineModel.fromMap(Map<String, dynamic> m) {
+    final base = _ciNum(
+      m['base_qty'] ?? m['baseQty'] ?? m['total_qty'] ?? m['totalQty'],
+    );
     return ContInvoiceLineModel(
       id: _ciInt(m['id']),
       sortOrder: _ciInt(m['sort_order'] ?? m['sortOrder']) ?? 0,
       itemNo: _ciInt(m['item_no'] ?? m['itemNo']),
+      lineKind: (m['line_kind'] ?? m['lineKind'] ?? 'execution').toString(),
+      structureLocationId: _ciInt(
+        m['structure_location_id'] ?? m['structureLocationId'],
+      ),
       locationLabel:
           (m['location_label'] ?? m['locationLabel'] ?? '').toString(),
       description: (m['description'] ?? '').toString(),
       unit: (m['unit'] ?? 'عدد').toString(),
       prevQty: _ciNum(m['prev_qty'] ?? m['prevQty']),
       currentQty: _ciNum(m['current_qty'] ?? m['currentQty']),
+      baseQty: base,
       unitPrice: _ciNum(m['unit_price'] ?? m['unitPrice']),
+      prevPercent: _ciNum(m['prev_percent'] ?? m['prevPercent'], 0),
       percent: _ciNum(m['percent'], 100),
+      deductionKind: (m['deduction_kind'] ?? m['deductionKind'] ?? '').toString(),
+      counterpartyContractorId: _ciInt(
+        m['counterparty_contractor_id'] ?? m['counterpartyContractorId'],
+      ),
+      counterpartyContractorName: (m['counterparty_contractor_name'] ??
+              m['counterpartyContractorName'] ??
+              '')
+          .toString(),
     );
   }
 }

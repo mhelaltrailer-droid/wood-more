@@ -3472,6 +3472,38 @@ class ApiStorageService {
     return Map<String, dynamic>.from(jsonDecode(r.body) as Map);
   }
 
+  /// آخر نسبة تنفيذ لموقع هيكلة المستخلصات (لنفس المقاول/المشروع).
+  Future<Map<String, dynamic>> getContInvoiceLocationProgress({
+    required int userId,
+    required int projectId,
+    required int structureLocationId,
+    int? contractorId,
+    String? contractorName,
+    int? excludeId,
+  }) async {
+    final qp = <String, String>{
+      'userId': userId.toString(),
+      'projectId': projectId.toString(),
+      'structureLocationId': structureLocationId.toString(),
+    };
+    if (contractorId != null) qp['contractorId'] = contractorId.toString();
+    if (contractorName != null && contractorName.trim().isNotEmpty) {
+      qp['contractorName'] = contractorName.trim();
+    }
+    if (excludeId != null) qp['excludeId'] = excludeId.toString();
+    final uri = Uri.parse(_path('cont-invoices/location-progress')).replace(
+      queryParameters: qp,
+    );
+    final r = await _httpGet(uri);
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'cont-invoices/location-progress');
+    }
+    if (r.body.isEmpty) {
+      return {'has_previous': false, 'prev_percent': 0};
+    }
+    return Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+  }
+
   Future<ContInvoiceModel> getContInvoiceDetail(int id, int userId) async {
     final data = await _get('cont-invoices/$id?userId=$userId');
     return ContInvoiceModel.fromMap(data);

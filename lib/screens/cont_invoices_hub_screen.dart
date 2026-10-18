@@ -6,7 +6,10 @@ import '../models/cont_invoice_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
-import 'cont_invoices_form_screen.dart';
+import '../models/contractor_model.dart';
+import '../models/project_model.dart';
+import 'cont_invoices_select_screen.dart';
+import 'cont_invoices_work_screen.dart';
 
 class ContInvoicesHubScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -58,14 +61,35 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
   }
 
   Future<void> _openForm({ContInvoiceModel? existing}) async {
-    final result = await Navigator.of(context).push<ContInvoiceModel>(
-      MaterialPageRoute(
-        builder: (_) => ContInvoicesFormScreen(
-          currentUser: widget.currentUser,
-          existing: existing,
+    final ContInvoiceModel? result;
+    if (existing == null) {
+      result = await Navigator.of(context).push<ContInvoiceModel>(
+        MaterialPageRoute(
+          builder: (_) => ContInvoicesSelectScreen(
+            currentUser: widget.currentUser,
+          ),
         ),
-      ),
-    );
+      );
+    } else {
+      final contractor = ContractorModel(
+        id: existing.contractorId ?? 0,
+        name: existing.contractorName,
+      );
+      final project = ProjectModel(
+        id: existing.projectId ?? 0,
+        name: existing.projectName,
+      );
+      result = await Navigator.of(context).push<ContInvoiceModel>(
+        MaterialPageRoute(
+          builder: (_) => ContInvoicesWorkScreen(
+            currentUser: widget.currentUser,
+            contractor: contractor,
+            project: project,
+            existing: existing,
+          ),
+        ),
+      );
+    }
     if (result != null) {
       await _load();
     }
