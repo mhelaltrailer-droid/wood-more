@@ -600,6 +600,31 @@ class ApiStorageService {
     return decoded;
   }
 
+  /// تغيير نوع القياس بعد اعتماده — المسؤول الرئيسي فقط.
+  Future<Map<String, dynamic>> changeInvoiceStructureMeasureType({
+    required int userId,
+    required int projectId,
+    required String measureType,
+  }) async {
+    final uri = Uri.parse(_path('invoice-structure/measure-type'));
+    final r = await http.put(
+      uri,
+      body: jsonEncode({
+        'userId': userId,
+        'projectId': projectId,
+        'measureType': measureType,
+      }),
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+    );
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'invoice-structure/measure-type');
+    }
+    final decoded = r.body.isEmpty
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+    return decoded;
+  }
+
   /// نسخ هيكلة المشروعات → هيكلة المستخلصات لمشروع واحد (إن كانت فارغة).
   Future<Map<String, dynamic>> importInvoiceStructureFromProject({
     required int userId,

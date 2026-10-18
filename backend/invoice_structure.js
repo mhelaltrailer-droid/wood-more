@@ -4,7 +4,10 @@
  * صلاحية: app_admin فقط.
  */
 
-const { applyViewAsToUser } = require('./view_as');
+const {
+  applyViewAsToUser,
+  primaryAdminPowersActiveForUser,
+} = require('./view_as');
 
 function isStr(raw) {
   return String(raw ?? '').trim();
@@ -44,6 +47,17 @@ async function requireAppAdmin(pool, req, res) {
   }
   if (!isAppAdmin(user)) {
     res.status(403).json({ error: 'forbidden' });
+    return null;
+  }
+  return user;
+}
+
+/** المسؤول الرئيسي فقط (وليس View-as لدور آخر). */
+async function requirePrimaryAppAdmin(pool, req, res) {
+  const user = await requireAppAdmin(pool, req, res);
+  if (!user) return null;
+  if (!primaryAdminPowersActiveForUser(user, req)) {
+    res.status(403).json({ error: 'forbidden_primary_admin' });
     return null;
   }
   return user;
@@ -302,6 +316,83 @@ function registerInvoiceStructureRoutes(app, pool) {
         project_id: projectId,
         measure_type: measureType,
         import: imported,
+      });
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  /**
+   * تغيير نوع القياس (Flooring ↔ WPC) — المسؤول الرئيسي فقط.
+   * مع تحذير قوي من الواجهة؛ هنا يُحدَّث النوع ويُصفَّر حقول النوع الآخر.
+   */
+  app.put('/invoice-structure/measure-type', async (req, res) => {
+    try {
+      const user = await requirePrimaryAppAdmin(pool, req, res);
+      if (!user) return;
+
+      const projectId = parseInt(
+        String(req.body.projectId ?? req.body.project_id ?? ''),
+        10,
+      );
+      const measureType = normalizeMeasureType(
+        req.body.measureType ?? req.body.measure_type,
+      );
+      if (Number.isNaN(projectId)) {
+        return res.status(400).json({ error: 'projectId required' });
+      }
+      if (!measureType) {
+        return res
+          .status(400)
+          .json({ error: 'measureType must be flooring or wpc' });
+      }
+
+      const existing = await pool.query(
+        `SELECT measure_type FROM invoice_structure_projects WHERE project_id = $1`,
+        [projectId],
+      );
+      if (!existing.rows.length) {
+        return res.status(404).json({ error: 'measure_type not set' });
+      }
+      const previous = String(existing.rows[0].measure_type || '');
+      if (previous === measureType) {
+        return res.json({
+          project_id: projectId,
+          measure_type: measureType,
+          previous_measure_type: previous,
+          unchanged: true,
+        });
+      }
+
+      await pool.query(
+        `UPDATE invoice_structure_projects
+         SET measure_type = $1
+         WHERE project_id = $2`,
+        [measureType, projectId],
+      );
+
+      // صفّر حقول النوع السابق حتى لا تبقى قيم غير متوافقة ظاهرة
+      if (measureType === 'flooring') {
+        await pool.query(
+          `UPDATE invoice_structure_locations
+           SET unit_value = NULL
+           WHERE project_id = $1`,
+          [projectId],
+        );
+      } else {
+        await pool.query(
+          `UPDATE invoice_structure_locations
+           SET total_meters = NULL, meter_price = NULL
+           WHERE project_id = $1`,
+          [projectId],
+        );
+      }
+
+      return res.json({
+        project_id: projectId,
+        measure_type: measureType,
+        previous_measure_type: previous,
+        unchanged: false,
       });
     } catch (e) {
       res.status(500).json({ error: String(e.message) });

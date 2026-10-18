@@ -101,43 +101,41 @@ class _ContInvoicesSelectScreenState extends State<ContInvoicesSelectScreen> {
     final chosen = await showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('تحديد نوع القياس'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'المشروع «${project.name}» غير محدد بعد.\n'
-              'اختر Flooring أو WPC مرة واحدة — سيُعتمد في هيكلة المستخلصات والمستخلصات.',
-              style: TextStyle(color: Colors.grey[800], height: 1.4),
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.pop(ctx, invoiceStructureMeasureFlooring),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF1B5E20),
-                padding: const EdgeInsets.symmetric(vertical: 14),
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const Text('تحديد نوع القياس'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'المشروع «${project.name}» غير محدد بعد.\n'
+                'يجب اختيار Flooring أو WPC مرة واحدة — سيُعتمد في هيكلة المستخلصات والمستخلصات.',
+                style: TextStyle(color: Colors.grey[800], height: 1.4),
               ),
-              child: const Text('Flooring'),
-            ),
-            const SizedBox(height: 10),
-            FilledButton.tonal(
-              onPressed: () => Navigator.pop(ctx, invoiceStructureMeasureWpc),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () =>
+                    Navigator.pop(ctx, invoiceStructureMeasureFlooring),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B5E20),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text('Flooring'),
               ),
-              child: const Text('WPC'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('لاحقاً'),
+              const SizedBox(height: 10),
+              FilledButton.tonal(
+                onPressed: () =>
+                    Navigator.pop(ctx, invoiceStructureMeasureWpc),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text('WPC'),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
     if (!mounted || chosen == null) return false;
@@ -268,7 +266,7 @@ class _ContInvoicesSelectScreenState extends State<ContInvoicesSelectScreen> {
                           ),
                           child: Text(
                             _measureType == null || _measureType!.isEmpty
-                                ? 'غير محدد — سيُطلب عند المتابعة'
+                                ? 'غير محدد — يجب اختيار Flooring أو WPC'
                                 : invoiceStructureMeasureLabel(_measureType),
                             style: TextStyle(
                               fontWeight: FontWeight.w600,

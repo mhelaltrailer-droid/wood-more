@@ -101,6 +101,72 @@ class _AdminInvoiceStructureScreenState
     }
   }
 
+  Future<void> _changeMeasureType() async {
+    if (_selectedProject == null ||
+        _measureType == null ||
+        !_isApi ||
+        !widget.admin.isPrimaryAppAdmin) {
+      return;
+    }
+    final current = _measureType!;
+    final target = current == invoiceStructureMeasureFlooring
+        ? invoiceStructureMeasureWpc
+        : invoiceStructureMeasureFlooring;
+    final currentLabel = invoiceStructureMeasureLabel(current);
+    final targetLabel = invoiceStructureMeasureLabel(target);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تحذير: تغيير نوع القياس'),
+        content: Text(
+          'أنت على وشك تغيير نوع المشروع «${_selectedProject!.name}» من $currentLabel إلى $targetLabel.\n\n'
+          'هذا إجراء حساس وقد يؤثر على حقول الهيكلة والمستخلصات.\n'
+          'سيتم تصفير قيم النوع السابق (أمتار/سعر أو قيمة Unit).\n\n'
+          'هل أنت متأكد تماماً من المتابعة؟',
+          style: TextStyle(color: Colors.grey[900], height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            child: const Text('نعم، غيّر النوع'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      setState(() => _loading = true);
+      await _api.changeInvoiceStructureMeasureType(
+        userId: widget.admin.id,
+        projectId: _selectedProject!.id,
+        measureType: target,
+      );
+      if (!mounted) return;
+      setState(() => _measureType = target);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تم التغيير إلى $targetLabel'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      await _loadStructure();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('فشل التغيير: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   Future<void> _promptMeasureType() async {
     if (_selectedProject == null || !_isApi) return;
     final chosen = await showDialog<String>(
@@ -685,6 +751,12 @@ class _AdminInvoiceStructureScreenState
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                       ),
+                      if (widget.admin.isPrimaryAppAdmin)
+                        TextButton.icon(
+                          onPressed: _loading ? null : _changeMeasureType,
+                          icon: const Icon(Icons.swap_horiz, size: 18),
+                          label: const Text('تغيير النوع'),
+                        ),
                     ],
                   ),
                 ),
