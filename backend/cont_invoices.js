@@ -59,8 +59,12 @@ function ciNormalizeLine(raw, index) {
       : ciNum(baseQtyRaw);
   const totalQty = kind === 'execution' ? baseQty : prevQty + currentQty;
   const unitPrice = ciNum(raw.unit_price ?? raw.unitPrice);
-  const prevPercent = ciNum(raw.prev_percent ?? raw.prevPercent, 0);
-  const percent = ciNum(raw.percent, kind === 'execution' ? 0 : 100);
+  const prevPercent = Math.min(100, Math.max(0, ciNum(raw.prev_percent ?? raw.prevPercent, 0)));
+  const percentRaw = ciNum(raw.percent, kind === 'execution' ? 0 : 100);
+  const percent =
+    kind === 'execution'
+      ? Math.min(100, Math.max(0, percentRaw))
+      : percentRaw;
   const structureLocationIdRaw =
     raw.structure_location_id ?? raw.structureLocationId;
   const structureLocationId =

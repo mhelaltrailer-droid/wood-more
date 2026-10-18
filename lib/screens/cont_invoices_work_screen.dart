@@ -249,7 +249,9 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
           text: e0 == null ? '' : _trim(e0.unitPrice),
         ),
         currentPercent: TextEditingController(
-          text: e0 == null ? '0' : _trim(e0.percent),
+          text: e0 == null
+              ? '0'
+              : _trim(e0.percent.clamp(0, 100).toDouble()),
         ),
         prevPercent: e0?.prevPercent ?? 0,
       );
@@ -376,9 +378,11 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
             text: unitPrice > 0 ? _trim(unitPrice) : '',
           ),
           currentPercent: TextEditingController(
-            text: prevPercent > 0 ? _trim(prevPercent) : '0',
+            text: prevPercent > 0
+                ? _trim(prevPercent.clamp(0, 100).toDouble())
+                : '0',
           ),
-          prevPercent: prevPercent,
+          prevPercent: prevPercent.clamp(0, 100).toDouble(),
         ),
       );
     });
@@ -528,6 +532,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
 
   Future<void> _addDeductionDialog(_SectionState section) async {
     String dedKind = contDeductionKindOptions.first;
+    bool creditOther = false;
     ContractorModel? other;
     final amountC = TextEditingController();
     final otherDesc = TextEditingController();
@@ -571,27 +576,32 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                 ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<ContractorModel?>(
-                  value: other,
-                  decoration: const InputDecoration(
-                    labelText: 'مقاول يعالج التقصير (اختياري)',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: [
-                    const DropdownMenuItem<ContractorModel?>(
-                      value: null,
-                      child: Text('— بدون مقاول (معلّق غير مربوط) —'),
-                    ),
-                    ..._otherContractors.map(
-                      (c) => DropdownMenuItem<ContractorModel?>(
-                        value: c,
-                        child: Text(c.name),
-                      ),
-                    ),
-                  ],
-                  onChanged: (v) => setLocal(() => other = v),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('خصم لصالح مقاول اخر'),
+                  value: creditOther,
+                  onChanged: (v) => setLocal(() {
+                    creditOther = v ?? false;
+                    if (!creditOther) other = null;
+                  }),
                 ),
+                if (creditOther) ...[
+                  DropdownButtonFormField<ContractorModel>(
+                    value: other,
+                    decoration: const InputDecoration(
+                      labelText: 'المقاول',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _otherContractors
+                        .map(
+                          (c) =>
+                              DropdownMenuItem(value: c, child: Text(c.name)),
+                        )
+                        .toList(),
+                    onChanged: (v) => setLocal(() => other = v),
+                  ),
+                ],
               ],
             ),
           ),
@@ -603,6 +613,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
             FilledButton(
               onPressed: () {
                 if (_parse(amountC.text) <= 0) return;
+                if (creditOther && other == null) return;
                 Navigator.pop(ctx, true);
               },
               child: const Text('إضافة'),
@@ -612,10 +623,11 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
       ),
     );
     if (ok != true) return;
+    final counterparty = creditOther ? other : null;
     final desc = dedKind == 'أخرى' && otherDesc.text.trim().isNotEmpty
         ? otherDesc.text.trim()
-        : (other != null
-            ? 'خصم — $dedKind لصالح ${other!.name}'
+        : (counterparty != null
+            ? 'خصم — $dedKind لصالح ${counterparty.name}'
             : 'خصم — $dedKind');
     setState(() {
       section.manuals.add(
@@ -624,7 +636,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
           amount: TextEditingController(text: amountC.text.trim()),
           description: TextEditingController(text: desc),
           deductionKind: dedKind,
-          counterparty: other,
+          counterparty: counterparty,
         ),
       );
     });
@@ -759,7 +771,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     for (final s in _sections) {
       final baseQty = _parse(s.baseQty.text);
       final unitPrice = _parse(s.unitPrice.text);
-      final percent = _parse(s.currentPercent.text);
+      final percent = _parse(s.currentPercent.text).clamp(0, 100).toDouble();
       out.add(
         ContInvoiceLineModel(
           sortOrder: sort++,
@@ -864,32 +876,64 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     );
   }
 
-  static const double _metricBoxW = 148;
-  static const double _metricBoxH = 72;
+  static const double _metricBoxW = 150;
+  static const double _metricBoxH = 68;
+
+  Widget _metricShell({
+    required String label,
+    required Widget child,
+    Color? fill,
+    Color? border,
+  }) {
+    return Container(
+      width: _metricBoxW,
+      height: _metricBoxH,
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        color: fill ?? Colors.white,
+        border: Border.all(
+          color: border ?? const Color(0xFFB0BEC5),
+          width: 1.2,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: Colors.grey[700], height: 1.1),
+          ),
+          const SizedBox(height: 4),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
 
   Widget _metricFieldBox({
     required String label,
     required TextEditingController controller,
     ValueChanged<String>? onChanged,
+    List<TextInputFormatter>? inputFormatters,
   }) {
-    return SizedBox(
-      width: _metricBoxW,
-      height: _metricBoxH,
+    return _metricShell(
+      label: label,
       child: TextField(
         controller: controller,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        decoration: const InputDecoration(
           isDense: true,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 12,
-          ),
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          contentPadding: EdgeInsets.zero,
         ),
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        inputFormatters: [
-          FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-        ],
+        inputFormatters: inputFormatters ??
+            [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
         onChanged: onChanged,
       ),
     );
@@ -900,40 +944,48 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     required String value,
     Color? fill,
     Color? border,
+    Color? valueColor,
   }) {
-    return Container(
-      width: _metricBoxW,
-      height: _metricBoxH,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: fill,
-        border: Border.all(color: border ?? Colors.blueGrey.shade200),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 11)),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: fill != null ? Colors.teal.shade800 : null,
-            ),
+    return _metricShell(
+      label: label,
+      fill: fill,
+      border: border,
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 15,
+            color: valueColor,
           ),
-        ],
+        ),
       ),
     );
+  }
+
+  void _onPercentChanged(TextEditingController ctrl) {
+    final raw = ctrl.text.replaceAll(',', '').trim();
+    if (raw.isEmpty) {
+      setState(() {});
+      return;
+    }
+    final v = double.tryParse(raw);
+    if (v != null && v > 100) {
+      ctrl.value = const TextEditingValue(
+        text: '100',
+        selection: TextSelection.collapsed(offset: 3),
+      );
+    }
+    setState(() {});
   }
 
   Widget _buildSection(_SectionState s) {
     final baseQty = _parse(s.baseQty.text);
     final unitPrice = _parse(s.unitPrice.text);
-    final percent = _parse(s.currentPercent.text);
+    final percent = _parse(s.currentPercent.text).clamp(0, 100).toDouble();
     final due = ContInvoiceLineModel(
       baseQty: _isFlooring ? baseQty : 1,
       unitPrice: unitPrice,
@@ -994,17 +1046,23 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                 _metricReadonlyBox(
                   label: 'النسبة السابقة',
                   value: '${_trim(s.prevPercent)} %',
+                  fill: const Color(0xFFF5F5F5),
                 ),
                 _metricFieldBox(
                   label: 'النسبة الحالية %',
                   controller: s.currentPercent,
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (_) => _onPercentChanged(s.currentPercent),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    _MaxValueInputFormatter(100),
+                  ],
                 ),
                 _metricReadonlyBox(
                   label: 'المستحق لهذه الفاتورة',
                   value: _moneyFmt.format(due),
                   fill: const Color(0xFFE0F2F1),
                   border: Colors.teal,
+                  valueColor: Colors.teal.shade800,
                 ),
               ],
             ),
@@ -1029,7 +1087,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                   () => _addManual(s, contLineKindDeduction),
                 ),
                 _manualChip(
-                  'يوميات ملاحظات',
+                  'اضافة يوميات',
                   Icons.notes,
                   () => _addManual(s, contLineKindNoteOnOther),
                 ),
@@ -1045,8 +1103,6 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                   sub = m.kind == contLineKindDeduction
                       ? 'لصالح: ${m.counterparty!.name}'
                       : 'خصم على: ${m.counterparty!.name}';
-                } else if (m.kind == contLineKindDeduction) {
-                  sub = 'معلّق غير مربوط بمقاول';
                 }
                 return ListTile(
                   dense: true,
@@ -1320,5 +1376,33 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         ],
       ),
     );
+  }
+}
+
+/// يمنع إدخال قيمة أكبر من [max] أثناء الكتابة.
+class _MaxValueInputFormatter extends TextInputFormatter {
+  final double max;
+
+  _MaxValueInputFormatter(this.max);
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final t = newValue.text.replaceAll(',', '').trim();
+    if (t.isEmpty || t == '.') return newValue;
+    final v = double.tryParse(t);
+    if (v == null) return oldValue;
+    if (v > max) {
+      final capped = max == max.roundToDouble()
+          ? max.toInt().toString()
+          : max.toString();
+      return TextEditingValue(
+        text: capped,
+        selection: TextSelection.collapsed(offset: capped.length),
+      );
+    }
+    return newValue;
   }
 }
