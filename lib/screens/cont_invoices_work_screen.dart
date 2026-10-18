@@ -62,7 +62,10 @@ class _SectionState {
 
 class _ManualLineState {
   final String kind;
+  /// قيمة اليومية (عطلات/ملاحظات) أو المبلغ الإجمالي (انتقالات/خصم).
   final TextEditingController amount;
+  /// عدد اليوميات — لعطلات وملاحظات فقط.
+  final TextEditingController days;
   final TextEditingController description;
   String deductionKind;
   ContractorModel? counterparty;
@@ -71,13 +74,24 @@ class _ManualLineState {
     required this.kind,
     required this.amount,
     required this.description,
+    TextEditingController? days,
     this.deductionKind = 'مقطوعية',
     this.counterparty,
-  });
+  }) : days = days ?? TextEditingController(text: '1');
 
   void dispose() {
     amount.dispose();
+    days.dispose();
     description.dispose();
+  }
+
+  double get displayTotal {
+    if (kind == contLineKindHoliday || kind == contLineKindNoteOnOther) {
+      final d = double.tryParse(days.text.replaceAll(',', '').trim()) ?? 0;
+      final v = double.tryParse(amount.text.replaceAll(',', '').trim()) ?? 0;
+      return d * v;
+    }
+    return double.tryParse(amount.text.replaceAll(',', '').trim()) ?? 0;
   }
 }
 
@@ -94,9 +108,8 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   final List<_SectionState> _sections = [];
 
   DateTime _statementDate = DateTime.now();
-  final _contractTypeCtrl = TextEditingController(
-    text: contInvoicesDefaultContractType,
-  );
+  String _contractTypeChoice = contInvoicesDefaultContractType;
+  final _contractTypeOtherCtrl = TextEditingController();
   final _previouslyPaidCtrl = TextEditingController(text: '0');
   final _otherDeductionsCtrl = TextEditingController(text: '0');
   final _notesCtrl = TextEditingController();
@@ -107,6 +120,14 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   bool get _isApi => _storage is ApiStorageService;
   ApiStorageService get _api => _storage as ApiStorageService;
 
+  String get _resolvedContractType {
+    if (_contractTypeChoice == contInvoicesContractTypeOther) {
+      final t = _contractTypeOtherCtrl.text.trim();
+      return t.isEmpty ? contInvoicesContractTypeOther : t;
+    }
+    return contInvoicesDefaultContractType;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -115,7 +136,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
 
   @override
   void dispose() {
-    _contractTypeCtrl.dispose();
+    _contractTypeOtherCtrl.dispose();
     _previouslyPaidCtrl.dispose();
     _otherDeductionsCtrl.dispose();
     _notesCtrl.dispose();
@@ -187,7 +208,14 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
 
   void _applyExisting(ContInvoiceModel inv) {
     _statementDate = inv.statementDate ?? DateTime.now();
-    _contractTypeCtrl.text = inv.contractType;
+    final ct = inv.contractType.trim();
+    if (ct.isEmpty || ct == contInvoicesDefaultContractType) {
+      _contractTypeChoice = contInvoicesDefaultContractType;
+      _contractTypeOtherCtrl.clear();
+    } else {
+      _contractTypeChoice = contInvoicesContractTypeOther;
+      _contractTypeOtherCtrl.text = ct;
+    }
     _previouslyPaidCtrl.text = inv.previouslyPaid.toString();
     _otherDeductionsCtrl.text = inv.otherDeductions.toString();
     _notesCtrl.text = inv.notes;
@@ -226,38 +254,40 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         prevPercent: e0?.prevPercent ?? 0,
       );
       for (final m in manuals) {
-        section.manuals.add(
-          _ManualLineState(
-            kind: m.lineKind,
-            amount: TextEditingController(text: _trim(m.unitPrice.abs())),
-            description: TextEditingController(text: m.description),
-            deductionKind:
-                m.deductionKind.isEmpty ? 'مقطوعية' : m.deductionKind,
-            counterparty: _contractors.cast<ContractorModel?>().firstWhere(
-                  (c) =>
-                      c?.id == m.counterpartyContractorId ||
-                      c?.name == m.counterpartyContractorName,
-                  orElse: () => null,
-                ),
-          ),
-        );
+        section.manuals.add(_manualFromLine(m));
       }
       _sections.add(section);
     }
     // orphan manuals without location — attach under synthetic section if needed
     if (orphans.isNotEmpty && _sections.isNotEmpty) {
       for (final m in orphans.where((e) => !e.isExecution)) {
-        _sections.last.manuals.add(
-          _ManualLineState(
-            kind: m.lineKind,
-            amount: TextEditingController(text: _trim(m.unitPrice.abs())),
-            description: TextEditingController(text: m.description),
-            deductionKind:
-                m.deductionKind.isEmpty ? 'مقطوعية' : m.deductionKind,
-          ),
-        );
+        _sections.last.manuals.add(_manualFromLine(m));
       }
     }
+  }
+
+  _ManualLineState _manualFromLine(ContInvoiceLineModel m) {
+    final isDaysBased = m.lineKind == contLineKindHoliday ||
+        m.lineKind == contLineKindNoteOnOther;
+    final days = isDaysBased && m.baseQty > 0 ? m.baseQty : 1;
+    final rate = isDaysBased
+        ? (m.unitPrice.abs() > 0
+            ? m.unitPrice.abs()
+            : (days > 0 ? m.lineTotal.abs() / days : m.lineTotal.abs()))
+        : m.unitPrice.abs();
+    return _ManualLineState(
+      kind: m.lineKind,
+      amount: TextEditingController(text: _trim(rate)),
+      days: TextEditingController(text: _trim(days.toDouble())),
+      description: TextEditingController(text: m.description),
+      deductionKind: m.deductionKind.isEmpty ? 'مقطوعية' : m.deductionKind,
+      counterparty: _contractors.cast<ContractorModel?>().firstWhere(
+            (c) =>
+                c?.id == m.counterpartyContractorId ||
+                c?.name == m.counterpartyContractorName,
+            orElse: () => null,
+          ),
+    );
   }
 
   static String _trim(double v) {
@@ -354,49 +384,108 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     });
   }
 
+  List<ContractorModel> get _otherContractors =>
+      _contractors.where((c) => c.id != widget.contractor.id).toList();
+
   Future<void> _addManual(_SectionState section, String kind) async {
     if (kind == contLineKindNoteOnOther) {
-      ContractorModel? other;
-      final amountC = TextEditingController();
-      final descC = TextEditingController(text: 'يوميات ملاحظات بالخصم على مقاول آخر');
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => StatefulBuilder(
-          builder: (ctx, setLocal) => AlertDialog(
-            title: const Text('يوميات ملاحظات بالخصم على مقاول آخر'),
+      await _addNotesDialog(section);
+      return;
+    }
+    if (kind == contLineKindDeduction) {
+      await _addDeductionDialog(section);
+      return;
+    }
+    if (kind == contLineKindHoliday) {
+      await _addHolidayDialog(section);
+      return;
+    }
+    // transport — قيمة واحدة
+    final amountC = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('انتقالات'),
+        content: TextField(
+          controller: amountC,
+          decoration: const InputDecoration(
+            labelText: 'القيمة',
+            border: OutlineInputBorder(),
+          ),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (_parse(amountC.text) <= 0) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('إضافة'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() {
+      section.manuals.add(
+        _ManualLineState(
+          kind: kind,
+          amount: TextEditingController(text: amountC.text.trim()),
+          description: TextEditingController(text: 'انتقالات'),
+        ),
+      );
+    });
+  }
+
+  Future<void> _addHolidayDialog(_SectionState section) async {
+    final daysC = TextEditingController(text: '1');
+    final rateC = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final total = _parse(daysC.text) * _parse(rateC.text);
+          return AlertDialog(
+            title: const Text('عطلات'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                DropdownButtonFormField<ContractorModel>(
-                  value: other,
-                  decoration: const InputDecoration(
-                    labelText: 'المقاول الآخر',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: _contractors
-                      .where((c) => c.id != widget.contractor.id)
-                      .map(
-                        (c) => DropdownMenuItem(value: c, child: Text(c.name)),
-                      )
-                      .toList(),
-                  onChanged: (v) => setLocal(() => other = v),
-                ),
-                const SizedBox(height: 12),
                 TextField(
-                  controller: amountC,
+                  controller: daysC,
                   decoration: const InputDecoration(
-                    labelText: 'القيمة',
+                    labelText: 'عدد اليوميات',
                     border: OutlineInputBorder(),
                   ),
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (_) => setLocal(() {}),
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: descC,
+                  controller: rateC,
                   decoration: const InputDecoration(
-                    labelText: 'الوصف',
+                    labelText: 'قيمة اليومية',
                     border: OutlineInputBorder(),
+                  ),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  autofocus: true,
+                  onChanged: (_) => setLocal(() {}),
+                ),
+                const SizedBox(height: 12),
+                InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'الإجمالي',
+                    border: OutlineInputBorder(),
+                  ),
+                  child: Text(
+                    _moneyFmt.format(total),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
@@ -408,39 +497,47 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
               ),
               FilledButton(
                 onPressed: () {
-                  if (other == null || _parse(amountC.text) <= 0) return;
+                  if (_parse(daysC.text) <= 0 || _parse(rateC.text) <= 0) {
+                    return;
+                  }
                   Navigator.pop(ctx, true);
                 },
                 child: const Text('إضافة'),
               ),
             ],
+          );
+        },
+      ),
+    );
+    if (ok != true) return;
+    final days = _parse(daysC.text);
+    final rate = _parse(rateC.text);
+    setState(() {
+      section.manuals.add(
+        _ManualLineState(
+          kind: contLineKindHoliday,
+          amount: TextEditingController(text: _trim(rate)),
+          days: TextEditingController(text: _trim(days)),
+          description: TextEditingController(
+            text: 'عطلات — ${_trim(days)} × ${_trim(rate)}',
           ),
         ),
       );
-      if (ok != true || other == null) return;
-      setState(() {
-        section.manuals.add(
-          _ManualLineState(
-            kind: kind,
-            amount: TextEditingController(text: amountC.text.trim()),
-            description: TextEditingController(text: descC.text.trim()),
-            counterparty: other,
-          ),
-        );
-      });
-      return;
-    }
+    });
+  }
 
-    if (kind == contLineKindDeduction) {
-      String dedKind = contDeductionKindOptions.first;
-      final amountC = TextEditingController();
-      final otherDesc = TextEditingController();
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => StatefulBuilder(
-          builder: (ctx, setLocal) => AlertDialog(
-            title: const Text('خصم'),
-            content: Column(
+  Future<void> _addDeductionDialog(_SectionState section) async {
+    String dedKind = contDeductionKindOptions.first;
+    ContractorModel? other;
+    final amountC = TextEditingController();
+    final otherDesc = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('خصم'),
+          content: SingleChildScrollView(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
@@ -474,7 +571,150 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                 ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<ContractorModel?>(
+                  value: other,
+                  decoration: const InputDecoration(
+                    labelText: 'مقاول يعالج التقصير (اختياري)',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<ContractorModel?>(
+                      value: null,
+                      child: Text('— بدون مقاول (معلّق غير مربوط) —'),
+                    ),
+                    ..._otherContractors.map(
+                      (c) => DropdownMenuItem<ContractorModel?>(
+                        value: c,
+                        child: Text(c.name),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) => setLocal(() => other = v),
+                ),
               ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (_parse(amountC.text) <= 0) return;
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('إضافة'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    final desc = dedKind == 'أخرى' && otherDesc.text.trim().isNotEmpty
+        ? otherDesc.text.trim()
+        : (other != null
+            ? 'خصم — $dedKind لصالح ${other!.name}'
+            : 'خصم — $dedKind');
+    setState(() {
+      section.manuals.add(
+        _ManualLineState(
+          kind: contLineKindDeduction,
+          amount: TextEditingController(text: amountC.text.trim()),
+          description: TextEditingController(text: desc),
+          deductionKind: dedKind,
+          counterparty: other,
+        ),
+      );
+    });
+  }
+
+  Future<void> _addNotesDialog(_SectionState section) async {
+    bool deductOther = false;
+    ContractorModel? other;
+    final daysC = TextEditingController(text: '1');
+    final rateC = TextEditingController();
+    final descC = TextEditingController(text: 'يوميات ملاحظات');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final total = _parse(daysC.text) * _parse(rateC.text);
+          return AlertDialog(
+            title: const Text('يوميات ملاحظات'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: daysC,
+                    decoration: const InputDecoration(
+                      labelText: 'عدد اليوميات',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (_) => setLocal(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: rateC,
+                    decoration: const InputDecoration(
+                      labelText: 'قيمة اليومية',
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (_) => setLocal(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'إجمالي القيمة',
+                      border: OutlineInputBorder(),
+                    ),
+                    child: Text(
+                      _moneyFmt.format(total),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('خصم على مقاول آخر'),
+                    value: deductOther,
+                    onChanged: (v) => setLocal(() {
+                      deductOther = v ?? false;
+                      if (!deductOther) other = null;
+                    }),
+                  ),
+                  if (deductOther) ...[
+                    DropdownButtonFormField<ContractorModel>(
+                      value: other,
+                      decoration: const InputDecoration(
+                        labelText: 'المقاول الآخر',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _otherContractors
+                          .map(
+                            (c) =>
+                                DropdownMenuItem(value: c, child: Text(c.name)),
+                          )
+                          .toList(),
+                      onChanged: (v) => setLocal(() => other = v),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  TextField(
+                    controller: descC,
+                    decoration: const InputDecoration(
+                      labelText: 'الوصف',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
             ),
             actions: [
               TextButton(
@@ -483,71 +723,30 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
               ),
               FilledButton(
                 onPressed: () {
-                  if (_parse(amountC.text) <= 0) return;
+                  if (_parse(daysC.text) <= 0 || _parse(rateC.text) <= 0) {
+                    return;
+                  }
+                  if (deductOther && other == null) return;
                   Navigator.pop(ctx, true);
                 },
                 child: const Text('إضافة'),
               ),
             ],
-          ),
-        ),
-      );
-      if (ok != true) return;
-      setState(() {
-        section.manuals.add(
-          _ManualLineState(
-            kind: kind,
-            amount: TextEditingController(text: amountC.text.trim()),
-            description: TextEditingController(
-              text: dedKind == 'أخرى' && otherDesc.text.trim().isNotEmpty
-                  ? otherDesc.text.trim()
-                  : 'خصم — $dedKind',
-            ),
-            deductionKind: dedKind,
-          ),
-        );
-      });
-      return;
-    }
-
-    // holiday / transport
-    final label = kind == contLineKindHoliday ? 'عطلات' : 'انتقالات';
-    final amountC = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(label),
-        content: TextField(
-          controller: amountC,
-          decoration: const InputDecoration(
-            labelText: 'القيمة',
-            border: OutlineInputBorder(),
-          ),
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (_parse(amountC.text) <= 0) return;
-              Navigator.pop(ctx, true);
-            },
-            child: const Text('إضافة'),
-          ),
-        ],
+          );
+        },
       ),
     );
     if (ok != true) return;
+    final days = _parse(daysC.text);
+    final rate = _parse(rateC.text);
     setState(() {
       section.manuals.add(
         _ManualLineState(
-          kind: kind,
-          amount: TextEditingController(text: amountC.text.trim()),
-          description: TextEditingController(text: label),
+          kind: contLineKindNoteOnOther,
+          amount: TextEditingController(text: _trim(rate)),
+          days: TextEditingController(text: _trim(days)),
+          description: TextEditingController(text: descC.text.trim()),
+          counterparty: deductOther ? other : null,
         ),
       );
     });
@@ -577,6 +776,8 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         ),
       );
       for (final m in s.manuals) {
+        final isDaysBased = m.kind == contLineKindHoliday ||
+            m.kind == contLineKindNoteOnOther;
         out.add(
           ContInvoiceLineModel(
             sortOrder: sort++,
@@ -585,8 +786,8 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
             structureLocationId: s.structureLocationId,
             locationLabel: s.pathLabel,
             description: m.description.text.trim(),
-            unit: 'مقط',
-            baseQty: 1,
+            unit: isDaysBased ? 'يومية' : 'مقط',
+            baseQty: isDaysBased ? _parse(m.days.text) : 1,
             unitPrice: _parse(m.amount.text),
             prevPercent: 0,
             percent: 100,
@@ -624,9 +825,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         projectId: widget.project.id,
         projectName: widget.project.name,
         statementDate: _statementDate,
-        contractType: _contractTypeCtrl.text.trim().isEmpty
-            ? contInvoicesDefaultContractType
-            : _contractTypeCtrl.text.trim(),
+        contractType: _resolvedContractType,
         previouslyPaid: _previouslyPaid,
         otherDeductions: _otherDeductions,
         notes: _notesCtrl.text.trim(),
@@ -662,6 +861,72 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
       avatar: Icon(icon, size: 18),
       label: Text(label),
       onPressed: onTap,
+    );
+  }
+
+  static const double _metricBoxW = 148;
+  static const double _metricBoxH = 72;
+
+  Widget _metricFieldBox({
+    required String label,
+    required TextEditingController controller,
+    ValueChanged<String>? onChanged,
+  }) {
+    return SizedBox(
+      width: _metricBoxW,
+      height: _metricBoxH,
+      child: TextField(
+        controller: controller,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 12,
+          ),
+        ),
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+        ],
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  Widget _metricReadonlyBox({
+    required String label,
+    required String value,
+    Color? fill,
+    Color? border,
+  }) {
+    return Container(
+      width: _metricBoxW,
+      height: _metricBoxH,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: fill,
+        border: Border.all(color: border ?? Colors.blueGrey.shade200),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 11)),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: fill != null ? Colors.teal.shade800 : null,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -716,96 +981,30 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
               runSpacing: 10,
               children: [
                 if (_isFlooring)
-                  SizedBox(
-                    width: 140,
-                    child: TextField(
-                      controller: s.baseQty,
-                      decoration: const InputDecoration(
-                        labelText: 'عدد الأمتار',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-                      ],
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                SizedBox(
-                  width: 140,
-                  child: TextField(
-                    controller: s.unitPrice,
-                    decoration: InputDecoration(
-                      labelText: _isFlooring ? 'سعر المتر' : 'قيمة الـ Unit',
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-                    ],
+                  _metricFieldBox(
+                    label: 'عدد الأمتار',
+                    controller: s.baseQty,
                     onChanged: (_) => setState(() {}),
                   ),
+                _metricFieldBox(
+                  label: _isFlooring ? 'سعر المتر' : 'قيمة الـ Unit',
+                  controller: s.unitPrice,
+                  onChanged: (_) => setState(() {}),
                 ),
-                Container(
-                  width: 130,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.blueGrey.shade200),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('النسبة السابقة', style: TextStyle(fontSize: 11)),
-                      Text(
-                        '${_trim(s.prevPercent)} %',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
+                _metricReadonlyBox(
+                  label: 'النسبة السابقة',
+                  value: '${_trim(s.prevPercent)} %',
                 ),
-                SizedBox(
-                  width: 140,
-                  child: TextField(
-                    controller: s.currentPercent,
-                    decoration: const InputDecoration(
-                      labelText: 'النسبة الحالية %',
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    onChanged: (_) => setState(() {}),
-                  ),
+                _metricFieldBox(
+                  label: 'النسبة الحالية %',
+                  controller: s.currentPercent,
+                  onChanged: (_) => setState(() {}),
                 ),
-                Container(
-                  width: 160,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE0F2F1),
-                    border: Border.all(color: Colors.teal),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'المستحق لهذه الفاتورة',
-                        style: TextStyle(fontSize: 11),
-                      ),
-                      Text(
-                        _moneyFmt.format(due),
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.teal.shade800,
-                        ),
-                      ),
-                    ],
-                  ),
+                _metricReadonlyBox(
+                  label: 'المستحق لهذه الفاتورة',
+                  value: _moneyFmt.format(due),
+                  fill: const Color(0xFFE0F2F1),
+                  border: Colors.teal,
                 ),
               ],
             ),
@@ -814,12 +1013,24 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _manualChip('عطلات', Icons.beach_access, () => _addManual(s, contLineKindHoliday)),
-                _manualChip('انتقالات', Icons.directions_car, () => _addManual(s, contLineKindTransport)),
-                _manualChip('خصم', Icons.remove_circle_outline, () => _addManual(s, contLineKindDeduction)),
+                _manualChip(
+                  'عطلات',
+                  Icons.add_circle_outline,
+                  () => _addManual(s, contLineKindHoliday),
+                ),
+                _manualChip(
+                  'انتقالات',
+                  Icons.directions_car,
+                  () => _addManual(s, contLineKindTransport),
+                ),
+                _manualChip(
+                  'خصم',
+                  Icons.remove_circle_outline,
+                  () => _addManual(s, contLineKindDeduction),
+                ),
                 _manualChip(
                   'يوميات ملاحظات',
-                  Icons.person_search,
+                  Icons.notes,
                   () => _addManual(s, contLineKindNoteOnOther),
                 ),
               ],
@@ -829,18 +1040,24 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
               ...List.generate(s.manuals.length, (i) {
                 final m = s.manuals[i];
                 final sign = m.kind == contLineKindDeduction ? '-' : '+';
+                String? sub;
+                if (m.counterparty != null) {
+                  sub = m.kind == contLineKindDeduction
+                      ? 'لصالح: ${m.counterparty!.name}'
+                      : 'خصم على: ${m.counterparty!.name}';
+                } else if (m.kind == contLineKindDeduction) {
+                  sub = 'معلّق غير مربوط بمقاول';
+                }
                 return ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   title: Text(m.description.text),
-                  subtitle: m.counterparty != null
-                      ? Text('على: ${m.counterparty!.name}')
-                      : null,
+                  subtitle: sub != null ? Text(sub) : null,
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '$sign${_moneyFmt.format(_parse(m.amount.text))}',
+                        '$sign${_moneyFmt.format(m.displayTotal)}',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: m.kind == contLineKindDeduction
@@ -926,12 +1143,24 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                       Row(
                         children: [
                           Expanded(
-                            child: TextField(
-                              controller: _contractTypeCtrl,
+                            child: DropdownButtonFormField<String>(
+                              value: _contractTypeChoice,
                               decoration: const InputDecoration(
-                                labelText: 'نوع المقاولة (تركيب أو آخر)',
+                                labelText: 'نوع المقاولة',
                                 border: OutlineInputBorder(),
                               ),
+                              items: contInvoicesContractTypeChoices
+                                  .map(
+                                    (e) => DropdownMenuItem(
+                                      value: e,
+                                      child: Text(e),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) {
+                                if (v == null) return;
+                                setState(() => _contractTypeChoice = v);
+                              },
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -962,11 +1191,22 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                           ),
                         ],
                       ),
+                      if (_contractTypeChoice ==
+                          contInvoicesContractTypeOther) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _contractTypeOtherCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'اكتب نوع المقاولة',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       FilledButton.tonalIcon(
                         onPressed: _addLocation,
                         icon: const Icon(Icons.account_tree_outlined),
-                        label: const Text('إضافة موقع من هيكلة المستخلصات'),
+                        label: const Text('إضافة موقع'),
                       ),
                       const SizedBox(height: 12),
                       if (_sections.isEmpty)
@@ -974,7 +1214,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                           child: Padding(
                             padding: EdgeInsets.all(20),
                             child: Text(
-                              'أضف موقعاً فرعياً أو موقع عمل من هيكلة المستخلصات للبدء.',
+                              'أضف موقعاً من هيكلة المستخلصات للبدء.',
                               textAlign: TextAlign.center,
                             ),
                           ),

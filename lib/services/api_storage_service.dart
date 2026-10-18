@@ -3557,6 +3557,38 @@ class ApiStorageService {
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
+  /// خصومات معلّقة غير مربوطة بمقاول (Admin).
+  Future<List<Map<String, dynamic>>> getContInvoicePendingUnlinked(
+    int userId,
+  ) async {
+    final list = await _getList(
+      'cont-invoices/pending-unlinked?userId=$userId',
+    );
+    return list
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  /// ربط خصم معلّق غير مربوط بمقاول → يصبح credit له.
+  Future<void> assignContInvoicePendingUnlinked({
+    required int id,
+    required int userId,
+    required int contractorId,
+    required String contractorName,
+  }) async {
+    final uri = Uri.parse(_path('cont-invoices/pending-unlinked/$id/assign'));
+    final r = await http.post(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode({
+        'userId': userId,
+        'contractorId': contractorId,
+        'contractorName': contractorName,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
   Future<AppReleaseInfoModel> getAppReleaseLatest(int userId) async {
     final cacheKey = 'app-release/latest:$userId';
     final cached = _readCachedRelease(cacheKey);

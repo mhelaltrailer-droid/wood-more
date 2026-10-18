@@ -8,6 +8,7 @@ import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
 import '../models/contractor_model.dart';
 import '../models/project_model.dart';
+import 'cont_invoices_pending_unlinked_screen.dart';
 import 'cont_invoices_select_screen.dart';
 import 'cont_invoices_work_screen.dart';
 
@@ -153,71 +154,108 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
           icon: const Icon(Icons.add),
           label: const Text('مستخلص جديد'),
         ),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(_error!, textAlign: TextAlign.center),
-                          const SizedBox(height: 12),
-                          FilledButton(
-                            onPressed: _load,
-                            child: const Text('إعادة المحاولة'),
-                          ),
-                        ],
+        body: Column(
+          children: [
+            if (widget.currentUser.isAdmin)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => ContInvoicesPendingUnlinkedScreen(
+                                currentUser: widget.currentUser,
+                              ),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.link_off),
+                        label: const Text('خصومات معلّقة غير مربوطة'),
                       ),
                     ),
-                  )
-                : _items.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'لا توجد مستخلصات بعد.\nاضغط «مستخلص جديد» للبدء.',
-                          textAlign: TextAlign.center,
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _load,
-                        child: ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
-                          itemCount: _items.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 8),
-                          itemBuilder: (context, i) {
-                            final item = _items[i];
-                            final dateLabel = item.statementDate == null
-                                ? '—'
-                                : _dateFmt.format(item.statementDate!);
-                            return Card(
-                              child: ListTile(
-                                title: Text(
-                                  '${item.contractorName} — ${item.projectName}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: () => _openForm(),
+                      icon: const Icon(Icons.add),
+                      label: const Text('مستخلص جديد'),
+                    ),
+                  ],
+                ),
+              ),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(_error!, textAlign: TextAlign.center),
+                                const SizedBox(height: 12),
+                                FilledButton(
+                                  onPressed: _load,
+                                  child: const Text('إعادة المحاولة'),
                                 ),
-                                subtitle: Text(
-                                  'تاريخ: $dateLabel  |  إجمالي: ${_moneyFmt.format(item.totalAmount)}\n'
-                                  'مستحق: ${_moneyFmt.format(item.amountDue)}  |  حالة: ${item.status}',
-                                ),
-                                isThreeLine: true,
-                                onTap: () => _openForm(existing: item),
-                                trailing: IconButton(
-                                  tooltip: 'حذف',
-                                  onPressed: () => _delete(item),
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                    color: Colors.red,
-                                  ),
-                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : _items.isEmpty
+                          ? const Center(
+                              child: Text(
+                                'لا توجد مستخلصات بعد.\nاضغط «مستخلص جديد» للبدء.',
+                                textAlign: TextAlign.center,
                               ),
-                            );
-                          },
-                        ),
-                      ),
+                            )
+                          : RefreshIndicator(
+                              onRefresh: _load,
+                              child: ListView.separated(
+                                padding:
+                                    const EdgeInsets.fromLTRB(16, 16, 16, 88),
+                                itemCount: _items.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 8),
+                                itemBuilder: (context, i) {
+                                  final item = _items[i];
+                                  final dateLabel = item.statementDate == null
+                                      ? '—'
+                                      : _dateFmt.format(item.statementDate!);
+                                  return Card(
+                                    child: ListTile(
+                                      title: Text(
+                                        '${item.contractorName} — ${item.projectName}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        'تاريخ: $dateLabel  |  إجمالي: ${_moneyFmt.format(item.totalAmount)}\n'
+                                        'مستحق: ${_moneyFmt.format(item.amountDue)}  |  حالة: ${item.status}',
+                                      ),
+                                      isThreeLine: true,
+                                      onTap: () =>
+                                          _openForm(existing: item),
+                                      trailing: IconButton(
+                                        tooltip: 'حذف',
+                                        onPressed: () => _delete(item),
+                                        icon: const Icon(
+                                          Icons.delete_outline,
+                                          color: Colors.red,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+            ),
+          ],
+        ),
       ),
     );
   }

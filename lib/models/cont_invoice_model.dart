@@ -64,10 +64,13 @@ class ContInvoiceLineModel {
 
   double get lineTotal {
     if (lineKind == 'execution') return executionDue;
-    final amt = unitPrice.abs();
     if (lineKind == 'deduction') {
+      final amt = unitPrice.abs();
       return double.parse((-amt).toStringAsFixed(2));
     }
+    // holiday | transport | note_on_other — عدد × قيمة إن وُجد عدد
+    final qty = baseQty > 0 ? baseQty : 1;
+    final amt = (qty * unitPrice).abs();
     return double.parse(amt.toStringAsFixed(2));
   }
 
@@ -132,7 +135,7 @@ class ContInvoiceLineModel {
         'deduction_kind': deductionKind,
         'counterparty_contractor_id': counterpartyContractorId,
         'counterparty_contractor_name': counterpartyContractorName,
-        'amount': unitPrice.abs(),
+        'amount': lineTotal.abs(),
         'line_total': lineTotal,
       };
 

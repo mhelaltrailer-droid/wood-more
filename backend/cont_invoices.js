@@ -86,7 +86,16 @@ function ciNormalizeLine(raw, index) {
     lineTotal = -Math.round(amt * 100) / 100;
   } else {
     // holiday | transport | note_on_other
-    const amt = Math.abs(ciNum(raw.amount ?? unitPrice ?? currentQty));
+    // تفضيل amount إن وُجد، وإلا عدد × قيمة اليومية
+    const amountRaw = raw.amount;
+    let amt;
+    if (amountRaw != null && amountRaw !== '') {
+      amt = Math.abs(ciNum(amountRaw));
+    } else if (baseQty > 0 && unitPrice > 0) {
+      amt = Math.abs(baseQty * unitPrice);
+    } else {
+      amt = Math.abs(ciNum(unitPrice || currentQty));
+    }
     lineTotal = Math.round(amt * 100) / 100;
   }
 
@@ -288,28 +297,77 @@ async function ciUpsertPendingFromLines(client, {
   const lines = Array.isArray(rawLines) ? rawLines : [];
   for (const raw of lines) {
     const kind = ciNormalizeKind(raw);
-    if (kind !== 'note_on_other') continue;
     const line = ciNormalizeLine(raw, 0);
-    if (!(line.line_total > 0) || !line.counterparty_contractor_name) continue;
-    await client.query(
-      `INSERT INTO cont_invoice_pending_cross (
-        project_id, source_invoice_id,
-        beneficiary_contractor_id, beneficiary_contractor_name,
-        target_contractor_id, target_contractor_name,
-        amount, description
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [
-        Number.isFinite(projectId) ? projectId : null,
-        invoiceId,
-        Number.isFinite(beneficiaryContractorId) ? beneficiaryContractorId : null,
-        beneficiaryContractorName || '',
-        line.counterparty_contractor_id,
-        line.counterparty_contractor_name,
-        line.line_total,
-        line.description ||
-          `يوميات ملاحظات بالخصم (من ${beneficiaryContractorName || 'مقاول'})`,
-      ],
-    );
+    const amount = Math.abs(ciNum(line.line_total));
+    if (!(amount > 0)) continue;
+
+    // يوميات ملاحظات + خصم على مقاول آخر → خصم (debit) على المقاول الآخر
+    if (kind === 'note_on_other' && line.counterparty_contractor_name) {
+      await client.query(
+        `INSERT INTO cont_invoice_pending_cross (
+          project_id, source_invoice_id,
+          beneficiary_contractor_id, beneficiary_contractor_name,
+          target_contractor_id, target_contractor_name,
+          amount, description, pending_kind
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'debit')`,
+        [
+          Number.isFinite(projectId) ? projectId : null,
+          invoiceId,
+          Number.isFinite(beneficiaryContractorId) ? beneficiaryContractorId : null,
+          beneficiaryContractorName || '',
+          line.counterparty_contractor_id,
+          line.counterparty_contractor_name,
+          amount,
+          line.description ||
+            `يوميات ملاحظات — خصم (من ${beneficiaryContractorName || 'مقاول'})`,
+        ],
+      );
+      continue;
+    }
+
+    // خصم على فاتورة الحالي:
+    // - مع مقاول آخر → credit له (يصرف له لاحقاً لمعالجة التقصير)
+    // - بدون مقاول → unlinked لحين الربط
+    if (kind === 'deduction') {
+      if (line.counterparty_contractor_name) {
+        await client.query(
+          `INSERT INTO cont_invoice_pending_cross (
+            project_id, source_invoice_id,
+            beneficiary_contractor_id, beneficiary_contractor_name,
+            target_contractor_id, target_contractor_name,
+            amount, description, pending_kind
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'credit')`,
+          [
+            Number.isFinite(projectId) ? projectId : null,
+            invoiceId,
+            Number.isFinite(beneficiaryContractorId) ? beneficiaryContractorId : null,
+            beneficiaryContractorName || '',
+            line.counterparty_contractor_id,
+            line.counterparty_contractor_name,
+            amount,
+            line.description ||
+              `صرف خصم تقصير (من ${beneficiaryContractorName || 'مقاول'})`,
+          ],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO cont_invoice_pending_cross (
+            project_id, source_invoice_id,
+            beneficiary_contractor_id, beneficiary_contractor_name,
+            target_contractor_id, target_contractor_name,
+            amount, description, pending_kind
+          ) VALUES ($1,$2,$3,$4,NULL,'',$5,$6,'unlinked')`,
+          [
+            Number.isFinite(projectId) ? projectId : null,
+            invoiceId,
+            Number.isFinite(beneficiaryContractorId) ? beneficiaryContractorId : null,
+            beneficiaryContractorName || '',
+            amount,
+            line.description || 'خصم معلّق غير مربوط بمقاول',
+          ],
+        );
+      }
+    }
   }
 }
 
@@ -321,7 +379,10 @@ async function ciApplyPendingToInvoice(client, {
   existingLines,
 }) {
   const params = [];
-  const where = ['applied_invoice_id IS NULL'];
+  const where = [
+    `applied_invoice_id IS NULL`,
+    `pending_kind IN ('debit', 'credit')`,
+  ];
   if (Number.isFinite(contractorId) && contractorName) {
     params.push(contractorId, contractorName);
     where.push(
@@ -350,18 +411,33 @@ async function ciApplyPendingToInvoice(client, {
 
   const out = Array.isArray(existingLines) ? [...existingLines] : [];
   for (const row of pending.rows) {
-    out.push({
-      line_kind: 'deduction',
-      location_label: '',
-      description: row.description || 'خصم معلّق من مقاول آخر',
-      unit: 'مقط',
-      base_qty: 1,
-      unit_price: ciNum(row.amount),
-      amount: ciNum(row.amount),
-      percent: 100,
-      prev_percent: 0,
-      deduction_kind: 'أخرى',
-    });
+    const pendingKind = String(row.pending_kind || 'debit');
+    if (pendingKind === 'credit') {
+      out.push({
+        line_kind: 'transport',
+        location_label: '',
+        description: row.description || 'صرف خصم تقصير معلّق',
+        unit: 'مقط',
+        base_qty: 1,
+        unit_price: ciNum(row.amount),
+        amount: ciNum(row.amount),
+        percent: 100,
+        prev_percent: 0,
+      });
+    } else {
+      out.push({
+        line_kind: 'deduction',
+        location_label: '',
+        description: row.description || 'خصم معلّق من مقاول آخر',
+        unit: 'مقط',
+        base_qty: 1,
+        unit_price: ciNum(row.amount),
+        amount: ciNum(row.amount),
+        percent: 100,
+        prev_percent: 0,
+        deduction_kind: 'أخرى',
+      });
+    }
     await client.query(
       `UPDATE cont_invoice_pending_cross
        SET applied_invoice_id = $1, applied_at = NOW()
@@ -451,14 +527,23 @@ async function ensureContInvoicesTables(pool) {
       target_contractor_name TEXT NOT NULL DEFAULT '',
       amount NUMERIC(14,2) NOT NULL DEFAULT 0,
       description TEXT NOT NULL DEFAULT '',
+      pending_kind TEXT NOT NULL DEFAULT 'debit',
       applied_invoice_id INTEGER REFERENCES cont_invoices(id) ON DELETE SET NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       applied_at TIMESTAMPTZ
     )
   `);
+  await pool.query(
+    `ALTER TABLE cont_invoice_pending_cross
+     ADD COLUMN IF NOT EXISTS pending_kind TEXT NOT NULL DEFAULT 'debit'`,
+  );
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_cont_pending_cross_target
     ON cont_invoice_pending_cross (target_contractor_id, applied_invoice_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_cont_pending_cross_unlinked
+    ON cont_invoice_pending_cross (pending_kind, applied_invoice_id)
   `);
 }
 
@@ -543,6 +628,108 @@ function registerContInvoicesRoutes(app, pool) {
         unit_price: ciNum(row.unit_price),
         from_invoice_id: parseInt(row.invoice_id, 10),
       });
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  /** خصومات معلّقة غير مربوطة بمقاول (Admin) */
+  app.get('/cont-invoices/pending-unlinked', async (req, res) => {
+    try {
+      const userId = parseInt(String(req.query.userId || ''), 10);
+      if (Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'userId required' });
+      }
+      const user = await ciGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!ciIsAppAdmin(user)) return res.status(403).json({ error: 'forbidden' });
+
+      const r = await pool.query(
+        `SELECT p.*,
+                i.project_name AS source_project_name,
+                i.statement_date AS source_statement_date
+         FROM cont_invoice_pending_cross p
+         LEFT JOIN cont_invoices i ON i.id = p.source_invoice_id
+         WHERE p.pending_kind = 'unlinked'
+           AND p.applied_invoice_id IS NULL
+         ORDER BY p.created_at DESC, p.id DESC`,
+      );
+      res.json(
+        r.rows.map((row) => ({
+          id: parseInt(row.id, 10),
+          project_id:
+            row.project_id != null ? parseInt(row.project_id, 10) : null,
+          source_invoice_id:
+            row.source_invoice_id != null
+              ? parseInt(row.source_invoice_id, 10)
+              : null,
+          source_project_name: row.source_project_name || '',
+          source_statement_date: row.source_statement_date
+            ? String(row.source_statement_date).slice(0, 10)
+            : null,
+          beneficiary_contractor_id:
+            row.beneficiary_contractor_id != null
+              ? parseInt(row.beneficiary_contractor_id, 10)
+              : null,
+          beneficiary_contractor_name: row.beneficiary_contractor_name || '',
+          amount: ciNum(row.amount),
+          description: row.description || '',
+          pending_kind: row.pending_kind || 'unlinked',
+          created_at: row.created_at,
+        })),
+      );
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  /** ربط خصم معلّق غير مربوط بمقاول (يصبح credit له) */
+  app.post('/cont-invoices/pending-unlinked/:id/assign', async (req, res) => {
+    try {
+      const userId = parseInt(String(req.body?.userId ?? req.query.userId ?? ''), 10);
+      const id = parseInt(String(req.params.id || ''), 10);
+      if (Number.isNaN(userId) || Number.isNaN(id)) {
+        return res.status(400).json({ error: 'userId and id required' });
+      }
+      const user = await ciGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!ciIsAppAdmin(user)) return res.status(403).json({ error: 'forbidden' });
+
+      const contractorIdRaw =
+        req.body?.contractorId ?? req.body?.contractor_id;
+      const contractorId =
+        contractorIdRaw == null || contractorIdRaw === ''
+          ? null
+          : parseInt(String(contractorIdRaw), 10);
+      const contractorName = ciStr(
+        req.body?.contractorName ?? req.body?.contractor_name,
+      );
+      if (!Number.isFinite(contractorId) && !contractorName) {
+        return res.status(400).json({ error: 'contractor required' });
+      }
+
+      const existing = await pool.query(
+        `SELECT id FROM cont_invoice_pending_cross
+         WHERE id = $1 AND pending_kind = 'unlinked' AND applied_invoice_id IS NULL`,
+        [id],
+      );
+      if (!existing.rows.length) {
+        return res.status(404).json({ error: 'not found' });
+      }
+
+      await pool.query(
+        `UPDATE cont_invoice_pending_cross
+         SET pending_kind = 'credit',
+             target_contractor_id = $1,
+             target_contractor_name = $2
+         WHERE id = $3`,
+        [
+          Number.isFinite(contractorId) ? contractorId : null,
+          contractorName,
+          id,
+        ],
+      );
+      res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }

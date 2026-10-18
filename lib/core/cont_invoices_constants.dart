@@ -2,6 +2,12 @@ const String contInvoicesIconId = 'cont_invoices';
 const String contInvoicesRouteName = 'cont-invoices';
 const String contInvoicesHomeLabel = 'Cont-Invoices';
 const String contInvoicesDefaultContractType = 'تركيب';
+const String contInvoicesContractTypeOther = 'آخر';
+
+const List<String> contInvoicesContractTypeChoices = [
+  contInvoicesDefaultContractType,
+  contInvoicesContractTypeOther,
+];
 
 const List<String> contInvoicesUnitOptions = [
   'عدد',
