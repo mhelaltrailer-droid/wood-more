@@ -153,12 +153,19 @@ class IconVisibilityService {
     rolePurchaser: 'Purchaser',
   };
 
+  /// مخفية افتراضياً — تُفعَّل فقط من Icons Control (المسؤول الأساسي).
+  static const Set<String> hiddenByDefaultIconIds = {
+    'cont_invoices',
+    'invoice_structure',
+  };
+
   static const Map<String, List<HomeIconItem>> roleIcons = {
     roleOpCoordinator: [
       meetingsIcon,
     ],
     roleQs: [
       invoicesOwnerIcon,
+      contInvoicesIcon,
     ],
     roleFinance: [
       invoicesOwnerIcon,
@@ -194,6 +201,7 @@ class IconVisibilityService {
       balancesExpensesIcon,
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       invoicesOwnerIcon,
+      contInvoicesIcon,
     ],
     roleDocumentController: _documentControllerHomeIcons,
     roleSiteEngineerManager: [
@@ -210,6 +218,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
       meetingsIcon,
       invoicesOwnerIcon,
+      contInvoicesIcon,
     ],
     roleGeneralSupervisor: [
       HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),
@@ -240,6 +249,7 @@ class IconVisibilityService {
       operationManagerCustodyBalancesExpensesIcon,
       meetingsIcon,
       invoicesOwnerIcon,
+      contInvoicesIcon,
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -274,12 +284,17 @@ class IconVisibilityService {
 
   static Map<String, bool> defaultForRole(String role) {
     final items = roleIcons[role] ?? const <HomeIconItem>[];
-    return {for (final item in items) item.id: true};
+    return {
+      for (final item in items)
+        item.id: !hiddenByDefaultIconIds.contains(item.id),
+    };
   }
 
   static bool isVisible(Map<String, bool>? roleConfig, String iconId) {
-    if (roleConfig == null) return true;
-    return roleConfig[iconId] ?? true;
+    final defaultVisible = !hiddenByDefaultIconIds.contains(iconId);
+    if (roleConfig == null) return defaultVisible;
+    if (roleConfig.containsKey(iconId)) return roleConfig[iconId] == true;
+    return defaultVisible;
   }
 
   static Map<String, Map<String, bool>> normalizeAllConfig(

@@ -65,6 +65,46 @@ function isSemLikeRole(role) {
   return SEM_LIKE_ROLES.includes(String(role || '').trim());
 }
 
+/// احتفاظ بسجل الحركة لآخر N يوم فقط؛ الأقدم يُحذف تلقائيًا.
+const ACTIVITY_LOGS_RETENTION_DAYS = 30;
+const ACTIVITY_LOGS_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let _activityLogsPurgeTimer = null;
+
+function activityLogsRetentionCutoffIso() {
+  const d = new Date(Date.now() - ACTIVITY_LOGS_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  return d.toISOString();
+}
+
+async function purgeOldActivityLogs() {
+  const cutoff = activityLogsRetentionCutoffIso();
+  const r = await pool.query(
+    'DELETE FROM activity_logs WHERE created_at < $1',
+    [cutoff],
+  );
+  const deleted = r.rowCount || 0;
+  if (deleted > 0) {
+    console.log(
+      `purgeOldActivityLogs: deleted ${deleted} row(s) older than ${ACTIVITY_LOGS_RETENTION_DAYS}d (before ${cutoff})`,
+    );
+  }
+  return deleted;
+}
+
+function startActivityLogsRetentionPurge() {
+  if (_activityLogsPurgeTimer) return;
+  const run = () => {
+    purgeOldActivityLogs().catch((e) => {
+      console.warn('purgeOldActivityLogs:', e && e.message ? e.message : e);
+    });
+  };
+  // تأجيل أول تشغيل قليلاً حتى لا يتزاحم مع باقي ensures عند الإقلاع.
+  setTimeout(run, 15 * 1000);
+  _activityLogsPurgeTimer = setInterval(run, ACTIVITY_LOGS_PURGE_INTERVAL_MS);
+  if (typeof _activityLogsPurgeTimer.unref === 'function') {
+    _activityLogsPurgeTimer.unref();
+  }
+}
+
 async function ensureActivityLogsTable() {
   try {
     await pool.query(`
@@ -87,6 +127,7 @@ async function ensureActivityLogsTable() {
     await pool.query('CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id)').catch(() => {});
     await pool.query('CREATE INDEX IF NOT EXISTS idx_activity_logs_action_type ON activity_logs(action_type)').catch(() => {});
     console.log('ensureActivityLogsTable: ok');
+    startActivityLogsRetentionPurge();
   } catch (e) {
     console.warn('ensureActivityLogsTable:', e.message);
   }
@@ -1919,6 +1960,7 @@ async function ensureHomeIconsVisibilitySetting() {
         accountant_finance: true,
         reports_sys: true,
         invoices_owner: true,
+        cont_invoices: false,
       },
       site_engineer_manager: {
         attendance_reports: true,
@@ -1948,6 +1990,7 @@ async function ensureHomeIconsVisibilitySetting() {
         meetings: true,
         shop_drawing: true,
         invoices_owner: true,
+        cont_invoices: false,
       },
       general_supervisor: {
         attendance: true,
@@ -1978,6 +2021,7 @@ async function ensureHomeIconsVisibilitySetting() {
         custody_expenses_view: true,
         meetings: true,
         invoices_owner: true,
+        cont_invoices: false,
       },
       app_admin: {
         attendance_reports: true,
@@ -1999,8 +2043,8 @@ async function ensureHomeIconsVisibilitySetting() {
         projects_dashboard_plus1: true,
         meetings: true,
         invoices_owner: true,
-        cont_invoices: true,
-        invoice_structure: true,
+        cont_invoices: false,
+        invoice_structure: false,
       },
       document_controller: {
         ir_mir: true,
@@ -2025,6 +2069,7 @@ async function ensureHomeIconsVisibilitySetting() {
       },
       qs: {
         invoices_owner: true,
+        cont_invoices: false,
       },
       finance: {
         invoices_owner: true,
@@ -2035,8 +2080,9 @@ async function ensureHomeIconsVisibilitySetting() {
       },
     };
 
-    function mergeHomeIconsVisibilityDefaults(existing) {
+    function mergeHomeIconsVisibilityDefaults(existing, { forceHideContIcons = false } = {}) {
       const merged = existing && typeof existing === 'object' ? { ...existing } : {};
+      const contHiddenIds = ['cont_invoices', 'invoice_structure'];
       for (const [role, icons] of Object.entries(defaultConfig)) {
         const roleMap =
           merged[role] && typeof merged[role] === 'object' ? { ...merged[role] } : {};
@@ -2045,10 +2091,23 @@ async function ensureHomeIconsVisibilitySetting() {
         }
         // أُزيلت أيقونة التقرير المفصل من الواجهة — أخفِها إن بقيت في الإعدادات القديمة.
         delete roleMap.detailed_report;
+        if (forceHideContIcons) {
+          for (const iconId of contHiddenIds) {
+            if (Object.prototype.hasOwnProperty.call(roleMap, iconId) ||
+                Object.prototype.hasOwnProperty.call(icons, iconId)) {
+              roleMap[iconId] = false;
+            }
+          }
+        }
         merged[role] = roleMap;
       }
       return merged;
     }
+
+    const flagR = await pool.query(
+      `SELECT value FROM app_settings WHERE key = 'cont_icons_default_off_v1' LIMIT 1`,
+    );
+    const forceHideContIcons = flagR.rows.length === 0;
 
     const r = await pool.query(
       `SELECT value FROM app_settings WHERE key = 'home_icons_visibility' LIMIT 1`,
@@ -2058,6 +2117,12 @@ async function ensureHomeIconsVisibilitySetting() {
         `INSERT INTO app_settings (key, value) VALUES ('home_icons_visibility', $1)`,
         [JSON.stringify(defaultConfig)],
       );
+      if (forceHideContIcons) {
+        await pool.query(
+          `INSERT INTO app_settings (key, value) VALUES ('cont_icons_default_off_v1', '1')
+           ON CONFLICT (key) DO NOTHING`,
+        );
+      }
       return;
     }
 
@@ -2067,11 +2132,19 @@ async function ensureHomeIconsVisibilitySetting() {
     } catch (_) {
       existing = {};
     }
-    const merged = mergeHomeIconsVisibilityDefaults(existing);
+    const merged = mergeHomeIconsVisibilityDefaults(existing, {
+      forceHideContIcons,
+    });
     await pool.query(
       `UPDATE app_settings SET value = $1 WHERE key = 'home_icons_visibility'`,
       [JSON.stringify(merged)],
     );
+    if (forceHideContIcons) {
+      await pool.query(
+        `INSERT INTO app_settings (key, value) VALUES ('cont_icons_default_off_v1', '1')
+         ON CONFLICT (key) DO NOTHING`,
+      );
+    }
   } catch (e) {
     console.warn('ensureHomeIconsVisibilitySetting:', e.message);
   }

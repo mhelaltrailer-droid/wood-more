@@ -1,9 +1,12 @@
 /**
  * Cont-Invoices — مستخلصات المقاول (مسودات + بنود كميات/أسعار).
- * المرحلة الحالية: إنشاء/تعديل/حذف للـ app_admin فقط. بدون تداول أو PDF.
+ * تداول: draft → pending_price → pending_pm → pending_om → approved → paid
  */
 
-const { applyViewAsToUser } = require('./view_as');
+const {
+  applyViewAsToUser,
+  primaryAdminPowersActiveForUser,
+} = require('./view_as');
 
 function ciNum(raw, fallback = 0) {
   const n = parseFloat(String(raw ?? '').replace(/,/g, ''));
@@ -16,6 +19,195 @@ function ciStr(raw) {
 
 function ciIsAppAdmin(user) {
   return !!user && String(user.role || '').trim() === 'app_admin';
+}
+
+function ciNormEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+const CI_QS_EMAILS = new Set(['qs-user', 'qs@app.com']);
+const CI_AH_AMIN_EMAIL = 'ah-amin';
+const CI_PM_EMAIL = 'abdelrhmanellaithy828@gmail.com';
+const CI_OM_EMAIL = 'shams';
+
+const CI_ACTOR_AH_AMIN_ID = 15;
+const CI_ACTOR_PM_ID = 12;
+const CI_ACTOR_OM_ID = 11;
+
+function ciIsPrimaryAdmin(user, req) {
+  return primaryAdminPowersActiveForUser(user, req);
+}
+
+function ciIsQs(user) {
+  return CI_QS_EMAILS.has(ciNormEmail(user?.email));
+}
+
+function ciIsAhAmin(user) {
+  return ciNormEmail(user?.email) === CI_AH_AMIN_EMAIL;
+}
+
+function ciIsPm(user) {
+  return ciNormEmail(user?.email) === CI_PM_EMAIL;
+}
+
+function ciIsOm(user) {
+  return ciNormEmail(user?.email) === CI_OM_EMAIL;
+}
+
+function ciCanAccessList(user, req) {
+  return (
+    ciIsAppAdmin(user) ||
+    ciIsPrimaryAdmin(user, req) ||
+    ciIsQs(user) ||
+    ciIsAhAmin(user) ||
+    ciIsPm(user) ||
+    ciIsOm(user)
+  );
+}
+
+function ciCanCreate(user, req) {
+  return ciIsQs(user) || ciIsPrimaryAdmin(user, req);
+}
+
+function ciCanDelete(user, req) {
+  return ciIsPrimaryAdmin(user, req);
+}
+
+function ciStatusLabelAr(status) {
+  switch (String(status || '').trim()) {
+    case 'draft':
+      return 'مسودة';
+    case 'pending_price':
+      return 'مراجعة السعر';
+    case 'pending_pm':
+      return 'مراجعة مدير المشروعات';
+    case 'pending_om':
+      return 'اعتماد العمليات';
+    case 'approved':
+      return 'معتمد';
+    case 'paid':
+      return 'تم الصرف';
+    default:
+      return String(status || '');
+  }
+}
+
+function ciLineEditMode(user, req, status) {
+  if (ciIsPrimaryAdmin(user, req)) return 'full';
+  const st = String(status || 'draft').trim();
+  if (st === 'draft' && ciIsQs(user)) return 'full';
+  if (st === 'pending_price' && ciIsAhAmin(user)) return 'price_only';
+  if (st === 'pending_pm' && ciIsPm(user)) return 'full';
+  return 'none';
+}
+
+function ciMergePriceOnlyLines(existingRows, incomingRaw) {
+  const incoming = Array.isArray(incomingRaw) ? incomingRaw : [];
+  const byId = new Map();
+  const bySort = new Map();
+  for (const raw of incoming) {
+    const idRaw = raw.id;
+    const id =
+      idRaw == null || idRaw === ''
+        ? null
+        : parseInt(String(idRaw), 10);
+    if (Number.isFinite(id)) byId.set(id, raw);
+    const sort = parseInt(String(raw.sort_order ?? raw.sortOrder ?? ''), 10);
+    if (Number.isFinite(sort)) bySort.set(sort, raw);
+  }
+  return existingRows.map((row, index) => {
+    const id = parseInt(row.id, 10);
+    const inc =
+      (Number.isFinite(id) && byId.get(id)) ||
+      bySort.get(parseInt(row.sort_order, 10) || index);
+    if (!inc) {
+      return {
+        id: row.id,
+        sort_order: row.sort_order,
+        item_no: row.item_no,
+        line_kind: row.line_kind,
+        structure_location_id: row.structure_location_id,
+        location_label: row.location_label,
+        description: row.description,
+        unit: row.unit,
+        prev_qty: row.prev_qty,
+        current_qty: row.current_qty,
+        total_qty: row.total_qty,
+        base_qty: row.base_qty,
+        unit_price: row.unit_price,
+        prev_percent: row.prev_percent,
+        percent: row.percent,
+        deduction_kind: row.deduction_kind,
+        counterparty_contractor_id: row.counterparty_contractor_id,
+        counterparty_contractor_name: row.counterparty_contractor_name,
+      };
+    }
+    const newPrice = inc.unit_price ?? inc.unitPrice;
+    return {
+      id: row.id,
+      sort_order: row.sort_order,
+      item_no: row.item_no,
+      line_kind: row.line_kind,
+      structure_location_id: row.structure_location_id,
+      location_label: row.location_label,
+      description: row.description,
+      unit: row.unit,
+      prev_qty: row.prev_qty,
+      current_qty: row.current_qty,
+      total_qty: row.total_qty,
+      base_qty: row.base_qty,
+      unit_price: newPrice != null && newPrice !== '' ? newPrice : row.unit_price,
+      prev_percent: row.prev_percent,
+      percent: row.percent,
+      deduction_kind: row.deduction_kind,
+      counterparty_contractor_id: row.counterparty_contractor_id,
+      counterparty_contractor_name: row.counterparty_contractor_name,
+    };
+  });
+}
+
+async function ciLoadActions(pool, invoiceId) {
+  const r = await pool.query(
+    `SELECT * FROM cont_invoice_actions
+     WHERE invoice_id = $1
+     ORDER BY created_at ASC, id ASC`,
+    [invoiceId],
+  );
+  return r.rows.map((row) => ({
+    id: parseInt(row.id, 10),
+    invoice_id: parseInt(row.invoice_id, 10),
+    actor_user_id:
+      row.actor_user_id != null ? parseInt(row.actor_user_id, 10) : null,
+    actor_user_name: row.actor_user_name || '',
+    action: row.action || '',
+    comment: row.comment || '',
+    created_at: row.created_at,
+  }));
+}
+
+async function ciLogAction(client, invoiceId, user, action, comment) {
+  await client.query(
+    `INSERT INTO cont_invoice_actions (
+      invoice_id, actor_user_id, actor_user_name, action, comment
+    ) VALUES ($1,$2,$3,$4,$5)`,
+    [
+      invoiceId,
+      user.id != null ? parseInt(user.id, 10) : null,
+      user.name || '',
+      action,
+      comment || '',
+    ],
+  );
+}
+
+async function ciAssigneeUser(pool, userId) {
+  const r = await pool.query(
+    'SELECT id, name FROM users WHERE id = $1',
+    [userId],
+  );
+  const row = r.rows[0];
+  if (!row) return { id: userId, name: '' };
+  return { id: parseInt(row.id, 10), name: row.name || '' };
 }
 
 async function ciGetUser(pool, userId, req) {
@@ -134,7 +326,7 @@ function ciNormalizeLine(raw, index) {
   };
 }
 
-function ciRowToJson(row, lines = []) {
+function ciRowToJson(row, lines = [], actions = null) {
   const totalAmount = ciNum(row.total_amount);
   const previouslyPaid = ciNum(row.previously_paid);
   const otherDeductions = ciNum(row.other_deductions);
@@ -142,7 +334,8 @@ function ciRowToJson(row, lines = []) {
     row.amount_due != null
       ? ciNum(row.amount_due)
       : Math.round((totalAmount - previouslyPaid - otherDeductions) * 100) / 100;
-  return {
+  const status = row.status || 'draft';
+  const out = {
     id: parseInt(row.id, 10),
     contractor_id:
       row.contractor_id != null ? parseInt(row.contractor_id, 10) : null,
@@ -158,7 +351,19 @@ function ciRowToJson(row, lines = []) {
     total_amount: totalAmount,
     amount_due: amountDue,
     notes: row.notes || '',
-    status: row.status || 'draft',
+    status,
+    status_label_ar: ciStatusLabelAr(status),
+    return_reason: row.return_reason || '',
+    current_assignee_user_id:
+      row.current_assignee_user_id != null
+        ? parseInt(row.current_assignee_user_id, 10)
+        : null,
+    current_assignee_user_name: row.current_assignee_user_name || '',
+    approved_at: row.approved_at || null,
+    paid_at: row.paid_at || null,
+    paid_by_user_id:
+      row.paid_by_user_id != null ? parseInt(row.paid_by_user_id, 10) : null,
+    paid_by_user_name: row.paid_by_user_name || '',
     created_by_user_id:
       row.created_by_user_id != null
         ? parseInt(row.created_by_user_id, 10)
@@ -194,6 +399,10 @@ function ciRowToJson(row, lines = []) {
       line_total: ciNum(l.line_total),
     })),
   };
+  if (actions != null) {
+    out.actions = actions;
+  }
+  return out;
 }
 
 async function ciLoadLines(pool, invoiceId) {
@@ -549,6 +758,42 @@ async function ensureContInvoicesTables(pool) {
     CREATE INDEX IF NOT EXISTS idx_cont_pending_cross_unlinked
     ON cont_invoice_pending_cross (pending_kind, applied_invoice_id)
   `);
+  await pool.query(
+    `ALTER TABLE cont_invoices ADD COLUMN IF NOT EXISTS return_reason TEXT NOT NULL DEFAULT ''`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoices ADD COLUMN IF NOT EXISTS current_assignee_user_id INTEGER`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoices ADD COLUMN IF NOT EXISTS current_assignee_user_name TEXT NOT NULL DEFAULT ''`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoices ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoices ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoices ADD COLUMN IF NOT EXISTS paid_by_user_id INTEGER`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoices ADD COLUMN IF NOT EXISTS paid_by_user_name TEXT NOT NULL DEFAULT ''`,
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cont_invoice_actions (
+      id SERIAL PRIMARY KEY,
+      invoice_id INTEGER NOT NULL REFERENCES cont_invoices(id) ON DELETE CASCADE,
+      actor_user_id INTEGER,
+      actor_user_name TEXT NOT NULL DEFAULT '',
+      action TEXT NOT NULL DEFAULT '',
+      comment TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_cont_invoice_actions_invoice
+    ON cont_invoice_actions (invoice_id, created_at ASC)
+  `);
 }
 
 function registerContInvoicesRoutes(app, pool) {
@@ -563,7 +808,9 @@ function registerContInvoicesRoutes(app, pool) {
       }
       const user = await ciGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
-      if (!ciIsAppAdmin(user)) return res.status(403).json({ error: 'forbidden' });
+      if (!ciCanAccessList(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
 
       const projectId = parseInt(String(req.query.projectId || ''), 10);
       const structureLocationId = parseInt(
@@ -752,7 +999,9 @@ function registerContInvoicesRoutes(app, pool) {
       }
       const user = await ciGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
-      if (!ciIsAppAdmin(user)) return res.status(403).json({ error: 'forbidden' });
+      if (!ciCanAccessList(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
 
       const contractorIdRaw = req.query.contractorId ?? req.query.contractor_id;
       const contractorName = ciStr(
@@ -850,7 +1099,9 @@ function registerContInvoicesRoutes(app, pool) {
       }
       const user = await ciGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
-      if (!ciIsAppAdmin(user)) return res.status(403).json({ error: 'forbidden' });
+      if (!ciCanAccessList(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
 
       const r = await pool.query(
         `SELECT * FROM cont_invoices
@@ -871,14 +1122,17 @@ function registerContInvoicesRoutes(app, pool) {
       }
       const user = await ciGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
-      if (!ciIsAppAdmin(user)) return res.status(403).json({ error: 'forbidden' });
+      if (!ciCanAccessList(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
 
       const r = await pool.query('SELECT * FROM cont_invoices WHERE id = $1', [
         id,
       ]);
       if (!r.rows.length) return res.status(404).json({ error: 'not found' });
       const lines = await ciLoadLines(pool, id);
-      res.json(ciRowToJson(r.rows[0], lines));
+      const actions = await ciLoadActions(pool, id);
+      res.json(ciRowToJson(r.rows[0], lines, actions));
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }
@@ -894,7 +1148,9 @@ function registerContInvoicesRoutes(app, pool) {
       }
       const user = await ciGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
-      if (!ciIsAppAdmin(user)) return res.status(403).json({ error: 'forbidden' });
+      if (!ciCanCreate(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
 
       const contractorName = ciStr(b.contractor_name ?? b.contractorName);
       const projectName = ciStr(b.project_name ?? b.projectName);
@@ -927,8 +1183,9 @@ function registerContInvoicesRoutes(app, pool) {
         `INSERT INTO cont_invoices (
           contractor_id, contractor_name, project_id, project_name,
           statement_date, contract_type, previously_paid, other_deductions,
-          notes, status, created_by_user_id, created_by_user_name
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'draft',$10,$11)
+          notes, status, created_by_user_id, created_by_user_name,
+          current_assignee_user_id, current_assignee_user_name
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'draft',$10,$11,NULL,'')
         RETURNING *`,
         [
           Number.isFinite(contractorId) ? contractorId : null,
@@ -978,9 +1235,11 @@ function registerContInvoicesRoutes(app, pool) {
          RETURNING *`,
         [totalAmount, amountDue, invoiceId],
       );
+      await ciLogAction(client, invoiceId, user, 'create', '');
       await client.query('COMMIT');
       const lines = await ciLoadLines(pool, invoiceId);
-      res.status(201).json(ciRowToJson(upd.rows[0], lines));
+      const actions = await ciLoadActions(pool, invoiceId);
+      res.status(201).json(ciRowToJson(upd.rows[0], lines, actions));
     } catch (e) {
       try {
         await client.query('ROLLBACK');
@@ -1002,70 +1261,102 @@ function registerContInvoicesRoutes(app, pool) {
       }
       const user = await ciGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
-      if (!ciIsAppAdmin(user)) return res.status(403).json({ error: 'forbidden' });
 
       const existing = await pool.query(
-        'SELECT id FROM cont_invoices WHERE id = $1',
+        'SELECT * FROM cont_invoices WHERE id = $1',
         [id],
       );
       if (!existing.rows.length) {
         return res.status(404).json({ error: 'not found' });
       }
-
-      const contractorName = ciStr(b.contractor_name ?? b.contractorName);
-      const projectName = ciStr(b.project_name ?? b.projectName);
-      if (!contractorName) {
-        return res.status(400).json({ error: 'contractor_name required' });
-      }
-      if (!projectName) {
-        return res.status(400).json({ error: 'project_name required' });
+      const invRow = existing.rows[0];
+      const editMode = ciLineEditMode(user, req, invRow.status);
+      if (editMode === 'none') {
+        return res.status(403).json({ error: 'forbidden' });
       }
 
-      const contractorIdRaw = b.contractor_id ?? b.contractorId;
-      const projectIdRaw = b.project_id ?? b.projectId;
-      const contractorId =
-        contractorIdRaw == null || contractorIdRaw === ''
-          ? null
-          : parseInt(String(contractorIdRaw), 10);
-      const projectId =
-        projectIdRaw == null || projectIdRaw === ''
-          ? null
-          : parseInt(String(projectIdRaw), 10);
-      const statementDate = ciStr(b.statement_date ?? b.statementDate) || null;
-      const contractType =
-        ciStr(b.contract_type ?? b.contractType) || 'تركيب';
-      const previouslyPaid = ciNum(b.previously_paid ?? b.previouslyPaid);
-      const otherDeductions = ciNum(b.other_deductions ?? b.otherDeductions);
-      const notes = ciStr(b.notes);
+      let contractorName = ciStr(invRow.contractor_name);
+      let projectName = ciStr(invRow.project_name);
+      let contractorId =
+        invRow.contractor_id != null
+          ? parseInt(invRow.contractor_id, 10)
+          : null;
+      let projectId =
+        invRow.project_id != null ? parseInt(invRow.project_id, 10) : null;
+      let statementDate = invRow.statement_date
+        ? String(invRow.statement_date).slice(0, 10)
+        : null;
+      let contractType = invRow.contract_type || 'تركيب';
+      let previouslyPaid = ciNum(invRow.previously_paid);
+      let otherDeductions = ciNum(invRow.other_deductions);
+      let notes = ciStr(invRow.notes);
+
+      if (editMode === 'full') {
+        contractorName = ciStr(b.contractor_name ?? b.contractorName);
+        projectName = ciStr(b.project_name ?? b.projectName);
+        if (!contractorName) {
+          return res.status(400).json({ error: 'contractor_name required' });
+        }
+        if (!projectName) {
+          return res.status(400).json({ error: 'project_name required' });
+        }
+        const contractorIdRaw = b.contractor_id ?? b.contractorId;
+        const projectIdRaw = b.project_id ?? b.projectId;
+        contractorId =
+          contractorIdRaw == null || contractorIdRaw === ''
+            ? null
+            : parseInt(String(contractorIdRaw), 10);
+        projectId =
+          projectIdRaw == null || projectIdRaw === ''
+            ? null
+            : parseInt(String(projectIdRaw), 10);
+        statementDate = ciStr(b.statement_date ?? b.statementDate) || null;
+        contractType = ciStr(b.contract_type ?? b.contractType) || 'تركيب';
+        previouslyPaid = ciNum(b.previously_paid ?? b.previouslyPaid);
+        otherDeductions = ciNum(b.other_deductions ?? b.otherDeductions);
+        notes = ciStr(b.notes);
+      }
+
+      let linesPayload = b.lines || [];
+      if (editMode === 'price_only') {
+        const dbLines = await ciLoadLines(pool, id);
+        linesPayload = ciMergePriceOnlyLines(dbLines, linesPayload);
+      }
 
       await client.query('BEGIN');
-      await client.query(
-        `UPDATE cont_invoices SET
-          contractor_id = $1,
-          contractor_name = $2,
-          project_id = $3,
-          project_name = $4,
-          statement_date = $5,
-          contract_type = $6,
-          previously_paid = $7,
-          other_deductions = $8,
-          notes = $9,
-          updated_at = NOW()
-         WHERE id = $10`,
-        [
-          Number.isFinite(contractorId) ? contractorId : null,
-          contractorName,
-          Number.isFinite(projectId) ? projectId : null,
-          projectName,
-          statementDate,
-          contractType,
-          previouslyPaid,
-          otherDeductions,
-          notes,
-          id,
-        ],
-      );
-      const linesPayload = b.lines || [];
+      if (editMode === 'full') {
+        await client.query(
+          `UPDATE cont_invoices SET
+            contractor_id = $1,
+            contractor_name = $2,
+            project_id = $3,
+            project_name = $4,
+            statement_date = $5,
+            contract_type = $6,
+            previously_paid = $7,
+            other_deductions = $8,
+            notes = $9,
+            updated_at = NOW()
+           WHERE id = $10`,
+          [
+            Number.isFinite(contractorId) ? contractorId : null,
+            contractorName,
+            Number.isFinite(projectId) ? projectId : null,
+            projectName,
+            statementDate,
+            contractType,
+            previouslyPaid,
+            otherDeductions,
+            notes,
+            id,
+          ],
+        );
+      } else {
+        await client.query(
+          `UPDATE cont_invoices SET updated_at = NOW() WHERE id = $1`,
+          [id],
+        );
+      }
       const totalAmount = await ciReplaceLines(client, id, linesPayload);
       await ciSyncStructureFromLines(
         client,
@@ -1091,9 +1382,296 @@ function registerContInvoicesRoutes(app, pool) {
          RETURNING *`,
         [totalAmount, amountDue, id],
       );
+      await ciLogAction(
+        client,
+        id,
+        user,
+        editMode === 'price_only' ? 'update_prices' : 'update',
+        '',
+      );
       await client.query('COMMIT');
       const lines = await ciLoadLines(pool, id);
-      res.json(ciRowToJson(upd.rows[0], lines));
+      const actions = await ciLoadActions(pool, id);
+      res.json(ciRowToJson(upd.rows[0], lines, actions));
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+      res.status(500).json({ error: String(e.message) });
+    } finally {
+      client.release();
+    }
+  });
+
+  async function ciWorkflowRespond(pool, invoiceId, res) {
+    const r = await pool.query('SELECT * FROM cont_invoices WHERE id = $1', [
+      invoiceId,
+    ]);
+    if (!r.rows.length) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const lines = await ciLoadLines(pool, invoiceId);
+    const actions = await ciLoadActions(pool, invoiceId);
+    res.json(ciRowToJson(r.rows[0], lines, actions));
+  }
+
+  app.post('/cont-invoices/:id/submit', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'id and userId required' });
+      }
+      const user = await ciGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!ciIsQs(user) && !ciIsPrimaryAdmin(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const comment = ciStr(b.comment ?? b.notes);
+      const existing = await pool.query(
+        'SELECT id, status FROM cont_invoices WHERE id = $1',
+        [id],
+      );
+      if (!existing.rows.length) {
+        return res.status(404).json({ error: 'not found' });
+      }
+      if (String(existing.rows[0].status) !== 'draft') {
+        return res.status(400).json({ error: 'invalid_status' });
+      }
+      const assignee = await ciAssigneeUser(pool, CI_ACTOR_AH_AMIN_ID);
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE cont_invoices SET
+          status = 'pending_price',
+          return_reason = '',
+          current_assignee_user_id = $1,
+          current_assignee_user_name = $2,
+          updated_at = NOW()
+         WHERE id = $3`,
+        [assignee.id, assignee.name, id],
+      );
+      await ciLogAction(client, id, user, 'submit', comment);
+      await client.query('COMMIT');
+      await ciWorkflowRespond(pool, id, res);
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+      res.status(500).json({ error: String(e.message) });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post('/cont-invoices/:id/forward', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'id and userId required' });
+      }
+      const user = await ciGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      const comment = ciStr(b.comment ?? b.notes);
+      const existing = await pool.query(
+        'SELECT id, status FROM cont_invoices WHERE id = $1',
+        [id],
+      );
+      if (!existing.rows.length) {
+        return res.status(404).json({ error: 'not found' });
+      }
+      const status = String(existing.rows[0].status);
+      let newStatus;
+      let assigneeId;
+      if (status === 'pending_price') {
+        if (!ciIsAhAmin(user) && !ciIsPrimaryAdmin(user, req)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        newStatus = 'pending_pm';
+        assigneeId = CI_ACTOR_PM_ID;
+      } else if (status === 'pending_pm') {
+        if (!ciIsPm(user) && !ciIsPrimaryAdmin(user, req)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        newStatus = 'pending_om';
+        assigneeId = CI_ACTOR_OM_ID;
+      } else {
+        return res.status(400).json({ error: 'invalid_status' });
+      }
+      const assignee = await ciAssigneeUser(pool, assigneeId);
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE cont_invoices SET
+          status = $1,
+          return_reason = '',
+          current_assignee_user_id = $2,
+          current_assignee_user_name = $3,
+          updated_at = NOW()
+         WHERE id = $4`,
+        [newStatus, assignee.id, assignee.name, id],
+      );
+      await ciLogAction(client, id, user, 'forward', comment);
+      await client.query('COMMIT');
+      await ciWorkflowRespond(pool, id, res);
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+      res.status(500).json({ error: String(e.message) });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post('/cont-invoices/:id/return', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'id and userId required' });
+      }
+      const user = await ciGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!ciIsOm(user) && !ciIsPrimaryAdmin(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const comment = ciStr(b.comment ?? b.notes ?? b.return_reason);
+      if (!comment) {
+        return res.status(400).json({ error: 'comment_required' });
+      }
+      const existing = await pool.query(
+        'SELECT id, status FROM cont_invoices WHERE id = $1',
+        [id],
+      );
+      if (!existing.rows.length) {
+        return res.status(404).json({ error: 'not found' });
+      }
+      if (String(existing.rows[0].status) !== 'pending_om') {
+        return res.status(400).json({ error: 'invalid_status' });
+      }
+      const assignee = await ciAssigneeUser(pool, CI_ACTOR_PM_ID);
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE cont_invoices SET
+          status = 'pending_pm',
+          return_reason = $1,
+          current_assignee_user_id = $2,
+          current_assignee_user_name = $3,
+          updated_at = NOW()
+         WHERE id = $4`,
+        [comment, assignee.id, assignee.name, id],
+      );
+      await ciLogAction(client, id, user, 'return', comment);
+      await client.query('COMMIT');
+      await ciWorkflowRespond(pool, id, res);
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+      res.status(500).json({ error: String(e.message) });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post('/cont-invoices/:id/approve', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'id and userId required' });
+      }
+      const user = await ciGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!ciIsOm(user) && !ciIsPrimaryAdmin(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const comment = ciStr(b.comment ?? b.notes);
+      const existing = await pool.query(
+        'SELECT id, status FROM cont_invoices WHERE id = $1',
+        [id],
+      );
+      if (!existing.rows.length) {
+        return res.status(404).json({ error: 'not found' });
+      }
+      if (String(existing.rows[0].status) !== 'pending_om') {
+        return res.status(400).json({ error: 'invalid_status' });
+      }
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE cont_invoices SET
+          status = 'approved',
+          return_reason = '',
+          current_assignee_user_id = NULL,
+          current_assignee_user_name = '',
+          approved_at = NOW(),
+          updated_at = NOW()
+         WHERE id = $1`,
+        [id],
+      );
+      await ciLogAction(client, id, user, 'approve', comment);
+      await client.query('COMMIT');
+      await ciWorkflowRespond(pool, id, res);
+    } catch (e) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+      res.status(500).json({ error: String(e.message) });
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post('/cont-invoices/:id/mark-paid', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'id and userId required' });
+      }
+      const user = await ciGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!ciIsAhAmin(user) && !ciIsPrimaryAdmin(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const comment = ciStr(b.comment ?? b.notes);
+      const existing = await pool.query(
+        'SELECT id, status FROM cont_invoices WHERE id = $1',
+        [id],
+      );
+      if (!existing.rows.length) {
+        return res.status(404).json({ error: 'not found' });
+      }
+      if (String(existing.rows[0].status) !== 'approved') {
+        return res.status(400).json({ error: 'invalid_status' });
+      }
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE cont_invoices SET
+          status = 'paid',
+          paid_at = NOW(),
+          paid_by_user_id = $1,
+          paid_by_user_name = $2,
+          current_assignee_user_id = NULL,
+          current_assignee_user_name = '',
+          updated_at = NOW()
+         WHERE id = $3`,
+        [userId, user.name || '', id],
+      );
+      await ciLogAction(client, id, user, 'mark_paid', comment);
+      await client.query('COMMIT');
+      await ciWorkflowRespond(pool, id, res);
     } catch (e) {
       try {
         await client.query('ROLLBACK');
@@ -1113,7 +1691,9 @@ function registerContInvoicesRoutes(app, pool) {
       }
       const user = await ciGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
-      if (!ciIsAppAdmin(user)) return res.status(403).json({ error: 'forbidden' });
+      if (!ciCanDelete(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
 
       const r = await pool.query(
         'DELETE FROM cont_invoices WHERE id = $1 RETURNING id',

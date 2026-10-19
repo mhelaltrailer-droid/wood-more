@@ -3582,6 +3582,87 @@ class ApiStorageService {
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
+  Future<ContInvoiceModel> _contInvoicePostAction({
+    required String path,
+    required int id,
+    required int userId,
+    String? comment,
+  }) async {
+    final uri = Uri.parse(_path('cont-invoices/$id/$path'));
+    final r = await http.post(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode({
+        'userId': userId,
+        if (comment != null && comment.trim().isNotEmpty) 'comment': comment.trim(),
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ContInvoiceModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ContInvoiceModel> submitContInvoice({
+    required int id,
+    required int userId,
+    String? comment,
+  }) =>
+      _contInvoicePostAction(
+        path: 'submit',
+        id: id,
+        userId: userId,
+        comment: comment,
+      );
+
+  Future<ContInvoiceModel> forwardContInvoice({
+    required int id,
+    required int userId,
+    String? comment,
+  }) =>
+      _contInvoicePostAction(
+        path: 'forward',
+        id: id,
+        userId: userId,
+        comment: comment,
+      );
+
+  Future<ContInvoiceModel> returnContInvoice({
+    required int id,
+    required int userId,
+    required String comment,
+  }) =>
+      _contInvoicePostAction(
+        path: 'return',
+        id: id,
+        userId: userId,
+        comment: comment,
+      );
+
+  Future<ContInvoiceModel> approveContInvoice({
+    required int id,
+    required int userId,
+    String? comment,
+  }) =>
+      _contInvoicePostAction(
+        path: 'approve',
+        id: id,
+        userId: userId,
+        comment: comment,
+      );
+
+  Future<ContInvoiceModel> markContInvoicePaid({
+    required int id,
+    required int userId,
+    String? comment,
+  }) =>
+      _contInvoicePostAction(
+        path: 'mark-paid',
+        id: id,
+        userId: userId,
+        comment: comment,
+      );
+
   /// خصومات معلّقة غير مربوطة بمقاول (Admin).
   Future<List<Map<String, dynamic>>> getContInvoicePendingUnlinked(
     int userId,

@@ -31,6 +31,29 @@ async function getUser(pool, userId, req) {
   return applyViewAsToUser(r.rows[0] || null, req);
 }
 
+function canReadInvoiceStructure(user) {
+  if (!user) return false;
+  if (isAppAdmin(user)) return true;
+  const email = isStr(user.email).toLowerCase();
+  const role = isStr(user.role);
+  // قراءون Cont-Invoices يحتاجون الشجرة أثناء التداول
+  if (
+    email === 'qs-user' ||
+    email === 'qs@app.com' ||
+    email === 'ah-amin' ||
+    email === 'abdelrhmanellaithy828@gmail.com' ||
+    email === 'shams'
+  ) {
+    return true;
+  }
+  return (
+    role === 'qs' ||
+    role === 'accountant' ||
+    role === 'projects_manager' ||
+    role === 'operation_manager'
+  );
+}
+
 async function requireAppAdmin(pool, req, res) {
   const userId = parseInt(
     String(req.query.userId || req.body?.userId || ''),
@@ -46,6 +69,27 @@ async function requireAppAdmin(pool, req, res) {
     return null;
   }
   if (!isAppAdmin(user)) {
+    res.status(403).json({ error: 'forbidden' });
+    return null;
+  }
+  return user;
+}
+
+async function requireInvoiceStructureReader(pool, req, res) {
+  const userId = parseInt(
+    String(req.query.userId || req.body?.userId || ''),
+    10,
+  );
+  if (Number.isNaN(userId)) {
+    res.status(400).json({ error: 'userId required' });
+    return null;
+  }
+  const user = await getUser(pool, userId, req);
+  if (!user) {
+    res.status(404).json({ error: 'user not found' });
+    return null;
+  }
+  if (!canReadInvoiceStructure(user)) {
     res.status(403).json({ error: 'forbidden' });
     return null;
   }
@@ -214,10 +258,10 @@ async function ensureInvoiceStructureTables(pool) {
 }
 
 function registerInvoiceStructureRoutes(app, pool) {
-  /** حالة هيكلة مستخلصات لمشروع + الشجرة */
+  /** حالة هيكلة مستخلصات لمشروع + الشجرة (قراءة: Admin + أدوار Cont-Invoices) */
   app.get('/invoice-structure', async (req, res) => {
     try {
-      const user = await requireAppAdmin(pool, req, res);
+      const user = await requireInvoiceStructureReader(pool, req, res);
       if (!user) return;
 
       const projectId = parseInt(String(req.query.projectId || ''), 10);
@@ -262,8 +306,18 @@ function registerInvoiceStructureRoutes(app, pool) {
   /** تعيين نوع القياس مرة واحدة (flooring | wpc) */
   app.post('/invoice-structure/measure-type', async (req, res) => {
     try {
-      const user = await requireAppAdmin(pool, req, res);
+      // أول اعتماد للنوع: Admin أو QS (من Cont-Invoices)
+      const user = await requireInvoiceStructureReader(pool, req, res);
       if (!user) return;
+      const email = isStr(user.email).toLowerCase();
+      const canSet =
+        isAppAdmin(user) ||
+        email === 'qs-user' ||
+        email === 'qs@app.com' ||
+        primaryAdminPowersActiveForUser(user, req);
+      if (!canSet) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
 
       const projectId = parseInt(
         String(req.body.projectId ?? req.body.project_id ?? ''),

@@ -1,3 +1,5 @@
+import '../core/cont_invoices_constants.dart';
+
 double _ciNum(dynamic v, [double fallback = 0]) {
   if (v == null) return fallback;
   if (v is num) return v.toDouble();
@@ -173,6 +175,45 @@ class ContInvoiceLineModel {
   }
 }
 
+class ContInvoiceActionModel {
+  final int? id;
+  final int? invoiceId;
+  final int? actorUserId;
+  final String actorUserName;
+  final String action;
+  final String comment;
+  final DateTime? createdAt;
+
+  const ContInvoiceActionModel({
+    this.id,
+    this.invoiceId,
+    this.actorUserId,
+    this.actorUserName = '',
+    this.action = '',
+    this.comment = '',
+    this.createdAt,
+  });
+
+  factory ContInvoiceActionModel.fromMap(Map<String, dynamic> m) {
+    DateTime? parseDate(dynamic v) {
+      if (v == null) return null;
+      if (v is DateTime) return v;
+      return DateTime.tryParse(v.toString());
+    }
+
+    return ContInvoiceActionModel(
+      id: _ciInt(m['id']),
+      invoiceId: _ciInt(m['invoice_id'] ?? m['invoiceId']),
+      actorUserId: _ciInt(m['actor_user_id'] ?? m['actorUserId']),
+      actorUserName:
+          (m['actor_user_name'] ?? m['actorUserName'] ?? '').toString(),
+      action: (m['action'] ?? '').toString(),
+      comment: (m['comment'] ?? '').toString(),
+      createdAt: parseDate(m['created_at'] ?? m['createdAt']),
+    );
+  }
+}
+
 class ContInvoiceModel {
   final int? id;
   final int? contractorId;
@@ -187,11 +228,20 @@ class ContInvoiceModel {
   final double amountDue;
   final String notes;
   final String status;
+  final String statusLabelAr;
+  final String returnReason;
+  final int? currentAssigneeUserId;
+  final String currentAssigneeUserName;
+  final DateTime? approvedAt;
+  final DateTime? paidAt;
+  final int? paidByUserId;
+  final String paidByUserName;
   final int? createdByUserId;
   final String createdByUserName;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final List<ContInvoiceLineModel> lines;
+  final List<ContInvoiceActionModel> actions;
 
   const ContInvoiceModel({
     this.id,
@@ -207,11 +257,20 @@ class ContInvoiceModel {
     this.amountDue = 0,
     this.notes = '',
     this.status = 'draft',
+    this.statusLabelAr = '',
+    this.returnReason = '',
+    this.currentAssigneeUserId,
+    this.currentAssigneeUserName = '',
+    this.approvedAt,
+    this.paidAt,
+    this.paidByUserId,
+    this.paidByUserName = '',
     this.createdByUserId,
     this.createdByUserName = '',
     this.createdAt,
     this.updatedAt,
     this.lines = const [],
+    this.actions = const [],
   });
 
   double get computedTotal => lines.fold<double>(
@@ -238,7 +297,16 @@ class ContInvoiceModel {
     double? amountDue,
     String? notes,
     String? status,
+    String? statusLabelAr,
+    String? returnReason,
+    int? currentAssigneeUserId,
+    String? currentAssigneeUserName,
+    DateTime? approvedAt,
+    DateTime? paidAt,
+    int? paidByUserId,
+    String? paidByUserName,
     List<ContInvoiceLineModel>? lines,
+    List<ContInvoiceActionModel>? actions,
   }) {
     return ContInvoiceModel(
       id: id ?? this.id,
@@ -254,11 +322,22 @@ class ContInvoiceModel {
       amountDue: amountDue ?? this.amountDue,
       notes: notes ?? this.notes,
       status: status ?? this.status,
+      statusLabelAr: statusLabelAr ?? this.statusLabelAr,
+      returnReason: returnReason ?? this.returnReason,
+      currentAssigneeUserId:
+          currentAssigneeUserId ?? this.currentAssigneeUserId,
+      currentAssigneeUserName:
+          currentAssigneeUserName ?? this.currentAssigneeUserName,
+      approvedAt: approvedAt ?? this.approvedAt,
+      paidAt: paidAt ?? this.paidAt,
+      paidByUserId: paidByUserId ?? this.paidByUserId,
+      paidByUserName: paidByUserName ?? this.paidByUserName,
       createdByUserId: createdByUserId,
       createdByUserName: createdByUserName,
       createdAt: createdAt,
       updatedAt: updatedAt,
       lines: lines ?? this.lines,
+      actions: actions ?? this.actions,
     );
   }
 
@@ -301,6 +380,20 @@ class ContInvoiceModel {
             .toList()
         : <ContInvoiceLineModel>[];
 
+    final rawActions = m['actions'];
+    final actions = rawActions is List
+        ? rawActions
+            .map(
+              (e) => ContInvoiceActionModel.fromMap(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
+            .toList()
+        : <ContInvoiceActionModel>[];
+
+    final status = (m['status'] ?? 'draft').toString();
+    final statusLabelRaw = m['status_label_ar'] ?? m['statusLabelAr'];
+
     return ContInvoiceModel(
       id: _ciInt(m['id']),
       contractorId: _ciInt(m['contractor_id'] ?? m['contractorId']),
@@ -316,7 +409,24 @@ class ContInvoiceModel {
       totalAmount: _ciNum(m['total_amount'] ?? m['totalAmount']),
       amountDue: _ciNum(m['amount_due'] ?? m['amountDue']),
       notes: (m['notes'] ?? '').toString(),
-      status: (m['status'] ?? 'draft').toString(),
+      status: status,
+      statusLabelAr: statusLabelRaw != null &&
+              statusLabelRaw.toString().isNotEmpty
+          ? statusLabelRaw.toString()
+          : contInvoiceStatusLabelAr(status),
+      returnReason: (m['return_reason'] ?? m['returnReason'] ?? '').toString(),
+      currentAssigneeUserId: _ciInt(
+        m['current_assignee_user_id'] ?? m['currentAssigneeUserId'],
+      ),
+      currentAssigneeUserName: (m['current_assignee_user_name'] ??
+              m['currentAssigneeUserName'] ??
+              '')
+          .toString(),
+      approvedAt: parseDate(m['approved_at'] ?? m['approvedAt']),
+      paidAt: parseDate(m['paid_at'] ?? m['paidAt']),
+      paidByUserId: _ciInt(m['paid_by_user_id'] ?? m['paidByUserId']),
+      paidByUserName:
+          (m['paid_by_user_name'] ?? m['paidByUserName'] ?? '').toString(),
       createdByUserId: _ciInt(m['created_by_user_id'] ?? m['createdByUserId']),
       createdByUserName:
           (m['created_by_user_name'] ?? m['createdByUserName'] ?? '')
@@ -324,6 +434,7 @@ class ContInvoiceModel {
       createdAt: parseDate(m['created_at'] ?? m['createdAt']),
       updatedAt: parseDate(m['updated_at'] ?? m['updatedAt']),
       lines: lines,
+      actions: actions,
     );
   }
 }

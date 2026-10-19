@@ -12,6 +12,8 @@ import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
 
+enum _ContLineEditMode { none, priceOnly, full }
+
 /// الشاشة 2: بنود التنفيذ + الأربعة اليدوية بعد اختيار المواقع من هيكلة المستخلصات.
 class ContInvoicesWorkScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -114,11 +116,80 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   final _otherDeductionsCtrl = TextEditingController(text: '0');
   final _notesCtrl = TextEditingController();
 
+  String _status = contStatusDraft;
+  String _returnReason = '';
+  List<ContInvoiceActionModel> _actions = const [];
+  bool _workflowBusy = false;
+  int? _invoiceId;
+
+  int? get _effectiveInvoiceId => _invoiceId ?? widget.existing?.id;
+
   bool get _isFlooring =>
       (_measureType ?? invoiceStructureMeasureFlooring) ==
       invoiceStructureMeasureFlooring;
   bool get _isApi => _storage is ApiStorageService;
   ApiStorageService get _api => _storage as ApiStorageService;
+
+  _ContLineEditMode get _lineEditMode {
+    if (widget.currentUser.isPrimaryAppAdmin) return _ContLineEditMode.full;
+    final email = widget.currentUser.email;
+    switch (_status) {
+      case contStatusDraft:
+        return isContInvoicesQsEmail(email)
+            ? _ContLineEditMode.full
+            : _ContLineEditMode.none;
+      case contStatusPendingPrice:
+        return isContInvoicesAhAminEmail(email)
+            ? _ContLineEditMode.priceOnly
+            : _ContLineEditMode.none;
+      case contStatusPendingPm:
+        return isContInvoicesPmEmail(email)
+            ? _ContLineEditMode.full
+            : _ContLineEditMode.none;
+      default:
+        return _ContLineEditMode.none;
+    }
+  }
+
+  bool get _canSaveLines => _lineEditMode != _ContLineEditMode.none;
+
+  bool get _canSubmit =>
+      _status == contStatusDraft &&
+      _effectiveInvoiceId != null &&
+      (isContInvoicesQsEmail(widget.currentUser.email) ||
+          widget.currentUser.isPrimaryAppAdmin);
+
+  bool get _canForward {
+    if (_effectiveInvoiceId == null) return false;
+    final email = widget.currentUser.email;
+    if (_status == contStatusPendingPrice) {
+      return isContInvoicesAhAminEmail(email) ||
+          widget.currentUser.isPrimaryAppAdmin;
+    }
+    if (_status == contStatusPendingPm) {
+      return isContInvoicesPmEmail(email) ||
+          widget.currentUser.isPrimaryAppAdmin;
+    }
+    return false;
+  }
+
+  bool get _canReturn =>
+      _status == contStatusPendingOm &&
+      _effectiveInvoiceId != null &&
+      (isContInvoicesOmEmail(widget.currentUser.email) ||
+          widget.currentUser.isPrimaryAppAdmin);
+
+  bool get _canApprove =>
+      _status == contStatusPendingOm &&
+      _effectiveInvoiceId != null &&
+      (isContInvoicesOmEmail(widget.currentUser.email) ||
+          widget.currentUser.isPrimaryAppAdmin);
+
+  bool get _canMarkPaid =>
+      _status == contStatusApproved &&
+      _effectiveInvoiceId != null &&
+      (isContInvoicesAhAminEmail(widget.currentUser.email) ||
+          widget.currentUser.isPrimaryAppAdmin);
 
   String get _resolvedContractType {
     if (_contractTypeChoice == contInvoicesContractTypeOther) {
@@ -207,6 +278,10 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   }
 
   void _applyExisting(ContInvoiceModel inv) {
+    _invoiceId = inv.id;
+    _status = inv.status;
+    _returnReason = inv.returnReason;
+    _actions = inv.actions;
     _statementDate = inv.statementDate ?? DateTime.now();
     final ct = inv.contractType.trim();
     if (ct.isEmpty || ct == contInvoicesDefaultContractType) {
@@ -821,17 +896,86 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
       double.parse((_grandTotal - _previouslyPaid - _otherDeductions)
           .toStringAsFixed(2));
 
-  Future<void> _save() async {
+  Future<void> _runWorkflow(
+    Future<ContInvoiceModel> Function() call, {
+    bool popOnSuccess = true,
+  }) async {
+    setState(() => _workflowBusy = true);
+    try {
+      final updated = await call();
+      if (!mounted) return;
+      _applyExisting(updated);
+      setState(() {});
+      if (popOnSuccess) {
+        Navigator.of(context).pop(updated);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم تنفيذ الإجراء')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('فشل الإجراء: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _workflowBusy = false);
+    }
+  }
+
+  Future<void> _confirmReturn() async {
+    final commentC = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('إرجاع لمدير المشروعات'),
+        content: TextField(
+          controller: commentC,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'ملاحظات الإرجاع (مطلوب)',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (commentC.text.trim().isEmpty) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('إرجاع'),
+          ),
+        ],
+      ),
+    );
+    final id = _effectiveInvoiceId;
+    if (ok != true || id == null) return;
+    await _runWorkflow(
+      () => _api.returnContInvoice(
+        id: id,
+        userId: widget.currentUser.id,
+        comment: commentC.text.trim(),
+      ),
+    );
+  }
+
+  Future<ContInvoiceModel?> _persistDraft({bool pop = true}) async {
+    if (!_canSaveLines) return null;
     if (_sections.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('أضف موقعاً واحداً على الأقل')),
       );
-      return;
+      return null;
     }
     setState(() => _saving = true);
     try {
       final invoice = ContInvoiceModel(
-        id: widget.existing?.id,
+        id: _effectiveInvoiceId,
         contractorId: widget.contractor.id,
         contractorName: widget.contractor.name,
         projectId: widget.project.id,
@@ -841,12 +985,13 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         previouslyPaid: _previouslyPaid,
         otherDeductions: _otherDeductions,
         notes: _notesCtrl.text.trim(),
+        status: _status,
         lines: _collectLines(),
       );
       final ContInvoiceModel saved;
-      if (widget.existing?.id != null) {
+      if (_effectiveInvoiceId != null) {
         saved = await _api.updateContInvoice(
-          id: widget.existing!.id!,
+          id: _effectiveInvoiceId!,
           userId: widget.currentUser.id,
           invoice: invoice,
         );
@@ -856,16 +1001,35 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
           invoice: invoice,
         );
       }
-      if (!mounted) return;
-      Navigator.of(context).pop(saved);
+      if (!mounted) return null;
+      _applyExisting(saved);
+      if (pop) Navigator.of(context).pop(saved);
+      return saved;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return null;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('فشل الحفظ: $e')),
       );
+      return null;
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<void> _save() async {
+    await _persistDraft(pop: true);
+  }
+
+  Future<void> _saveThenWorkflow(
+    Future<ContInvoiceModel> Function(int invoiceId) workflow,
+  ) async {
+    final saved = await _persistDraft(pop: false);
+    final id = saved?.id ?? _effectiveInvoiceId;
+    if (id == null) return;
+    await _runWorkflow(
+      () => workflow(id),
+      popOnSuccess: true,
+    );
   }
 
   Widget _manualChip(String label, IconData icon, VoidCallback onTap) {
@@ -918,7 +1082,11 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     required TextEditingController controller,
     ValueChanged<String>? onChanged,
     List<TextInputFormatter>? inputFormatters,
+    bool readOnly = false,
   }) {
+    if (readOnly) {
+      return _metricReadonlyBox(label: label, value: controller.text);
+    }
     return _metricShell(
       label: label,
       child: TextField(
@@ -983,6 +1151,9 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   }
 
   Widget _buildSection(_SectionState s) {
+    final mode = _lineEditMode;
+    final readOnly = mode == _ContLineEditMode.none;
+    final priceOnly = mode == _ContLineEditMode.priceOnly;
     final baseQty = _parse(s.baseQty.text);
     final unitPrice = _parse(s.unitPrice.text);
     final percent = _parse(s.currentPercent.text).clamp(0, 100).toDouble();
@@ -1011,13 +1182,14 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                     ),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.red),
-                  onPressed: () => setState(() {
-                    s.dispose();
-                    _sections.remove(s);
-                  }),
-                ),
+                if (!readOnly && !priceOnly)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    onPressed: () => setState(() {
+                      s.dispose();
+                      _sections.remove(s);
+                    }),
+                  ),
               ],
             ),
             const SizedBox(height: 8),
@@ -1037,11 +1209,13 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                     label: 'عدد الأمتار',
                     controller: s.baseQty,
                     onChanged: (_) => setState(() {}),
+                    readOnly: readOnly || priceOnly,
                   ),
                 _metricFieldBox(
                   label: _isFlooring ? 'سعر المتر' : 'قيمة الـ Unit',
                   controller: s.unitPrice,
                   onChanged: (_) => setState(() {}),
+                  readOnly: readOnly,
                 ),
                 _metricReadonlyBox(
                   label: 'النسبة السابقة',
@@ -1056,6 +1230,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                     _MaxValueInputFormatter(100),
                   ],
+                  readOnly: readOnly || priceOnly,
                 ),
                 _metricReadonlyBox(
                   label: 'المستحق لهذه الفاتورة',
@@ -1066,33 +1241,35 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _manualChip(
-                  'عطلات',
-                  Icons.add_circle_outline,
-                  () => _addManual(s, contLineKindHoliday),
-                ),
-                _manualChip(
-                  'انتقالات',
-                  Icons.directions_car,
-                  () => _addManual(s, contLineKindTransport),
-                ),
-                _manualChip(
-                  'خصم',
-                  Icons.remove_circle_outline,
-                  () => _addManual(s, contLineKindDeduction),
-                ),
-                _manualChip(
-                  'اضافة يوميات',
-                  Icons.notes,
-                  () => _addManual(s, contLineKindNoteOnOther),
-                ),
-              ],
-            ),
+            if (!readOnly && !priceOnly) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _manualChip(
+                    'عطلات',
+                    Icons.add_circle_outline,
+                    () => _addManual(s, contLineKindHoliday),
+                  ),
+                  _manualChip(
+                    'انتقالات',
+                    Icons.directions_car,
+                    () => _addManual(s, contLineKindTransport),
+                  ),
+                  _manualChip(
+                    'خصم',
+                    Icons.remove_circle_outline,
+                    () => _addManual(s, contLineKindDeduction),
+                  ),
+                  _manualChip(
+                    'اضافة يوميات',
+                    Icons.notes,
+                    () => _addManual(s, contLineKindNoteOnOther),
+                  ),
+                ],
+              ),
+            ],
             if (s.manuals.isNotEmpty) ...[
               const SizedBox(height: 8),
               ...List.generate(s.manuals.length, (i) {
@@ -1121,13 +1298,14 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                               : Colors.green.shade800,
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: () => setState(() {
-                          m.dispose();
-                          s.manuals.removeAt(i);
-                        }),
-                      ),
+                      if (!readOnly && !priceOnly)
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => setState(() {
+                            m.dispose();
+                            s.manuals.removeAt(i);
+                          }),
+                        ),
                     ],
                   ),
                 );
@@ -1142,23 +1320,27 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.existing?.id != null;
+    final headerReadOnly = _lineEditMode != _ContLineEditMode.full;
+    final statusLabel = contInvoiceStatusLabelAr(_status);
+    final busy = _saving || _workflowBusy;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
           title: Text(isEdit ? 'تعديل مستخلص' : 'مستخلص مقاول'),
           actions: [
-            TextButton.icon(
-              onPressed: _saving || _loading ? null : _save,
-              icon: _saving
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.save_outlined),
-              label: const Text('حفظ'),
-            ),
+            if (_canSaveLines)
+              TextButton.icon(
+                onPressed: busy || _loading ? null : _save,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: const Text('حفظ'),
+              ),
           ],
         ),
         body: _loading
@@ -1168,6 +1350,29 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                 : ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
+                      Card(
+                        color: const Color(0xFFE3F2FD),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                'الحالة: $statusLabel',
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              if (_returnReason.trim().isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  'سبب الإرجاع: ${_returnReason.trim()}',
+                                  style: TextStyle(color: Colors.orange.shade900),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
                       Card(
                         color: const Color(0xFFE8F5E9),
                         child: Padding(
@@ -1213,26 +1418,30 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                                     ),
                                   )
                                   .toList(),
-                              onChanged: (v) {
-                                if (v == null) return;
-                                setState(() => _contractTypeChoice = v);
-                              },
+                              onChanged: headerReadOnly
+                                  ? null
+                                  : (v) {
+                                      if (v == null) return;
+                                      setState(() => _contractTypeChoice = v);
+                                    },
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: InkWell(
-                              onTap: () async {
-                                final d = await showDatePicker(
-                                  context: context,
-                                  initialDate: _statementDate,
-                                  firstDate: DateTime(2020),
-                                  lastDate: DateTime(2100),
-                                );
-                                if (d != null) {
-                                  setState(() => _statementDate = d);
-                                }
-                              },
+                              onTap: headerReadOnly
+                                  ? null
+                                  : () async {
+                                      final d = await showDatePicker(
+                                        context: context,
+                                        initialDate: _statementDate,
+                                        firstDate: DateTime(2020),
+                                        lastDate: DateTime(2100),
+                                      );
+                                      if (d != null) {
+                                        setState(() => _statementDate = d);
+                                      }
+                                    },
                               child: InputDecorator(
                                 decoration: const InputDecoration(
                                   labelText: 'تاريخ المستخلص',
@@ -1252,18 +1461,21 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                         const SizedBox(height: 12),
                         TextField(
                           controller: _contractTypeOtherCtrl,
+                          readOnly: headerReadOnly,
                           decoration: const InputDecoration(
                             labelText: 'اكتب نوع المقاولة',
                             border: OutlineInputBorder(),
                           ),
                         ),
                       ],
-                      const SizedBox(height: 12),
-                      FilledButton.tonalIcon(
-                        onPressed: _addLocation,
-                        icon: const Icon(Icons.account_tree_outlined),
-                        label: const Text('إضافة موقع'),
-                      ),
+                      if (_lineEditMode == _ContLineEditMode.full) ...[
+                        const SizedBox(height: 12),
+                        FilledButton.tonalIcon(
+                          onPressed: _addLocation,
+                          icon: const Icon(Icons.account_tree_outlined),
+                          label: const Text('إضافة موقع'),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       if (_sections.isEmpty)
                         const Card(
@@ -1289,6 +1501,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                                   Expanded(
                                     child: TextField(
                                       controller: _previouslyPaidCtrl,
+                                      readOnly: headerReadOnly,
                                       decoration: const InputDecoration(
                                         labelText: 'السابق صرفه',
                                         border: OutlineInputBorder(),
@@ -1297,13 +1510,16 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                                           const TextInputType.numberWithOptions(
                                         decimal: true,
                                       ),
-                                      onChanged: (_) => setState(() {}),
+                                      onChanged: headerReadOnly
+                                          ? null
+                                          : (_) => setState(() {}),
                                     ),
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: TextField(
                                       controller: _otherDeductionsCtrl,
+                                      readOnly: headerReadOnly,
                                       decoration: const InputDecoration(
                                         labelText: 'خصومات أخرى',
                                         border: OutlineInputBorder(),
@@ -1312,7 +1528,9 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                                           const TextInputType.numberWithOptions(
                                         decimal: true,
                                       ),
-                                      onChanged: (_) => setState(() {}),
+                                      onChanged: headerReadOnly
+                                          ? null
+                                          : (_) => setState(() {}),
                                     ),
                                   ),
                                 ],
@@ -1331,21 +1549,137 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                       TextField(
                         controller: _notesCtrl,
                         maxLines: 2,
+                        readOnly: headerReadOnly,
                         decoration: const InputDecoration(
                           labelText: 'ملاحظات',
                           border: OutlineInputBorder(),
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      FilledButton.icon(
-                        onPressed: _saving ? null : _save,
-                        icon: const Icon(Icons.save),
-                        label: Text(isEdit ? 'تحديث المسودة' : 'حفظ المسودة'),
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(48),
-                          backgroundColor: const Color(0xFF1B5E20),
+                      if (_actions.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        const Text(
+                          'سجل الإجراءات',
+                          style: TextStyle(fontWeight: FontWeight.bold),
                         ),
-                      ),
+                        const SizedBox(height: 8),
+                        ..._actions.reversed.take(8).map(
+                              (a) => ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  '${a.action} — ${a.actorUserName}',
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                                subtitle: a.comment.trim().isEmpty
+                                    ? null
+                                    : Text(a.comment),
+                              ),
+                            ),
+                      ],
+                      const SizedBox(height: 20),
+                      if (_canSaveLines)
+                        FilledButton.icon(
+                          onPressed: busy ? null : _save,
+                          icon: const Icon(Icons.save),
+                          label: Text(
+                            _status == contStatusDraft
+                                ? (isEdit ? 'تحديث المسودة' : 'حفظ المسودة')
+                                : 'حفظ التعديلات',
+                          ),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                            backgroundColor: const Color(0xFF1B5E20),
+                          ),
+                        ),
+                      if (_canSubmit) ...[
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: busy
+                              ? null
+                              : () => _saveThenWorkflow(
+                                    (id) => _api.submitContInvoice(
+                                      id: id,
+                                      userId: widget.currentUser.id,
+                                    ),
+                                  ),
+                          icon: const Icon(Icons.send),
+                          label: const Text('إرسال لمراجعة السعر'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                        ),
+                      ],
+                      if (_canForward) ...[
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: busy
+                              ? null
+                              : () => _saveThenWorkflow(
+                                    (id) => _api.forwardContInvoice(
+                                      id: id,
+                                      userId: widget.currentUser.id,
+                                    ),
+                                  ),
+                          icon: const Icon(Icons.arrow_forward),
+                          label: Text(
+                            _status == contStatusPendingPrice
+                                ? 'إرسال لمدير المشروعات'
+                                : 'إرسال لاعتماد العمليات',
+                          ),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                        ),
+                      ],
+                      if (_canReturn) ...[
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: busy ? null : _confirmReturn,
+                          icon: const Icon(Icons.undo),
+                          label: const Text('إرجاع لمدير المشروعات'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                        ),
+                      ],
+                      if (_canApprove) ...[
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: busy
+                              ? null
+                              : () => _runWorkflow(
+                                    () => _api.approveContInvoice(
+                                      id: _effectiveInvoiceId!,
+                                      userId: widget.currentUser.id,
+                                    ),
+                                  ),
+                          icon: const Icon(Icons.check_circle),
+                          label: const Text('اعتماد نهائي'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                            backgroundColor: Colors.teal.shade700,
+                          ),
+                        ),
+                      ],
+                      if (_canMarkPaid) ...[
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: busy
+                              ? null
+                              : () => _runWorkflow(
+                                    () => _api.markContInvoicePaid(
+                                      id: _effectiveInvoiceId!,
+                                      userId: widget.currentUser.id,
+                                    ),
+                                  ),
+                          icon: const Icon(Icons.payments),
+                          label: const Text('تسجيل تم الصرف'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                            backgroundColor: Colors.indigo,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 40),
                     ],
                   ),

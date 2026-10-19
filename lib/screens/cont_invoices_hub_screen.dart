@@ -29,6 +29,36 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
   bool _loading = true;
   String? _error;
   List<ContInvoiceModel> _items = const [];
+  bool _mineOnly = false;
+
+  bool get _canCreate =>
+      isContInvoicesQsEmail(widget.currentUser.email) ||
+      widget.currentUser.isPrimaryAppAdmin;
+
+  bool get _canDelete => widget.currentUser.isPrimaryAppAdmin;
+
+  List<ContInvoiceModel> get _visibleItems {
+    if (!_mineOnly) return _items;
+    final uid = widget.currentUser.id;
+    return _items.where((item) {
+      if (item.currentAssigneeUserId == uid) return true;
+      final email = widget.currentUser.email;
+      switch (item.status) {
+        case contStatusDraft:
+          return isContInvoicesQsEmail(email);
+        case contStatusPendingPrice:
+          return isContInvoicesAhAminEmail(email);
+        case contStatusPendingPm:
+          return isContInvoicesPmEmail(email);
+        case contStatusPendingOm:
+          return isContInvoicesOmEmail(email);
+        case contStatusApproved:
+          return isContInvoicesAhAminEmail(email);
+        default:
+          return false;
+      }
+    }).toList();
+  }
 
   @override
   void initState() {
@@ -45,8 +75,7 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
       if (_storage is! ApiStorageService) {
         throw Exception('Cont-Invoices يتطلب الاتصال بالخادم');
       }
-      final list = await (_storage as ApiStorageService)
-          .getContInvoices(widget.currentUser.id);
+      final list = await _storage.getContInvoices(widget.currentUser.id);
       if (!mounted) return;
       setState(() {
         _items = list;
@@ -149,11 +178,13 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
             ),
           ],
         ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: () => _openForm(),
-          icon: const Icon(Icons.add),
-          label: const Text('مستخلص جديد'),
-        ),
+        floatingActionButton: _canCreate
+            ? FloatingActionButton.extended(
+                onPressed: () => _openForm(),
+                icon: const Icon(Icons.add),
+                label: const Text('مستخلص جديد'),
+              )
+            : null,
         body: Column(
           children: [
             if (widget.currentUser.isAdmin)
@@ -177,14 +208,25 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton.icon(
-                      onPressed: () => _openForm(),
-                      icon: const Icon(Icons.add),
-                      label: const Text('مستخلص جديد'),
-                    ),
+                    if (_canCreate)
+                      FilledButton.icon(
+                        onPressed: () => _openForm(),
+                        icon: const Icon(Icons.add),
+                        label: const Text('مستخلص جديد'),
+                      ),
                   ],
                 ),
               ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: FilterChip(
+                label: const Text('المطلوب مني فقط'),
+                selected: _mineOnly,
+                onSelected: _loading
+                    ? null
+                    : (v) => setState(() => _mineOnly = v),
+              ),
+            ),
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
@@ -205,26 +247,40 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
                             ),
                           ),
                         )
-                      : _items.isEmpty
-                          ? const Center(
+                      : _visibleItems.isEmpty
+                          ? Center(
                               child: Text(
-                                'لا توجد مستخلصات بعد.\nاضغط «مستخلص جديد» للبدء.',
+                                _items.isEmpty
+                                    ? 'لا توجد مستخلصات بعد.'
+                                    : 'لا توجد مستخلصات في هذا الفلتر.',
                                 textAlign: TextAlign.center,
                               ),
                             )
                           : RefreshIndicator(
                               onRefresh: _load,
                               child: ListView.separated(
-                                padding:
-                                    const EdgeInsets.fromLTRB(16, 16, 16, 88),
-                                itemCount: _items.length,
+                                padding: EdgeInsets.fromLTRB(
+                                  16,
+                                  16,
+                                  16,
+                                  _canCreate ? 88 : 16,
+                                ),
+                                itemCount: _visibleItems.length,
                                 separatorBuilder: (_, __) =>
                                     const SizedBox(height: 8),
                                 itemBuilder: (context, i) {
-                                  final item = _items[i];
+                                  final item = _visibleItems[i];
                                   final dateLabel = item.statementDate == null
                                       ? '—'
                                       : _dateFmt.format(item.statementDate!);
+                                  final statusLabel = item.statusLabelAr.isNotEmpty
+                                      ? item.statusLabelAr
+                                      : contInvoiceStatusLabelAr(item.status);
+                                  final assignee = item.currentAssigneeUserName
+                                          .trim()
+                                          .isNotEmpty
+                                      ? '\nالمكلف: ${item.currentAssigneeUserName}'
+                                      : '';
                                   return Card(
                                     child: ListTile(
                                       title: Text(
@@ -235,19 +291,21 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
                                       ),
                                       subtitle: Text(
                                         'تاريخ: $dateLabel  |  إجمالي: ${_moneyFmt.format(item.totalAmount)}\n'
-                                        'مستحق: ${_moneyFmt.format(item.amountDue)}  |  حالة: ${item.status}',
+                                        'مستحق: ${_moneyFmt.format(item.amountDue)}  |  الحالة: $statusLabel$assignee',
                                       ),
                                       isThreeLine: true,
                                       onTap: () =>
                                           _openForm(existing: item),
-                                      trailing: IconButton(
-                                        tooltip: 'حذف',
-                                        onPressed: () => _delete(item),
-                                        icon: const Icon(
-                                          Icons.delete_outline,
-                                          color: Colors.red,
-                                        ),
-                                      ),
+                                      trailing: _canDelete
+                                          ? IconButton(
+                                              tooltip: 'حذف',
+                                              onPressed: () => _delete(item),
+                                              icon: const Icon(
+                                                Icons.delete_outline,
+                                                color: Colors.red,
+                                              ),
+                                            )
+                                          : null,
                                     ),
                                   );
                                 },
