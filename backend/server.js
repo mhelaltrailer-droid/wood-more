@@ -1017,8 +1017,10 @@ async function runNotificationSafely(label, fn) {
 const FILE_UPLOAD_NOTIFY_ROLES = ['app_admin', 'operation_manager', 'site_engineer_manager', 'projects_manager'];
 
 /// لا يستقبلون إشعارات الحضور/الانصراف وخطط العمل (بريد محدد).
+/// على الإنتاج الحساب مخزَّن كـ email=abdelrhman؛ محليًا قد يكون العنوان الكامل.
 const MUTE_ATTENDANCE_WORK_PLAN_EMAILS = [
   'abdelrhmanellaithy828@gmail.com',
+  'abdelrhman',
 ];
 
 function isAttendanceOrWorkPlanEventType(eventType) {
