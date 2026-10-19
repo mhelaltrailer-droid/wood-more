@@ -1,8 +1,18 @@
+const crypto = require('crypto');
 const { formatArDateTimeEgypt } = require('./egypt_local_time');
+const {
+  isR2Configured,
+  stripBase64Payload,
+  r2PutObject,
+  r2GetObjectBuffer,
+  r2DeleteObject,
+} = require('./lib/r2');
 
 const SHOP_DRAWING_PM_EMAIL = 'abdelrhmanellaithy828@gmail.com';
 const SHOP_DRAWING_PRIMARY_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 const SHOP_DRAWING_PROJECTS_MANAGER_ROLE = 'projects_manager';
+const SHOP_DRAWING_STORAGE_DB = 'db';
+const SHOP_DRAWING_STORAGE_R2 = 'r2';
 
 function shopDrawingIsPmActor(user) {
   if (!user) return false;
@@ -80,11 +90,25 @@ async function ensureShopDrawingTables(pool) {
       drawing_id INTEGER NOT NULL REFERENCES shop_drawings(id) ON DELETE CASCADE,
       file_name TEXT NOT NULL,
       mime_type TEXT NOT NULL,
-      data_base64 TEXT NOT NULL,
+      data_base64 TEXT,
       size_bytes INTEGER NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      storage_backend TEXT NOT NULL DEFAULT 'db',
+      storage_key TEXT
     )
   `);
+  await pool.query(`
+    ALTER TABLE shop_drawing_attachments
+      ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'db'
+  `).catch(() => {});
+  await pool.query(`
+    ALTER TABLE shop_drawing_attachments
+      ADD COLUMN IF NOT EXISTS storage_key TEXT
+  `).catch(() => {});
+  await pool.query(`
+    ALTER TABLE shop_drawing_attachments
+      ALTER COLUMN data_base64 DROP NOT NULL
+  `).catch(() => {});
   await pool.query(`
     CREATE TABLE IF NOT EXISTS shop_drawing_actions (
       id SERIAL PRIMARY KEY,
@@ -470,25 +494,97 @@ function shopDrawingValidateAttachments(attachments) {
   return shopDrawingValidateContent(attachments, null);
 }
 
+function shopDrawingSafeFileSuffix(name) {
+  const base = String(name || 'file').replace(/[^a-zA-Z0-9._-]+/g, '_');
+  return base.slice(0, 80) || 'file';
+}
+
+async function shopDrawingStoreAttachmentBlob({
+  drawingId,
+  fileName,
+  mimeType,
+  sizeBytes,
+  dataBase64,
+}) {
+  const rawB64 = stripBase64Payload(dataBase64);
+  const body = Buffer.from(rawB64, 'base64');
+  if (isR2Configured()) {
+    const key = `shop-drawing/${drawingId}/${crypto.randomUUID()}-${shopDrawingSafeFileSuffix(fileName)}`;
+    await r2PutObject({
+      key,
+      body,
+      contentType: mimeType || 'application/octet-stream',
+    });
+    return {
+      storage_backend: SHOP_DRAWING_STORAGE_R2,
+      storage_key: key,
+      data_base64: null,
+      size_bytes: sizeBytes || body.length,
+    };
+  }
+  return {
+    storage_backend: SHOP_DRAWING_STORAGE_DB,
+    storage_key: null,
+    data_base64: rawB64,
+    size_bytes: sizeBytes || body.length,
+  };
+}
+
+async function shopDrawingLoadAttachmentBase64(row) {
+  if (
+    String(row.storage_backend || SHOP_DRAWING_STORAGE_DB) === SHOP_DRAWING_STORAGE_R2 &&
+    row.storage_key
+  ) {
+    const buf = await r2GetObjectBuffer(row.storage_key);
+    return buf.toString('base64');
+  }
+  return stripBase64Payload(row.data_base64 || '');
+}
+
 async function shopDrawingInsertAttachments(pool, drawingId, attachments, now) {
   for (const a of attachments) {
+    const fileName = String(a.file_name ?? a.fileName ?? 'file');
+    const mimeType = String(a.mime_type ?? a.mimeType ?? 'application/octet-stream');
+    const sizeBytes = parseInt(String(a.size_bytes ?? a.sizeBytes ?? '0'), 10);
+    const stored = await shopDrawingStoreAttachmentBlob({
+      drawingId,
+      fileName,
+      mimeType,
+      sizeBytes,
+      dataBase64: String(a.data_base64 ?? a.dataBase64 ?? ''),
+    });
     await pool.query(
       `INSERT INTO shop_drawing_attachments (
-        drawing_id, file_name, mime_type, data_base64, size_bytes, created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        drawing_id, file_name, mime_type, data_base64, size_bytes, created_at,
+        storage_backend, storage_key
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
         drawingId,
-        String(a.file_name ?? a.fileName ?? 'file'),
-        String(a.mime_type ?? a.mimeType ?? 'application/octet-stream'),
-        String(a.data_base64 ?? a.dataBase64 ?? ''),
-        parseInt(String(a.size_bytes ?? a.sizeBytes ?? '0'), 10),
+        fileName,
+        mimeType,
+        stored.data_base64,
+        stored.size_bytes,
         now,
+        stored.storage_backend,
+        stored.storage_key,
       ],
     );
   }
 }
 
 async function shopDrawingDeleteAttachments(pool, drawingId) {
+  const existing = await pool.query(
+    `SELECT storage_backend, storage_key FROM shop_drawing_attachments WHERE drawing_id = $1`,
+    [drawingId],
+  );
+  for (const row of existing.rows) {
+    if (
+      String(row.storage_backend) === SHOP_DRAWING_STORAGE_R2 &&
+      row.storage_key
+    ) {
+      await r2DeleteObject(row.storage_key);
+    }
+  }
   await pool.query('DELETE FROM shop_drawing_attachments WHERE drawing_id = $1', [drawingId]);
 }
 
@@ -733,15 +829,17 @@ function registerShopDrawingRoutes(app, pool, deps) {
         return res.status(400).json({ error: 'invalid' });
       }
       const r = await pool.query(
-        `SELECT file_name, mime_type, data_base64 FROM shop_drawing_attachments
+        `SELECT file_name, mime_type, data_base64, storage_backend, storage_key
+         FROM shop_drawing_attachments
          WHERE id = $1 AND drawing_id = $2`,
         [attachmentId, drawingId],
       );
       if (r.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      const row = r.rows[0];
       res.json({
-        file_name: r.rows[0].file_name,
-        mime_type: r.rows[0].mime_type,
-        data_base64: r.rows[0].data_base64,
+        file_name: row.file_name,
+        mime_type: row.mime_type,
+        data_base64: await shopDrawingLoadAttachmentBase64(row),
       });
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
@@ -1161,6 +1259,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
       const rq = await pool.query('SELECT status, project_name FROM shop_drawings WHERE id = $1', [id]);
       if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
 
+      await shopDrawingDeleteAttachments(pool, id);
       await pool.query('DELETE FROM shop_drawings WHERE id = $1', [id]);
       res.json({ ok: true });
     } catch (e) {

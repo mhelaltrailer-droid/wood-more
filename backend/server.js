@@ -10,6 +10,12 @@ const {
   r2GetObjectBuffer,
   r2DeleteObject,
 } = require('./lib/r2');
+const {
+  storeInlineBlob,
+  loadInlineBlobToDataUrl,
+  storeInlineBlobList,
+  parseR2Ref,
+} = require('./lib/inline_blob_storage');
 const { splitSqlChunks } = require('./scripts/lib/xlsx_project_locations');
 const {
   ensureShopDrawingTables,
@@ -4425,7 +4431,15 @@ app.post('/engineer-balance', async (req, res) => {
 app.post('/custody', async (req, res) => {
   try {
     const { userId, amount, note } = req.body;
-    const documentPath = req.body?.documentPath ?? req.body?.document_path ?? null;
+    const documentPathRaw = req.body?.documentPath ?? req.body?.document_path ?? null;
+    const documentPath = documentPathRaw
+      ? await storeInlineBlob({
+          keyPrefix: 'custody',
+          ownerId: userId,
+          raw: documentPathRaw,
+          fileName: 'custody-document',
+        })
+      : null;
     const now = new Date().toISOString();
     const ins = await pool.query(
       'INSERT INTO engineer_custody (user_id, amount, created_at, note, movement_type, document_path) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
@@ -4539,10 +4553,20 @@ app.get('/custody', async (req, res) => {
     const q = userId ? 'SELECT * FROM engineer_custody WHERE user_id = $1 ORDER BY created_at DESC' : 'SELECT * FROM engineer_custody ORDER BY created_at DESC';
     const params = userId ? [userId] : [];
     const r = await pool.query(q, params);
-    const mapRow = (row) => {
+    const mapRow = async (row) => {
       const out = { id: parseInt(row.id), user_id: parseInt(row.user_id), amount: parseFloat(row.amount), created_at: row.created_at, note: row.note || '' };
       if (row.movement_type != null) out.movement_type = row.movement_type;
-      if (row.document_path != null) out.document_path = row.document_path;
+      if (row.document_path != null) {
+        let doc = row.document_path;
+        if (parseR2Ref(doc)) {
+          try {
+            doc = await loadInlineBlobToDataUrl(doc);
+          } catch (e) {
+            console.warn('custody load document:', e.message);
+          }
+        }
+        out.document_path = doc;
+      }
       if (row.actor_user_id != null) out.actor_user_id = parseInt(row.actor_user_id);
       if (row.actor_user_name != null) out.actor_user_name = row.actor_user_name;
       if (row.actor_role != null) out.actor_role = row.actor_role;
@@ -4552,7 +4576,7 @@ app.get('/custody', async (req, res) => {
       }
       return out;
     };
-    res.json(r.rows.map(mapRow));
+    res.json(await Promise.all(r.rows.map((row) => mapRow(row))));
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -6714,6 +6738,12 @@ app.post('/operation-reports', async (req, res) => {
     }
 
     const now = new Date().toISOString();
+    const storedImages = await storeInlineBlobList({
+      keyPrefix: 'operation-reports',
+      ownerId: userId,
+      items: images,
+      fileNamePrefix: 'op-image',
+    });
     const ins = await pool.query(
       `INSERT INTO operation_reports (
         user_id, user_name, project_id, project_name, report_type, details, images_json, created_at
@@ -6725,7 +6755,7 @@ app.post('/operation-reports', async (req, res) => {
         projectName || null,
         reportType,
         details,
-        JSON.stringify(images),
+        JSON.stringify(storedImages),
         now,
       ],
     );

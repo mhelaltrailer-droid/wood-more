@@ -1,5 +1,15 @@
+const crypto = require('crypto');
 const zlib = require('zlib');
 const { formatArDateTimeEgypt } = require('./egypt_local_time');
+const {
+  isR2Configured,
+  r2PutObject,
+  r2GetObjectBuffer,
+  r2DeleteObject,
+} = require('./lib/r2');
+
+const MEETING_STORAGE_DB = 'db';
+const MEETING_STORAGE_R2 = 'r2';
 
 const PRIMARY_APP_ADMIN_EMAIL = 'mouhammedhelal@gmail.com';
 
@@ -110,7 +120,19 @@ function packMeetingFileBytes(buffer) {
   return { encoding: 'raw', bytes: buffer };
 }
 
-function unpackMeetingFileToBase64(row) {
+function meetingSafeFileSuffix(name) {
+  const base = String(name || 'file').replace(/[^a-zA-Z0-9._-]+/g, '_');
+  return base.slice(0, 80) || 'file';
+}
+
+async function unpackMeetingFileToBase64(row) {
+  if (
+    String(row.storage_backend || MEETING_STORAGE_DB) === MEETING_STORAGE_R2 &&
+    row.storage_key
+  ) {
+    const buf = await r2GetObjectBuffer(row.storage_key);
+    return buf.toString('base64');
+  }
   if (row.data_bytes) {
     const buf = Buffer.isBuffer(row.data_bytes)
       ? row.data_bytes
@@ -119,6 +141,15 @@ function unpackMeetingFileToBase64(row) {
     return raw.toString('base64');
   }
   return String(row.data_base64 || '');
+}
+
+async function deleteMeetingFileR2IfNeeded(row) {
+  if (
+    String(row?.storage_backend || '') === MEETING_STORAGE_R2 &&
+    row.storage_key
+  ) {
+    await r2DeleteObject(row.storage_key);
+  }
 }
 
 async function insertCompressedMeetingFile(pool, {
@@ -131,12 +162,40 @@ async function insertCompressedMeetingFile(pool, {
   uploadedAt,
 }) {
   const raw = Buffer.from(dataBase64, 'base64');
+  if (isR2Configured()) {
+    const key = `meetings/${meetingId}/${crypto.randomUUID()}-${meetingSafeFileSuffix(fileName)}`;
+    await r2PutObject({
+      key,
+      body: raw,
+      contentType: mimeType || 'application/pdf',
+    });
+    await pool.query(
+      `INSERT INTO meeting_files (
+         meeting_id, file_type, file_name, mime_type, data_base64,
+         data_bytes, storage_encoding, size_bytes, uploaded_by_user_id, uploaded_at,
+         storage_backend, storage_key
+       ) VALUES ($1, $2, $3, $4, NULL, NULL, 'raw', $5, $6, $7, $8, $9)`,
+      [
+        meetingId,
+        fileType,
+        fileName,
+        mimeType || 'application/pdf',
+        raw.length,
+        uploadedByUserId,
+        uploadedAt,
+        MEETING_STORAGE_R2,
+        key,
+      ],
+    );
+    return;
+  }
   const packed = packMeetingFileBytes(raw);
   await pool.query(
     `INSERT INTO meeting_files (
        meeting_id, file_type, file_name, mime_type, data_base64,
-       data_bytes, storage_encoding, size_bytes, uploaded_by_user_id, uploaded_at
-     ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9)`,
+       data_bytes, storage_encoding, size_bytes, uploaded_by_user_id, uploaded_at,
+       storage_backend, storage_key
+     ) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10, NULL)`,
     [
       meetingId,
       fileType,
@@ -147,6 +206,7 @@ async function insertCompressedMeetingFile(pool, {
       raw.length,
       uploadedByUserId,
       uploadedAt,
+      MEETING_STORAGE_DB,
     ],
   );
 }
@@ -210,6 +270,14 @@ async function ensureMeetingsTables(pool) {
     await pool.query(
       'ALTER TABLE meeting_files ALTER COLUMN data_base64 DROP NOT NULL',
     ).catch(() => {});
+    await pool.query(`
+      ALTER TABLE meeting_files
+        ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'db'
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE meeting_files
+        ADD COLUMN IF NOT EXISTS storage_key TEXT
+    `).catch(() => {});
     const legacy = await pool.query(
       `SELECT id, data_base64 FROM meeting_files
        WHERE data_bytes IS NULL
@@ -469,7 +537,7 @@ function registerMeetingsRoutes(app, pool, { runNotificationSafely } = {}) {
       if (!meeting.rows[0]) return res.status(404).json({ error: 'الاجتماع غير موجود' });
 
       const existing = await pool.query(
-        'SELECT file_type FROM meeting_files WHERE meeting_id = $1',
+        'SELECT id, file_type, storage_backend, storage_key FROM meeting_files WHERE meeting_id = $1',
         [meetingId],
       );
       const have = new Set(existing.rows.map((r) => r.file_type));
@@ -488,6 +556,8 @@ function registerMeetingsRoutes(app, pool, { runNotificationSafely } = {}) {
       if (fileErr) return res.status(400).json({ error: fileErr });
 
       const now = new Date().toISOString();
+      const oldFile = existing.rows.find((r) => r.file_type === fileType);
+      if (oldFile) await deleteMeetingFileR2IfNeeded(oldFile);
       await pool.query(
         'DELETE FROM meeting_files WHERE meeting_id = $1 AND file_type = $2',
         [meetingId, fileType],
@@ -542,7 +612,7 @@ function registerMeetingsRoutes(app, pool, { runNotificationSafely } = {}) {
       const fileType = String(req.params.fileType || '').trim();
       const r = await pool.query(
         `SELECT file_name, mime_type, data_base64, data_bytes,
-                storage_encoding, size_bytes
+                storage_encoding, size_bytes, storage_backend, storage_key
          FROM meeting_files
          WHERE meeting_id = $1 AND file_type = $2`,
         [meetingId, fileType],
@@ -552,7 +622,7 @@ function registerMeetingsRoutes(app, pool, { runNotificationSafely } = {}) {
       res.json({
         file_name: row.file_name,
         mime_type: row.mime_type,
-        data_base64: unpackMeetingFileToBase64(row),
+        data_base64: await unpackMeetingFileToBase64(row),
         size_bytes: row.size_bytes,
       });
     } catch (e) {
@@ -576,6 +646,13 @@ function registerMeetingsRoutes(app, pool, { runNotificationSafely } = {}) {
         [meetingId],
       );
       if (!meeting.rows[0]) return res.status(404).json({ error: 'الاجتماع غير موجود' });
+      const existingFile = await pool.query(
+        `SELECT storage_backend, storage_key FROM meeting_files
+         WHERE meeting_id = $1 AND file_type = $2`,
+        [meetingId, fileType],
+      );
+      if (!existingFile.rows[0]) return res.status(404).json({ error: 'الملف غير موجود' });
+      await deleteMeetingFileR2IfNeeded(existingFile.rows[0]);
       const del = await pool.query(
         'DELETE FROM meeting_files WHERE meeting_id = $1 AND file_type = $2',
         [meetingId, fileType],
@@ -601,6 +678,13 @@ function registerMeetingsRoutes(app, pool, { runNotificationSafely } = {}) {
         return res.status(403).json({ error: 'الحذف متاح للمسؤول الرئيسي فقط' });
       }
       const meetingId = parseInt(req.params.id, 10);
+      const files = await pool.query(
+        `SELECT storage_backend, storage_key FROM meeting_files WHERE meeting_id = $1`,
+        [meetingId],
+      );
+      for (const row of files.rows) {
+        await deleteMeetingFileR2IfNeeded(row);
+      }
       const del = await pool.query('DELETE FROM meetings WHERE id = $1', [meetingId]);
       if (!del.rowCount) return res.status(404).json({ error: 'الاجتماع غير موجود' });
       res.json({ ok: true });

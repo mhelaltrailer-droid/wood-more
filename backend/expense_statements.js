@@ -1,4 +1,10 @@
 const { applyViewAsToUser } = require('./view_as');
+const {
+  storeInlineBlob,
+  loadInlineBlobToDataUrl,
+  deleteInlineBlobIfR2,
+  parseR2Ref,
+} = require('./lib/inline_blob_storage');
 /**
  * بيانات صرف العهدة: إرسال من مهندس الموقع → اعتماد/رفض من مدير المشروعات المحدد.
  * إدخال مدير المشروعات يُحفظ معتمداً مباشرة مع خصم رصيده.
@@ -79,7 +85,15 @@ function esExpenseDateFromRow(row) {
   return esTodayYmd();
 }
 
-function esRowToJson(row) {
+async function esRowToJson(row) {
+  let imagePath = row.image_path || null;
+  if (imagePath && parseR2Ref(imagePath)) {
+    try {
+      imagePath = await loadInlineBlobToDataUrl(imagePath);
+    } catch (e) {
+      console.warn('esRowToJson load image:', e.message);
+    }
+  }
   return {
     id: parseInt(row.id, 10),
     submitter_user_id: parseInt(row.submitter_user_id, 10),
@@ -90,7 +104,7 @@ function esRowToJson(row) {
     project_name: row.project_name || null,
     description: row.description || '',
     amount: parseFloat(row.amount) || 0,
-    image_path: row.image_path || null,
+    image_path: imagePath,
     status: row.status || STATUS_PENDING,
     rejection_reason: row.rejection_reason || null,
     responded_by_user_id:
@@ -325,6 +339,14 @@ function registerExpenseStatementsRoutes(
       const ids = [];
 
       for (const item of items) {
+        const storedImage = item.image_path
+          ? await storeInlineBlob({
+              keyPrefix: 'expense-statements',
+              ownerId: userId,
+              raw: item.image_path,
+              fileName: 'receipt',
+            })
+          : null;
         const ins = await pool.query(
           `INSERT INTO expense_statements (
             submitter_user_id, submitter_user_name, submitter_role,
@@ -343,7 +365,7 @@ function registerExpenseStatementsRoutes(
             projectName,
             item.description,
             item.amount,
-            item.image_path,
+            storedImage,
             status,
             autoApprove ? userId : null,
             autoApprove ? user.name : null,
@@ -425,7 +447,7 @@ function registerExpenseStatementsRoutes(
       }
       sql += ' ORDER BY created_at DESC, id DESC';
       const r = await pool.query(sql, params);
-      res.json(r.rows.map(esRowToJson));
+      res.json(await Promise.all(r.rows.map((row) => esRowToJson(row))));
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }
@@ -545,7 +567,7 @@ function registerExpenseStatementsRoutes(
         'SELECT * FROM expense_statements WHERE id = $1',
         [id],
       );
-      res.json(esRowToJson(updated.rows[0]));
+      res.json(await esRowToJson(updated.rows[0]));
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }
@@ -587,6 +609,7 @@ function registerExpenseStatementsRoutes(
           );
         }
       }
+      await deleteInlineBlobIfR2(row.image_path);
       await pool.query('DELETE FROM expense_statements WHERE id = $1', [id]);
       res.json({ ok: true });
     } catch (e) {

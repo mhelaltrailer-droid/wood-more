@@ -11,6 +11,10 @@
 // =============================================================================
 
 const { r2GetObjectBuffer } = require('./lib/r2');
+const {
+  parseR2Ref,
+  loadInlineBlobToDataUrl,
+} = require('./lib/inline_blob_storage');
 
 const ATTACHMENT_VIEWER_ROLES = ['app_admin', 'operation_manager', 'site_engineer_manager', 'projects_manager'];
 
@@ -76,6 +80,21 @@ function attKindForMime(mime) {
 }
 
 function attItemFromDataUrl(id, raw, { fileName, label, fallbackMime }) {
+  const r2 = parseR2Ref(raw);
+  if (r2) {
+    const name =
+      String(fileName || '').trim() ||
+      `${label || 'مرفق'}.${attExtensionForMime(r2.mime_type)}`;
+    return {
+      id,
+      file_name: name,
+      mime_type: r2.mime_type,
+      size_bytes: r2.size_bytes || 0,
+      kind: attKindForMime(r2.mime_type),
+      label: label || null,
+      can_open: true,
+    };
+  }
   const parsed = attSplitDataUrl(raw, fallbackMime);
   if (!parsed) return null;
   const name =
@@ -99,6 +118,12 @@ function attFileFromDataUrl(raw, { fileName, label, fallbackMime }) {
     String(fileName || '').trim() ||
     `${label || 'مرفق'}.${attExtensionForMime(parsed.mime)}`;
   return { file_name: name, mime_type: parsed.mime, data_base64: parsed.base64 };
+}
+
+async function attFileFromStored(raw, { fileName, label, fallbackMime }) {
+  const dataUrl = await loadInlineBlobToDataUrl(raw);
+  if (!dataUrl) throw attErr(404, 'attachment_not_found');
+  return attFileFromDataUrl(dataUrl, { fileName, label, fallbackMime });
 }
 
 function attParseJsonArray(raw) {
@@ -197,7 +222,7 @@ function attSingleColumnSource({ table, column, label, nameColumn }) {
     async fetch(pool, recordId) {
       const r = await pool.query(`SELECT ${column} AS data FROM ${table} WHERE id = $1`, [recordId]);
       if (r.rows.length === 0) throw attErr(404, 'record_not_found');
-      return attFileFromDataUrl(r.rows[0].data, { label });
+      return attFileFromStored(r.rows[0].data, { label });
     },
   };
 }
@@ -246,7 +271,7 @@ function attRowGroupsSource({ table, columns, titleFor, groups }) {
       const { dataById } = attCollectFromRow(row, groups);
       const entry = dataById.get(String(attachmentId));
       if (!entry) throw attErr(404, 'attachment_not_found');
-      return attFileFromDataUrl(entry.data, {
+      return attFileFromStored(entry.data, {
         fileName: entry.fileName,
         label: entry.label,
       });
@@ -522,7 +547,7 @@ const ATTACHMENT_SOURCES = {
         [id, anchor.rows[0].submitter_user_id, anchor.rows[0].created_at],
       );
       if (r.rows.length === 0) throw attErr(404, 'attachment_not_found');
-      return attFileFromDataUrl(r.rows[0].image_path, { label: 'إيصال صرف' });
+      return attFileFromStored(r.rows[0].image_path, { label: 'إيصال صرف' });
     },
   },
 
