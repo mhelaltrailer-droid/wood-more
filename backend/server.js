@@ -880,6 +880,8 @@ async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
   const attachmentRecordId = fields.attachmentRecordId ?? fields.attachment_record_id ?? null;
   const attachmentCount = fields.attachmentCount ?? fields.attachment_count ?? null;
   const now = new Date().toISOString();
+  const muteAttendanceWorkPlan = isAttendanceOrWorkPlanEventType(eventType);
+  const mutedEmails = mutedAttendanceWorkPlanEmailsLower();
   await pool.query(
     `INSERT INTO notifications (
       recipient_user_id, recipient_role, title, body, event_type,
@@ -889,12 +891,18 @@ async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
     )
     SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE, $8, $9, $10, $11, $12
     FROM users
-    WHERE role = ANY($13::text[])`,
+    WHERE role = ANY($13::text[])
+      AND NOT (
+        $14::boolean
+        AND LOWER(TRIM(email)) = ANY($15::text[])
+      )`,
     [
       title, body, eventType, actorUserId, actorUserName, projectName, now,
       withdrawalRequestId, actionTakenAt,
       attachmentSource, attachmentRecordId, attachmentCount,
       roles,
+      muteAttendanceWorkPlan,
+      mutedEmails,
     ]
   );
 }
@@ -1007,6 +1015,30 @@ async function runNotificationSafely(label, fn) {
 
 /// مستقبلو إشعارات رفع الملفات: مسؤول التطبيق ومدير العمليات ومدير المشروعات.
 const FILE_UPLOAD_NOTIFY_ROLES = ['app_admin', 'operation_manager', 'site_engineer_manager', 'projects_manager'];
+
+/// لا يستقبلون إشعارات الحضور/الانصراف وخطط العمل (بريد محدد).
+const MUTE_ATTENDANCE_WORK_PLAN_EMAILS = [
+  'abdelrhmanellaithy828@gmail.com',
+];
+
+function isAttendanceOrWorkPlanEventType(eventType) {
+  const t = String(eventType || '').trim().toLowerCase();
+  if (!t) return false;
+  return (
+    t.startsWith('attendance') ||
+    t.includes('attendance') ||
+    t.startsWith('work_plan') ||
+    t.includes('work_plan') ||
+    t.includes('today_work_plan') ||
+    t.includes('tomorrow_work_plan')
+  );
+}
+
+function mutedAttendanceWorkPlanEmailsLower() {
+  return MUTE_ATTENDANCE_WORK_PLAN_EMAILS.map((e) =>
+    String(e || '').trim().toLowerCase(),
+  ).filter(Boolean);
+}
 
 /// إشعار موحّد لأي رفع ملف في التطبيق. `attachmentSource` + `attachmentRecordId`
 /// هما ما يسمح للواجهة بفتح المرفقات مباشرة من الإشعار عبر /attachments.
@@ -3128,7 +3160,8 @@ app.post('/attendance', async (req, res) => {
       )
       SELECT id, role, $1, $2, $3, $4, $5, $6, $7, FALSE
       FROM users
-      WHERE role IN ('site_engineer_manager', 'projects_manager', 'operation_manager', 'app_admin')`,
+      WHERE role IN ('site_engineer_manager', 'projects_manager', 'operation_manager', 'app_admin')
+        AND LOWER(TRIM(email)) <> ALL($8::text[])`,
       [
         'تنبيه حضور/انصراف',
         body,
@@ -3137,6 +3170,7 @@ app.post('/attendance', async (req, res) => {
         b.userName || null,
         b.projectName || null,
         new Date().toISOString(),
+        mutedAttendanceWorkPlanEmailsLower(),
       ]
     );
     res.json(parseInt(r.rows[0].id));
