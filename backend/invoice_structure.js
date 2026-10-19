@@ -50,7 +50,10 @@ function canReadInvoiceStructure(user) {
     role === 'qs' ||
     role === 'accountant' ||
     role === 'projects_manager' ||
-    role === 'operation_manager'
+    role === 'operation_manager' ||
+    role === 'site_engineer' ||
+    role === 'site_engineer_manager' ||
+    role === 'general_supervisor'
   );
 }
 

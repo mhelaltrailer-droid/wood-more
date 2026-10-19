@@ -39,6 +39,7 @@ import '../models/reports_sys_model.dart';
 import '../models/shop_drawing_model.dart';
 import '../models/invoices_owner_model.dart';
 import '../models/cont_invoice_model.dart';
+import '../models/cont_progress_report_model.dart';
 import '../models/invoice_structure_location_model.dart';
 import '../models/app_release_info_model.dart';
 import '../models/projects_dashboard_note_model.dart';
@@ -3662,6 +3663,83 @@ class ApiStorageService {
         userId: userId,
         comment: comment,
       );
+
+  Future<List<ContProgressReportModel>> getContProgressReports({
+    required int userId,
+    int? projectId,
+    int? contractorId,
+  }) async {
+    final qp = <String, String>{'userId': userId.toString()};
+    if (projectId != null) qp['projectId'] = projectId.toString();
+    if (contractorId != null) qp['contractorId'] = contractorId.toString();
+    final uri = Uri.parse(_path('cont-progress')).replace(queryParameters: qp);
+    final r = await _httpGet(uri);
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'cont-progress');
+    }
+    if (r.body.isEmpty) return const [];
+    final decoded = jsonDecode(r.body);
+    if (decoded is! List) return const [];
+    return decoded
+        .map(
+          (e) => ContProgressReportModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<List<ContProgressReportModel>> getContProgressSummary({
+    required int userId,
+    required int projectId,
+    int? contractorId,
+    String? contractorName,
+  }) async {
+    final qp = <String, String>{
+      'userId': userId.toString(),
+      'projectId': projectId.toString(),
+    };
+    if (contractorId != null) qp['contractorId'] = contractorId.toString();
+    if (contractorName != null && contractorName.trim().isNotEmpty) {
+      qp['contractorName'] = contractorName.trim();
+    }
+    final uri =
+        Uri.parse(_path('cont-progress/summary')).replace(queryParameters: qp);
+    final r = await _httpGet(uri);
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'cont-progress/summary');
+    }
+    if (r.body.isEmpty) return const [];
+    final decoded = jsonDecode(r.body);
+    if (decoded is! List) return const [];
+    return decoded
+        .map(
+          (e) => ContProgressReportModel.fromMap(
+            Map<String, dynamic>.from(e as Map),
+          ),
+        )
+        .toList();
+  }
+
+  Future<ContProgressReportModel> createContProgressReport({
+    required int userId,
+    required ContProgressReportModel report,
+  }) async {
+    final body = report.toMap();
+    body['userId'] = userId;
+    final uri = Uri.parse(_path('cont-progress'));
+    final r = await http.post(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode(body),
+    );
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'cont-progress');
+    }
+    return ContProgressReportModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
 
   /// خصومات معلّقة غير مربوطة بمقاول (Admin).
   Future<List<Map<String, dynamic>>> getContInvoicePendingUnlinked(

@@ -7,6 +7,7 @@ const String homeIconIdShopDrawing = 'shop_drawing';
 const String homeIconIdCustodyExpensesView = 'custody_expenses_view';
 const String homeIconIdInvoicesOwner = 'invoices_owner';
 const String homeIconIdContInvoices = 'cont_invoices';
+const String homeIconIdContProgress = 'cont_progress';
 
 List<String> defaultHomeIconOrderForUser(UserModel user) {
   final roleItems = IconVisibilityService.roleIcons[user.role] ?? const [];
@@ -95,6 +96,9 @@ bool _isHomeIconAvailable({
           IconVisibilityService.isVisible(iconConfig, iconId);
     case homeIconIdContInvoices:
       return user.canAccessContInvoices &&
+          IconVisibilityService.isVisible(iconConfig, iconId);
+    case homeIconIdContProgress:
+      return user.canAccessContProgress &&
           IconVisibilityService.isVisible(iconConfig, iconId);
     default:
       return IconVisibilityService.isVisible(iconConfig, iconId);

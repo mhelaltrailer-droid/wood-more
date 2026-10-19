@@ -1,6 +1,10 @@
 const String contInvoicesIconId = 'cont_invoices';
 const String contInvoicesRouteName = 'cont-invoices';
 const String contInvoicesHomeLabel = 'Cont-Invoices';
+
+const String contProgressIconId = 'cont_progress';
+const String contProgressRouteName = 'cont-progress';
+const String contProgressHomeLabel = 'مستخلص مقاول-Progress';
 const String contInvoicesDefaultContractType = 'تركيب';
 const String contInvoicesContractTypeOther = 'آخر';
 

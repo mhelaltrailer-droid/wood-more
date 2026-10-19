@@ -42,6 +42,7 @@ import '../screens/projects_dashboard_plus1_screen.dart';
 import '../screens/meetings_screen.dart';
 import '../screens/invoices_owner_hub_screen.dart';
 import '../screens/cont_invoices_hub_screen.dart';
+import '../screens/cont_progress_screen.dart';
 import '../core/cont_invoices_constants.dart';
 import '../screens/admin_invoice_structure_screen.dart';
 import '../core/invoice_structure_constants.dart';
@@ -175,6 +176,8 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return InvoicesOwnerHubScreen(currentUser: user);
     case contInvoicesRouteName:
       return ContInvoicesHubScreen(currentUser: user);
+    case contProgressRouteName:
+      return ContProgressScreen(currentUser: user);
     case invoiceStructureRouteName:
       return AdminInvoiceStructureScreen(admin: user);
     default:

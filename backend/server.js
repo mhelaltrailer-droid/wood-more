@@ -49,6 +49,9 @@ const {
   ensureInvoiceStructureTables,
   registerInvoiceStructureRoutes,
 } = require('./invoice_structure');
+const {
+  registerContProgressRoutes,
+} = require('./cont_progress');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -1994,6 +1997,7 @@ async function ensureHomeIconsVisibilitySetting() {
         ir_mir: true,
         ms_sd: true,
         mos_itp: true,
+        cont_progress: false,
       },
       accountant: {
         accountant_custody: true,
@@ -2015,6 +2019,7 @@ async function ensureHomeIconsVisibilitySetting() {
         manager_custody_expenses: true,
         meetings: true,
         shop_drawing: true,
+        cont_progress: false,
       },
       projects_manager: {
         attendance_reports: true,
@@ -2043,6 +2048,7 @@ async function ensureHomeIconsVisibilitySetting() {
         warehouses_view: true,
         ms_sd: true,
         mos_itp: true,
+        cont_progress: false,
       },
       operation_manager: {
         attendance_reports: true,
@@ -2085,6 +2091,7 @@ async function ensureHomeIconsVisibilitySetting() {
         invoices_owner: true,
         cont_invoices: false,
         invoice_structure: false,
+        cont_progress: false,
       },
       document_controller: {
         ir_mir: true,
@@ -2122,7 +2129,11 @@ async function ensureHomeIconsVisibilitySetting() {
 
     function mergeHomeIconsVisibilityDefaults(existing, { forceHideContIcons = false } = {}) {
       const merged = existing && typeof existing === 'object' ? { ...existing } : {};
-      const contHiddenIds = ['cont_invoices', 'invoice_structure'];
+      const contHiddenIds = [
+        'cont_invoices',
+        'invoice_structure',
+        'cont_progress',
+      ];
       for (const [role, icons] of Object.entries(defaultConfig)) {
         const roleMap =
           merged[role] && typeof merged[role] === 'object' ? { ...merged[role] } : {};
@@ -8147,6 +8158,7 @@ registerWithdrawalFilesReportRoutes(app, pool);
 registerMeetingsRoutes(app, pool, { runNotificationSafely });
 registerContInvoicesRoutes(app, pool);
 registerInvoiceStructureRoutes(app, pool);
+registerContProgressRoutes(app, pool);
 
 async function ensureProjectsMainContractor() {
   await pool.query(

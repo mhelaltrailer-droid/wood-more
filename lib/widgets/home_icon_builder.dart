@@ -37,6 +37,7 @@ import '../screens/projects_dashboard_plus1_screen.dart';
 import '../screens/meetings_screen.dart';
 import '../screens/invoices_owner_hub_screen.dart';
 import '../screens/cont_invoices_hub_screen.dart';
+import '../screens/cont_progress_screen.dart';
 import '../core/cont_invoices_constants.dart';
 import '../services/api_storage_service.dart';
 import '../services/home_icon_order_service.dart';
@@ -557,6 +558,22 @@ class HomeIconBuilder {
             context,
             contInvoicesRouteName,
             ContInvoicesHubScreen(currentUser: user),
+          ),
+        );
+      case contProgressIconId:
+        if (!user.canAccessContProgress) {
+          return const SizedBox.shrink();
+        }
+        return _lightCard(
+          icon: Icons.trending_up,
+          iconSize: 56,
+          title: contProgressHomeLabel,
+          subtitle: 'تسجيل إنجاز المقاول من الموقع (نسبة / أمتار)',
+          padding: 28,
+          onTap: () => pushAndSaveRoute(
+            context,
+            contProgressRouteName,
+            ContProgressScreen(currentUser: user),
           ),
         );
       default:

@@ -97,6 +97,11 @@ class IconVisibilityService {
     label: 'Cont-Invoices',
   );
 
+  static const HomeIconItem contProgressIcon = HomeIconItem(
+    id: 'cont_progress',
+    label: 'مستخلص مقاول-Progress',
+  );
+
   static const HomeIconItem invoiceStructureIcon = HomeIconItem(
     id: 'invoice_structure',
     label: 'هيكلة المستخلصات',
@@ -157,6 +162,7 @@ class IconVisibilityService {
   static const Set<String> hiddenByDefaultIconIds = {
     'cont_invoices',
     'invoice_structure',
+    'cont_progress',
   };
 
   static const Map<String, List<HomeIconItem>> roleIcons = {
@@ -195,6 +201,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'engineer_projects', label: 'المشروعات'),
       documentControlIcon,
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
+      contProgressIcon,
     ],
     roleAccountant: [
       HomeIconItem(id: 'accountant_custody', label: 'العهدة'),
@@ -210,6 +217,7 @@ class IconVisibilityService {
       managerCustodyExpensesIcon,
       HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
       meetingsIcon,
+      contProgressIcon,
     ],
     roleProjectsManager: [
       ..._projectManagerHomeIcons,
@@ -226,6 +234,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'tomorrow_work_plan', label: 'خطة عمل الغد'),
       HomeIconItem(id: 'engineer_finances', label: 'العهدة/المصروفات'),
       ..._projectManagerHomeIcons,
+      contProgressIcon,
     ],
     roleOperationManager: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -279,6 +288,7 @@ class IconVisibilityService {
       meetingsIcon,
       invoicesOwnerIcon,
       contInvoicesIcon,
+      contProgressIcon,
     ],
   };
 
