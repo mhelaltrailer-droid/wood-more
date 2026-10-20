@@ -8,6 +8,7 @@ import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
 import '../models/contractor_model.dart';
 import '../models/project_model.dart';
+import '../utils/cont_invoice_statement_pdf.dart';
 import 'cont_invoices_pending_unlinked_screen.dart';
 import 'cont_invoices_select_screen.dart';
 import 'cont_invoices_work_screen.dart';
@@ -27,6 +28,7 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
   final _dateFmt = DateFormat('dd/MM/yyyy');
 
   bool _loading = true;
+  bool _exportingPdf = false;
   String? _error;
   List<ContInvoiceModel> _items = const [];
   bool _mineOnly = false;
@@ -161,6 +163,29 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('فشل الحذف: $e')),
       );
+    }
+  }
+
+  Future<void> _exportStatement(ContInvoiceModel item) async {
+    if (!canPrintContInvoiceStatement(item.status) || _exportingPdf) return;
+    if (_storage is! ApiStorageService || item.id == null) return;
+    setState(() => _exportingPdf = true);
+    try {
+      var inv = item;
+      if (inv.lines.isEmpty) {
+        inv = await _storage.getContInvoiceDetail(
+          item.id!,
+          widget.currentUser.id,
+        );
+      }
+      await printContInvoiceStatementPdf(inv);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تصدير المستخلص: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingPdf = false);
     }
   }
 
@@ -304,16 +329,32 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
                                       isThreeLine: true,
                                       onTap: () =>
                                           _openForm(existing: item),
-                                      trailing: _canDelete
-                                          ? IconButton(
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (canPrintContInvoiceStatement(
+                                            item.status,
+                                          ))
+                                            IconButton(
+                                              tooltip: 'تصدير المستخلص PDF',
+                                              onPressed: _exportingPdf
+                                                  ? null
+                                                  : () => _exportStatement(item),
+                                              icon: const Icon(
+                                                Icons.picture_as_pdf_outlined,
+                                              ),
+                                            ),
+                                          if (_canDelete)
+                                            IconButton(
                                               tooltip: 'حذف',
                                               onPressed: () => _delete(item),
                                               icon: const Icon(
                                                 Icons.delete_outline,
                                                 color: Colors.red,
                                               ),
-                                            )
-                                          : null,
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                   );
                                 },

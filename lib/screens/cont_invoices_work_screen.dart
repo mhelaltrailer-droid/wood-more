@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart' hide TextDirection;
@@ -19,6 +18,8 @@ import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
 import '../utils/open_stored_attachment.dart';
 import '../utils/reports_sys_attachment_save.dart';
+import '../utils/cont_invoice_statement_pdf.dart';
+import '../widgets/cont_invoice_payment_dialog.dart';
 
 enum _ContLineEditMode { none, priceOnly, full }
 
@@ -131,6 +132,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   double _paidAmount = 0;
   double _remainingAmount = 0;
   bool _workflowBusy = false;
+  bool _exportingPdf = false;
   int? _invoiceId;
 
   int? get _effectiveInvoiceId => _invoiceId ?? widget.existing?.id;
@@ -210,6 +212,8 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
       _status == contStatusApproved ||
       _status == contStatusPartiallyPaid ||
       _status == contStatusPaid;
+
+  bool get _canPrintStatement => canPrintContInvoiceStatement(_status);
 
   double get _remainingCash {
     if (_remainingAmount > 0) return _remainingAmount;
@@ -994,71 +998,6 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     );
   }
 
-  String _paymentMimeFromExtension(String? ext) {
-    switch ((ext ?? '').toLowerCase()) {
-      case 'pdf':
-        return 'application/pdf';
-      case 'png':
-        return 'image/png';
-      case 'webp':
-        return 'image/webp';
-      case 'jpg':
-      case 'jpeg':
-        return 'image/jpeg';
-      default:
-        return '';
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _pickPaymentVouchers({
-    required int alreadyCount,
-  }) async {
-    final remaining = contPaymentVoucherMaxFiles - alreadyCount;
-    if (remaining <= 0) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('الحد الأقصى $contPaymentVoucherMaxFiles ملفات'),
-          ),
-        );
-      }
-      return const [];
-    }
-    final result = await FilePicker.pickFiles(
-      allowMultiple: true,
-      type: FileType.custom,
-      allowedExtensions: contPaymentVoucherExtensions,
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty) return const [];
-    final out = <Map<String, dynamic>>[];
-    for (final f in result.files) {
-      if (out.length >= remaining) break;
-      final bytes = f.bytes;
-      if (bytes == null) continue;
-      if (bytes.length > contPaymentVoucherMaxBytes) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('الملف ${f.name} أكبر من 10 ميجا'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        continue;
-      }
-      final mime = _paymentMimeFromExtension(f.extension);
-      if (mime.isEmpty) continue;
-      out.add({
-        'file_name': f.name,
-        'mime_type': mime,
-        'data_base64': base64Encode(bytes),
-        'size_bytes': bytes.length,
-      });
-    }
-    return out;
-  }
-
   Future<Map<String, String>?> _loadPaymentFile({
     required ContInvoicePaymentModel payment,
     ContInvoicePaymentAttachmentModel? attachment,
@@ -1174,131 +1113,59 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   Future<void> _confirmRecordPayment() async {
     final remaining = _remainingCash;
     if (remaining <= 0) return;
-    final amountC = TextEditingController(
-      text: remaining == remaining.roundToDouble()
-          ? remaining.toInt().toString()
-          : remaining.toStringAsFixed(2),
-    );
-    final noteC = TextEditingController();
-    final vouchers = <Map<String, dynamic>>[];
-    final ok = await showDialog<bool>(
+    final draft = await showContInvoicePaymentDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          title: const Text('تسجيل دفعة صرف'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    'المتبقي: ${_moneyFmt.format(remaining)}',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: amountC,
-                  autofocus: true,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                    _MaxValueInputFormatter(remaining),
-                  ],
-                  decoration: const InputDecoration(
-                    labelText: 'المبلغ المصروف الآن',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: noteC,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'ملاحظة (اختياري)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: vouchers.length >= contPaymentVoucherMaxFiles
-                      ? null
-                      : () async {
-                          final files = await _pickPaymentVouchers(
-                            alreadyCount: vouchers.length,
-                          );
-                          if (files.isEmpty) return;
-                          setLocal(() => vouchers.addAll(files));
-                        },
-                  icon: const Icon(Icons.attach_file),
-                  label: Text(
-                    vouchers.isEmpty
-                        ? 'إرفاق نموذج الصرف (مطلوب)'
-                        : 'إضافة ملف (${vouchers.length})',
-                  ),
-                ),
-                ...vouchers.asMap().entries.map(
-                  (e) => ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.insert_drive_file_outlined),
-                    title: Text(
-                      e.value['file_name'] as String? ?? 'مرفق',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => setLocal(() => vouchers.removeAt(e.key)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed:
-                  vouchers.isEmpty ? null : () => Navigator.pop(ctx, true),
-              child: const Text('تسجيل'),
-            ),
-          ],
-        ),
-      ),
+      remaining: remaining,
+      moneyFmt: _moneyFmt,
+      invoiceLabel:
+          '${widget.project.name} — ${DateFormat('dd/MM/yyyy').format(_statementDate)}',
     );
     final id = _effectiveInvoiceId;
-    if (ok != true || id == null) return;
-    final amount = double.tryParse(amountC.text.replaceAll(',', '').trim());
-    if (amount == null || amount <= 0) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('أدخل مبلغ صرف صحيح')),
-      );
-      return;
-    }
-    if (vouchers.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('أرفق صورة أو ملف نموذج الصرف')),
-      );
-      return;
-    }
+    if (draft == null || id == null) return;
     await _runWorkflow(
       () => _api.markContInvoicePaid(
         id: id,
         userId: widget.currentUser.id,
-        amount: amount,
-        comment: noteC.text.trim(),
-        attachments: vouchers,
+        amount: draft.amount,
+        comment: draft.comment,
+        attachments: draft.attachments,
       ),
       popOnSuccess: false,
     );
+  }
+
+  Future<void> _exportStatementPdf() async {
+    if (!_canPrintStatement || _exportingPdf) return;
+    setState(() => _exportingPdf = true);
+    try {
+      final inv = ContInvoiceModel(
+        id: _effectiveInvoiceId,
+        contractorId: widget.contractor.id,
+        contractorName: widget.contractor.name,
+        projectId: widget.project.id,
+        projectName: widget.project.name,
+        statementDate: _statementDate,
+        contractType: _resolvedContractType,
+        previouslyPaid: _previouslyPaid,
+        otherDeductions: _otherDeductions,
+        totalAmount: _grandTotal,
+        amountDue: _amountDue,
+        notes: _notesCtrl.text.trim(),
+        status: _status,
+        statusLabelAr: contInvoiceStatusLabelAr(_status),
+        paidAmount: _paidAmount,
+        remainingAmount: _remainingCash,
+        lines: _collectLines(),
+      );
+      await printContInvoiceStatementPdf(inv);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تصدير المستخلص: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingPdf = false);
+    }
   }
 
   Future<ContInvoiceModel?> _persistDraft({bool pop = true}) async {
@@ -1659,13 +1526,21 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     final isEdit = widget.existing?.id != null;
     final headerReadOnly = _lineEditMode != _ContLineEditMode.full;
     final statusLabel = contInvoiceStatusLabelAr(_status);
-    final busy = _saving || _workflowBusy;
+    final busy = _saving || _workflowBusy || _exportingPdf;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
           title: Text(isEdit ? 'تعديل مستخلص' : 'مستخلص مقاول'),
           actions: [
+            if (_canPrintStatement)
+              IconButton(
+                tooltip: 'تصدير المستخلص PDF',
+                onPressed: busy || _loading || _exportingPdf
+                    ? null
+                    : _exportStatementPdf,
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+              ),
             if (_canSaveLines)
               TextButton.icon(
                 onPressed: busy || _loading ? null : _save,
@@ -1885,6 +1760,14 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                                   _remainingCash,
                                   bold: true,
                                   due: true,
+                                ),
+                              ],
+                              if (_canPrintStatement) ...[
+                                const SizedBox(height: 12),
+                                OutlinedButton.icon(
+                                  onPressed: busy ? null : _exportStatementPdf,
+                                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                                  label: const Text('تصدير المستخلص PDF'),
                                 ),
                               ],
                             ],

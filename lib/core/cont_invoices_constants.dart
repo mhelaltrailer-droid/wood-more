@@ -42,6 +42,12 @@ const String contractorAccountsIconId = 'contractor_accounts';
 const String contractorAccountsRouteName = 'contractor-accounts';
 const String contractorAccountsHomeLabel = 'حسابات المقاولين';
 
+bool canPrintContInvoiceStatement(String status) {
+  return status == contStatusApproved ||
+      status == contStatusPartiallyPaid ||
+      status == contStatusPaid;
+}
+
 String contInvoiceStatusLabelAr(String status) {
   switch (status) {
     case contStatusDraft:

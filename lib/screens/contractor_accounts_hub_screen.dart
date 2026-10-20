@@ -12,6 +12,8 @@ import '../models/project_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
+import '../utils/cont_invoice_statement_pdf.dart';
+import '../widgets/cont_invoice_payment_dialog.dart';
 import 'cont_invoices_work_screen.dart';
 
 enum _DateFilterKind { statement, payment }
@@ -56,6 +58,7 @@ class _ContractorAccountsHubScreenState
   List<ContInvoiceModel> _allPosted = const [];
   List<_ContractorAccountRow> _rows = const [];
   String? _projectFilter;
+  final Set<String> _contractorKeys = {};
   DateTime? _from;
   DateTime? _to;
   _DateFilterKind _dateKind = _DateFilterKind.statement;
@@ -76,6 +79,7 @@ class _ContractorAccountsHubScreenState
       if (_from != null) 'من ${_dateFmt.format(_from!)}',
       if (_to != null) 'إلى ${_dateFmt.format(_to!)}',
       if (_projectFilter != null) 'مشروع: $_projectFilter',
+      if (_contractorKeys.isNotEmpty) 'مقاول: $_contractorFilterLabel',
       _dateKindLabel,
     ].join('  |  ');
   }
@@ -155,9 +159,19 @@ class _ContractorAccountsHubScreenState
     return true;
   }
 
+  String _contractorKey(ContInvoiceModel inv) {
+    return inv.contractorId != null
+        ? 'id:${inv.contractorId}'
+        : 'name:${inv.contractorName.trim().toLowerCase()}';
+  }
+
   bool _invoiceMatches(ContInvoiceModel inv) {
     if (_projectFilter != null &&
         inv.projectName.trim() != _projectFilter) {
+      return false;
+    }
+    if (_contractorKeys.isNotEmpty &&
+        !_contractorKeys.contains(_contractorKey(inv))) {
       return false;
     }
     if (!_hasRange) return true;
@@ -197,14 +211,40 @@ class _ContractorAccountsHubScreenState
     return names;
   }
 
+  List<({String key, String name})> get _contractorOptions {
+    final names = <String, String>{};
+    for (final inv in _allPosted) {
+      if (_projectFilter != null &&
+          inv.projectName.trim() != _projectFilter) {
+        continue;
+      }
+      names.putIfAbsent(_contractorKey(inv), () => inv.contractorName);
+    }
+    final list = names.entries
+        .map((e) => (key: e.key, name: e.value))
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+    return list;
+  }
+
+  String get _contractorFilterLabel {
+    if (_contractorKeys.isEmpty) return 'كل المقاولين';
+    final names = _contractorOptions
+        .where((o) => _contractorKeys.contains(o.key))
+        .map((o) => o.name)
+        .toList();
+    if (names.isEmpty) return 'كل المقاولين';
+    if (names.length == 1) return names.first;
+    return '${names.length} مقاولين';
+  }
+
   void _rebuildRows() {
+    final valid = _contractorOptions.map((e) => e.key).toSet();
+    _contractorKeys.removeWhere((k) => !valid.contains(k));
     final posted = _allPosted.where(_invoiceMatches).toList();
     final byKey = <String, List<ContInvoiceModel>>{};
     for (final inv in posted) {
-      final key = inv.contractorId != null
-          ? 'id:${inv.contractorId}'
-          : 'name:${inv.contractorName.trim().toLowerCase()}';
-      byKey.putIfAbsent(key, () => []).add(inv);
+      byKey.putIfAbsent(_contractorKey(inv), () => []).add(inv);
     }
     final rows = byKey.values.map((invoices) {
       final first = invoices.first;
@@ -247,6 +287,136 @@ class _ContractorAccountsHubScreenState
       }
     });
     _rebuildRows();
+  }
+
+  Future<void> _pickProject() async {
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('المشروع'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                RadioListTile<String>(
+                  title: const Text('كل المشروعات'),
+                  value: '',
+                  groupValue: _projectFilter ?? '',
+                  onChanged: (v) => Navigator.pop(ctx, v ?? ''),
+                ),
+                ..._projectNames.map(
+                  (n) => RadioListTile<String>(
+                    title: Text(n),
+                    value: n,
+                    groupValue: _projectFilter ?? '',
+                    onChanged: (v) => Navigator.pop(ctx, v ?? n),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null) return;
+    setState(() {
+      _projectFilter = selected.isEmpty ? null : selected;
+    });
+    _rebuildRows();
+  }
+
+  Future<void> _pickContractors() async {
+    final options = _contractorOptions;
+    final draft = Set<String>.from(_contractorKeys);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return Directionality(
+          textDirection: TextDirection.rtl,
+          child: StatefulBuilder(
+            builder: (ctx, setLocal) {
+              return AlertDialog(
+                title: const Text('المقاول'),
+                content: SizedBox(
+                  width: double.maxFinite,
+                  child: options.isEmpty
+                      ? const Text('لا يوجد مقاولون في العرض الحالي')
+                      : ListView(
+                          shrinkWrap: true,
+                          children: [
+                            CheckboxListTile(
+                              title: const Text('كل المقاولين'),
+                              value: draft.isEmpty,
+                              onChanged: (_) => setLocal(draft.clear),
+                            ),
+                            ...options.map(
+                              (o) => CheckboxListTile(
+                                title: Text(o.name),
+                                value: draft.contains(o.key),
+                                onChanged: (v) {
+                                  setLocal(() {
+                                    if (v == true) {
+                                      draft.add(o.key);
+                                    } else {
+                                      draft.remove(o.key);
+                                    }
+                                  });
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('إلغاء'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('تم'),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+    if (ok != true) return;
+    setState(() {
+      _contractorKeys
+        ..clear()
+        ..addAll(draft);
+    });
+    _rebuildRows();
+  }
+
+  Widget _pickerField({
+    required String label,
+    required String value,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: InputDecorator(
+        decoration: const InputDecoration(
+          border: OutlineInputBorder(),
+          isDense: true,
+          suffixIcon: Icon(Icons.arrow_drop_down),
+        ).copyWith(labelText: label),
+        child: Text(value, overflow: TextOverflow.ellipsis, maxLines: 1),
+      ),
+    );
   }
 
   Future<pw.ThemeData> _pdfTheme() async {
@@ -555,11 +725,25 @@ class _ContractorAccountsHubScreenState
     await _load();
   }
 
+  _ContractorAccountRow? _rowFor(_ContractorAccountRow sample) {
+    for (final r in _rows) {
+      if (sample.contractorId != null && r.contractorId == sample.contractorId) {
+        return r;
+      }
+      if (r.contractorName.trim().toLowerCase() ==
+          sample.contractorName.trim().toLowerCase()) {
+        return r;
+      }
+    }
+    return null;
+  }
+
   void _openContractor(_ContractorAccountRow row) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => _ContractorAccountDetailScreen(
           row: row,
+          currentUser: widget.currentUser,
           moneyFmt: _moneyFmt,
           dateFmt: _dateFmt,
           rangeLabel: _rangeLabel,
@@ -567,7 +751,11 @@ class _ContractorAccountsHubScreenState
           paymentsFor: _paymentsInView,
           paidFor: _paidForInvoice,
           onOpenInvoice: _openInvoice,
-          onPrint: () => _printDetailed(only: row),
+          onPrint: () => _printDetailed(only: _rowFor(row) ?? row),
+          reloadRow: () async {
+            await _load();
+            return _rowFor(row);
+          },
         ),
       ),
     );
@@ -622,33 +810,18 @@ class _ContractorAccountsHubScreenState
                     children: [
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                        child: DropdownButtonFormField<String?>(
-                          value: _projectFilter,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'المشروع',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          items: [
-                            const DropdownMenuItem<String?>(
-                              value: null,
-                              child: Text('كل المشروعات'),
-                            ),
-                            ..._projectNames.map(
-                              (n) => DropdownMenuItem<String?>(
-                                value: n,
-                                child: Text(
-                                  n,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            setState(() => _projectFilter = v);
-                            _rebuildRows();
-                          },
+                        child: _pickerField(
+                          label: 'المشروع',
+                          value: _projectFilter ?? 'كل المشروعات',
+                          onTap: _pickProject,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                        child: _pickerField(
+                          label: 'المقاول',
+                          value: _contractorFilterLabel,
+                          onTap: _pickContractors,
                         ),
                       ),
                       Padding(
@@ -821,6 +994,7 @@ class _ContractorAccountsHubScreenState
 
 class _ContractorAccountDetailScreen extends StatefulWidget {
   final _ContractorAccountRow row;
+  final UserModel currentUser;
   final NumberFormat moneyFmt;
   final DateFormat dateFmt;
   final String rangeLabel;
@@ -830,9 +1004,11 @@ class _ContractorAccountDetailScreen extends StatefulWidget {
   final double Function(ContInvoiceModel inv) paidFor;
   final Future<void> Function(ContInvoiceModel inv) onOpenInvoice;
   final Future<void> Function() onPrint;
+  final Future<_ContractorAccountRow?> Function() reloadRow;
 
   const _ContractorAccountDetailScreen({
     required this.row,
+    required this.currentUser,
     required this.moneyFmt,
     required this.dateFmt,
     required this.rangeLabel,
@@ -841,6 +1017,7 @@ class _ContractorAccountDetailScreen extends StatefulWidget {
     required this.paidFor,
     required this.onOpenInvoice,
     required this.onPrint,
+    required this.reloadRow,
   });
 
   @override
@@ -851,6 +1028,20 @@ class _ContractorAccountDetailScreen extends StatefulWidget {
 class _ContractorAccountDetailScreenState
     extends State<_ContractorAccountDetailScreen> {
   bool _printing = false;
+  bool _paying = false;
+  bool _exportingInvoice = false;
+  late _ContractorAccountRow _row;
+
+  @override
+  void initState() {
+    super.initState();
+    _row = widget.row;
+  }
+
+  Future<void> _refreshRow() async {
+    final updated = await widget.reloadRow();
+    if (updated != null && mounted) setState(() => _row = updated);
+  }
 
   Future<void> _print() async {
     if (_printing) return;
@@ -862,9 +1053,74 @@ class _ContractorAccountDetailScreenState
     }
   }
 
+  Future<void> _exportInvoice(ContInvoiceModel inv) async {
+    if (!canPrintContInvoiceStatement(inv.status) || _exportingInvoice) return;
+    final storage = getStorage();
+    if (storage is! ApiStorageService) return;
+    setState(() => _exportingInvoice = true);
+    try {
+      var detail = inv;
+      if (detail.lines.isEmpty && detail.id != null) {
+        detail = await storage.getContInvoiceDetail(
+          detail.id!,
+          widget.currentUser.id,
+        );
+      }
+      await printContInvoiceStatementPdf(detail);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تصدير المستخلص: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingInvoice = false);
+    }
+  }
+
+  Future<void> _payInvoice(ContInvoiceModel inv) async {
+    if (_paying || !canRecordContInvoicePayment(widget.currentUser, inv)) {
+      return;
+    }
+    final remaining = inv.remainingAmount;
+    final dateLabel = inv.statementDate == null
+        ? ''
+        : widget.dateFmt.format(inv.statementDate!);
+    final draft = await showContInvoicePaymentDialog(
+      context: context,
+      remaining: remaining,
+      moneyFmt: widget.moneyFmt,
+      invoiceLabel: '${inv.projectName}${dateLabel.isEmpty ? '' : ' — $dateLabel'}',
+    );
+    if (draft == null || inv.id == null) return;
+    final storage = getStorage();
+    if (storage is! ApiStorageService) return;
+    setState(() => _paying = true);
+    try {
+      await storage.markContInvoicePaid(
+        id: inv.id!,
+        userId: widget.currentUser.id,
+        amount: draft.amount,
+        comment: draft.comment,
+        attachments: draft.attachments,
+      );
+      await _refreshRow();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم تسجيل الدفعة على هذا المستخلص')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تسجيل الدفعة: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final row = widget.row;
+    final row = _row;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -906,12 +1162,21 @@ class _ContractorAccountDetailScreenState
               'المستخلصات والدفعات',
               style: Theme.of(context).textTheme.titleMedium,
             ),
+            const SizedBox(height: 4),
+            Text(
+              'كل مستخلص يتصرف لوحده. أي صرف جزئي أو كلي يلزم مستند الاستلام.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             const SizedBox(height: 8),
             ...row.invoices.map((inv) {
               final dateLabel = inv.statementDate == null
                   ? '—'
                   : widget.dateFmt.format(inv.statementDate!);
               final payments = widget.paymentsFor(inv);
+              final canPay = canRecordContInvoicePayment(
+                widget.currentUser,
+                inv,
+              );
               return Card(
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -922,13 +1187,45 @@ class _ContractorAccountDetailScreenState
                         title: Text(inv.projectName),
                         subtitle: Text(
                           'تاريخ المستخلص: $dateLabel  |  ${inv.statusLabelAr}\n'
-                          'مستحق: ${widget.moneyFmt.format(inv.amountDue)}  |  '
+                          'مستحق هذا المستخلص: ${widget.moneyFmt.format(inv.amountDue)}\n'
                           '${widget.paidLabel}: ${widget.moneyFmt.format(widget.paidFor(inv))}  |  '
-                          'باقي: ${widget.moneyFmt.format(inv.remainingAmount)}',
+                          'باقي هذا المستخلص: ${widget.moneyFmt.format(inv.remainingAmount)}',
                         ),
                         isThreeLine: true,
-                        onTap: () => widget.onOpenInvoice(inv),
+                        onTap: () async {
+                          await widget.onOpenInvoice(inv);
+                          await _refreshRow();
+                        },
                       ),
+                      if (canPrintContInvoiceStatement(inv.status) || canPay)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              if (canPrintContInvoiceStatement(inv.status))
+                                OutlinedButton.icon(
+                                  onPressed: _exportingInvoice
+                                      ? null
+                                      : () => _exportInvoice(inv),
+                                  icon: const Icon(
+                                    Icons.picture_as_pdf_outlined,
+                                  ),
+                                  label: const Text('تصدير المستخلص PDF'),
+                                ),
+                              if (canPay)
+                                FilledButton.icon(
+                                  onPressed:
+                                      _paying ? null : () => _payInvoice(inv),
+                                  icon: const Icon(Icons.payments_outlined),
+                                  label: const Text(
+                                    'تسجيل دفعة على هذا المستخلص',
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       if (payments.isEmpty)
                         const Padding(
                           padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
