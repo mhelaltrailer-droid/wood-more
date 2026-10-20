@@ -568,6 +568,49 @@ function ciRowToJson(row, lines = [], actions = null, payments = null) {
   return out;
 }
 
+async function ciLoadPaymentsForInvoices(pool, invoiceIds) {
+  const ids = (Array.isArray(invoiceIds) ? invoiceIds : [])
+    .map((id) => parseInt(id, 10))
+    .filter((id) => Number.isFinite(id));
+  const byInv = new Map();
+  if (!ids.length) return byInv;
+  const r = await pool.query(
+    `SELECT id, invoice_id, amount, note, file_name, mime_type, size_bytes,
+            created_by_user_id, created_by_user_name, created_at
+     FROM cont_invoice_payments
+     WHERE invoice_id = ANY($1::int[])
+     ORDER BY created_at ASC, id ASC`,
+    [ids],
+  );
+  const pids = r.rows
+    .map((row) => parseInt(row.id, 10))
+    .filter((id) => Number.isFinite(id));
+  const attByPay = new Map();
+  if (pids.length) {
+    const a = await pool.query(
+      `SELECT id, payment_id, file_name, mime_type, size_bytes
+       FROM cont_invoice_payment_attachments
+       WHERE payment_id = ANY($1::int[])
+       ORDER BY id ASC`,
+      [pids],
+    );
+    for (const row of a.rows) {
+      const pid = parseInt(row.payment_id, 10);
+      if (!attByPay.has(pid)) attByPay.set(pid, []);
+      attByPay.get(pid).push(row);
+    }
+  }
+  for (const row of r.rows) {
+    const invId = parseInt(row.invoice_id, 10);
+    if (!byInv.has(invId)) byInv.set(invId, []);
+    byInv.get(invId).push({
+      ...row,
+      _attachments: attByPay.get(parseInt(row.id, 10)) || [],
+    });
+  }
+  return byInv;
+}
+
 async function ciLoadPayments(pool, invoiceId) {
   const r = await pool.query(
     `SELECT * FROM cont_invoice_payments
@@ -1392,7 +1435,20 @@ function registerContInvoicesRoutes(app, pool) {
          ) pay ON pay.invoice_id = i.id
          ORDER BY i.updated_at DESC, i.id DESC`,
       );
-      res.json(r.rows.map((row) => ciRowToJson(row)));
+      const paysByInv = await ciLoadPaymentsForInvoices(
+        pool,
+        r.rows.map((row) => row.id),
+      );
+      res.json(
+        r.rows.map((row) =>
+          ciRowToJson(
+            row,
+            [],
+            null,
+            paysByInv.get(parseInt(row.id, 10)) || [],
+          ),
+        ),
+      );
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }
