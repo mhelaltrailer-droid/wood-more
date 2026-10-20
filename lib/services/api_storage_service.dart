@@ -3656,13 +3656,44 @@ class ApiStorageService {
     required int id,
     required int userId,
     String? comment,
-  }) =>
-      _contInvoicePostAction(
-        path: 'mark-paid',
-        id: id,
-        userId: userId,
-        comment: comment,
-      );
+    double? amount,
+    required List<Map<String, dynamic>> attachments,
+  }) async {
+    final uri = Uri.parse(_path('cont-invoices/$id/mark-paid'));
+    final r = await http.post(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode({
+        'userId': userId,
+        if (comment != null && comment.trim().isNotEmpty) 'comment': comment.trim(),
+        if (amount != null) 'amount': amount,
+        'attachments': attachments,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ContInvoiceModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<Map<String, String>> getContInvoicePaymentFile({
+    required int invoiceId,
+    required int paymentId,
+    required int userId,
+    int? attachmentId,
+  }) async {
+    final path = attachmentId != null
+        ? 'cont-invoices/$invoiceId/payments/$paymentId/attachments/$attachmentId/file?userId=$userId'
+        : 'cont-invoices/$invoiceId/payments/$paymentId/file?userId=$userId';
+    final r = await _httpGet(Uri.parse(_path(path)));
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    final map = Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+    return {
+      'file_name': (map['file_name'] ?? '').toString(),
+      'mime_type': (map['mime_type'] ?? '').toString(),
+      'data_base64': (map['data_base64'] ?? '').toString(),
+    };
+  }
 
   Future<List<ContProgressReportModel>> getContProgressReports({
     required int userId,

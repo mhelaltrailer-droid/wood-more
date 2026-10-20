@@ -23,14 +23,9 @@ function cpIsAppAdmin(user) {
 }
 
 function cpCanSubmit(user) {
+  // Hold: إدخال مهندس الموقع متوقف؛ مسار المستخلص يبدأ من QS.
   if (!user) return false;
-  if (cpIsAppAdmin(user)) return true;
-  const role = cpStr(user.role);
-  return (
-    role === 'site_engineer' ||
-    role === 'site_engineer_manager' ||
-    role === 'general_supervisor'
-  );
+  return cpIsAppAdmin(user);
 }
 
 function cpCanList(user) {
@@ -225,7 +220,9 @@ function registerContProgressRoutes(app, pool) {
       }
       const user = await cpGetUser(pool, userId, req);
       if (!user) return res.status(404).json({ error: 'user not found' });
-      if (!cpCanSubmit(user)) return res.status(403).json({ error: 'forbidden' });
+      if (!cpCanSubmit(user)) {
+        return res.status(403).json({ error: 'progress_entry_on_hold' });
+      }
 
       const projectId = parseInt(String(b.projectId ?? b.project_id ?? ''), 10);
       const structureLocationId = parseInt(

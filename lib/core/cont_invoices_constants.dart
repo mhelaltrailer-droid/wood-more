@@ -25,7 +25,22 @@ const String contStatusPendingPrice = 'pending_price';
 const String contStatusPendingPm = 'pending_pm';
 const String contStatusPendingOm = 'pending_om';
 const String contStatusApproved = 'approved';
+const String contStatusPartiallyPaid = 'partially_paid';
 const String contStatusPaid = 'paid';
+
+const int contPaymentVoucherMaxBytes = 10 * 1024 * 1024;
+const int contPaymentVoucherMaxFiles = 8;
+const List<String> contPaymentVoucherExtensions = [
+  'pdf',
+  'jpg',
+  'jpeg',
+  'png',
+  'webp',
+];
+
+const String contractorAccountsIconId = 'contractor_accounts';
+const String contractorAccountsRouteName = 'contractor-accounts';
+const String contractorAccountsHomeLabel = 'حسابات المقاولين';
 
 String contInvoiceStatusLabelAr(String status) {
   switch (status) {
@@ -39,6 +54,8 @@ String contInvoiceStatusLabelAr(String status) {
       return 'اعتماد العمليات';
     case contStatusApproved:
       return 'معتمد';
+    case contStatusPartiallyPaid:
+      return 'صرف جزئي';
     case contStatusPaid:
       return 'تم الصرف';
     default:

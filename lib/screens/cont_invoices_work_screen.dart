@@ -1,6 +1,12 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart' hide TextDirection;
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../core/cont_invoices_constants.dart';
 import '../core/invoice_structure_constants.dart';
@@ -11,6 +17,8 @@ import '../models/project_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
+import '../utils/open_stored_attachment.dart';
+import '../utils/reports_sys_attachment_save.dart';
 
 enum _ContLineEditMode { none, priceOnly, full }
 
@@ -119,6 +127,9 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   String _status = contStatusDraft;
   String _returnReason = '';
   List<ContInvoiceActionModel> _actions = const [];
+  List<ContInvoicePaymentModel> _payments = const [];
+  double _paidAmount = 0;
+  double _remainingAmount = 0;
   bool _workflowBusy = false;
   int? _invoiceId;
 
@@ -185,11 +196,27 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
       (isContInvoicesOmEmail(widget.currentUser.email) ||
           widget.currentUser.isPrimaryAppAdmin);
 
-  bool get _canMarkPaid =>
-      _status == contStatusApproved &&
-      _effectiveInvoiceId != null &&
-      (isContInvoicesAhAminEmail(widget.currentUser.email) ||
-          widget.currentUser.isPrimaryAppAdmin);
+  bool get _canRecordPayment {
+    if (_effectiveInvoiceId == null) return false;
+    if (_status != contStatusApproved && _status != contStatusPartiallyPaid) {
+      return false;
+    }
+    if (_remainingCash <= 0) return false;
+    return isContInvoicesAhAminEmail(widget.currentUser.email) ||
+        widget.currentUser.isPrimaryAppAdmin;
+  }
+
+  bool get _showCashLedger =>
+      _status == contStatusApproved ||
+      _status == contStatusPartiallyPaid ||
+      _status == contStatusPaid;
+
+  double get _remainingCash {
+    if (_remainingAmount > 0) return _remainingAmount;
+    final due = _amountDue;
+    final left = double.parse((due - _paidAmount).toStringAsFixed(2));
+    return left < 0 ? 0 : left;
+  }
 
   String get _resolvedContractType {
     if (_contractTypeChoice == contInvoicesContractTypeOther) {
@@ -282,6 +309,9 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     _status = inv.status;
     _returnReason = inv.returnReason;
     _actions = inv.actions;
+    _payments = inv.payments;
+    _paidAmount = inv.paidAmount;
+    _remainingAmount = inv.remainingAmount;
     _statementDate = inv.statementDate ?? DateTime.now();
     final ct = inv.contractType.trim();
     if (ct.isEmpty || ct == contInvoicesDefaultContractType) {
@@ -964,6 +994,313 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     );
   }
 
+  String _paymentMimeFromExtension(String? ext) {
+    switch ((ext ?? '').toLowerCase()) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      default:
+        return '';
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _pickPaymentVouchers({
+    required int alreadyCount,
+  }) async {
+    final remaining = contPaymentVoucherMaxFiles - alreadyCount;
+    if (remaining <= 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('الحد الأقصى $contPaymentVoucherMaxFiles ملفات'),
+          ),
+        );
+      }
+      return const [];
+    }
+    final result = await FilePicker.pickFiles(
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: contPaymentVoucherExtensions,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return const [];
+    final out = <Map<String, dynamic>>[];
+    for (final f in result.files) {
+      if (out.length >= remaining) break;
+      final bytes = f.bytes;
+      if (bytes == null) continue;
+      if (bytes.length > contPaymentVoucherMaxBytes) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('الملف ${f.name} أكبر من 10 ميجا'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        continue;
+      }
+      final mime = _paymentMimeFromExtension(f.extension);
+      if (mime.isEmpty) continue;
+      out.add({
+        'file_name': f.name,
+        'mime_type': mime,
+        'data_base64': base64Encode(bytes),
+        'size_bytes': bytes.length,
+      });
+    }
+    return out;
+  }
+
+  Future<Map<String, String>?> _loadPaymentFile({
+    required ContInvoicePaymentModel payment,
+    ContInvoicePaymentAttachmentModel? attachment,
+  }) async {
+    final invoiceId = _effectiveInvoiceId;
+    final paymentId = payment.id;
+    if (invoiceId == null || paymentId == null) return null;
+    return _api.getContInvoicePaymentFile(
+      invoiceId: invoiceId,
+      paymentId: paymentId,
+      userId: widget.currentUser.id,
+      attachmentId: attachment?.id,
+    );
+  }
+
+  Future<void> _openPaymentVoucher({
+    required ContInvoicePaymentModel payment,
+    ContInvoicePaymentAttachmentModel? attachment,
+  }) async {
+    try {
+      final file = await _loadPaymentFile(
+        payment: payment,
+        attachment: attachment,
+      );
+      if (file == null) return;
+      final raw = file['data_base64'] ?? '';
+      final bytes = Uint8List.fromList(base64Decode(raw));
+      final err = await openStoredAttachment(
+        bytes: bytes,
+        fileName: file['file_name'] ?? attachment?.fileName ?? payment.fileName,
+      );
+      if (err != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر فتح المرفق: $err')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تحميل مرفق الصرف: $e')),
+      );
+    }
+  }
+
+  Future<void> _downloadPaymentVoucher({
+    required ContInvoicePaymentModel payment,
+    ContInvoicePaymentAttachmentModel? attachment,
+  }) async {
+    try {
+      final file = await _loadPaymentFile(
+        payment: payment,
+        attachment: attachment,
+      );
+      if (file == null) return;
+      final raw = file['data_base64'] ?? '';
+      final bytes = Uint8List.fromList(base64Decode(raw));
+      final err = await saveReportsSysAttachment(
+        bytes: bytes,
+        fileName: file['file_name'] ?? attachment?.fileName ?? 'voucher',
+        mimeType: file['mime_type'] ?? attachment?.mimeType,
+      );
+      if (err != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر التنزيل: $err')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تنزيل المرفق: $e')),
+      );
+    }
+  }
+
+  Future<void> _printPaymentVoucher({
+    required ContInvoicePaymentModel payment,
+    ContInvoicePaymentAttachmentModel? attachment,
+  }) async {
+    try {
+      final file = await _loadPaymentFile(
+        payment: payment,
+        attachment: attachment,
+      );
+      if (file == null) return;
+      final raw = file['data_base64'] ?? '';
+      final bytes = Uint8List.fromList(base64Decode(raw));
+      final name = file['file_name'] ?? attachment?.fileName ?? 'voucher';
+      final mime = (file['mime_type'] ?? attachment?.mimeType ?? '').toLowerCase();
+      if (mime.contains('pdf') || name.toLowerCase().endsWith('.pdf')) {
+        await Printing.layoutPdf(onLayout: (_) async => bytes, name: name);
+        return;
+      }
+      final doc = pw.Document();
+      doc.addPage(
+        pw.Page(
+          build: (_) => pw.Center(
+            child: pw.Image(pw.MemoryImage(bytes), fit: pw.BoxFit.contain),
+          ),
+        ),
+      );
+      await Printing.layoutPdf(
+        onLayout: (_) async => doc.save(),
+        name: name,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر طباعة المرفق: $e')),
+      );
+    }
+  }
+
+  Future<void> _confirmRecordPayment() async {
+    final remaining = _remainingCash;
+    if (remaining <= 0) return;
+    final amountC = TextEditingController(
+      text: remaining == remaining.roundToDouble()
+          ? remaining.toInt().toString()
+          : remaining.toStringAsFixed(2),
+    );
+    final noteC = TextEditingController();
+    final vouchers = <Map<String, dynamic>>[];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('تسجيل دفعة صرف'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    'المتبقي: ${_moneyFmt.format(remaining)}',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: amountC,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    _MaxValueInputFormatter(remaining),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: 'المبلغ المصروف الآن',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: noteC,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'ملاحظة (اختياري)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: vouchers.length >= contPaymentVoucherMaxFiles
+                      ? null
+                      : () async {
+                          final files = await _pickPaymentVouchers(
+                            alreadyCount: vouchers.length,
+                          );
+                          if (files.isEmpty) return;
+                          setLocal(() => vouchers.addAll(files));
+                        },
+                  icon: const Icon(Icons.attach_file),
+                  label: Text(
+                    vouchers.isEmpty
+                        ? 'إرفاق نموذج الصرف (مطلوب)'
+                        : 'إضافة ملف (${vouchers.length})',
+                  ),
+                ),
+                ...vouchers.asMap().entries.map(
+                  (e) => ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.insert_drive_file_outlined),
+                    title: Text(
+                      e.value['file_name'] as String? ?? 'مرفق',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => setLocal(() => vouchers.removeAt(e.key)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed:
+                  vouchers.isEmpty ? null : () => Navigator.pop(ctx, true),
+              child: const Text('تسجيل'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final id = _effectiveInvoiceId;
+    if (ok != true || id == null) return;
+    final amount = double.tryParse(amountC.text.replaceAll(',', '').trim());
+    if (amount == null || amount <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('أدخل مبلغ صرف صحيح')),
+      );
+      return;
+    }
+    if (vouchers.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('أرفق صورة أو ملف نموذج الصرف')),
+      );
+      return;
+    }
+    await _runWorkflow(
+      () => _api.markContInvoicePaid(
+        id: id,
+        userId: widget.currentUser.id,
+        amount: amount,
+        comment: noteC.text.trim(),
+        attachments: vouchers,
+      ),
+      popOnSuccess: false,
+    );
+  }
+
   Future<ContInvoiceModel?> _persistDraft({bool pop = true}) async {
     if (!_canSaveLines) return null;
     if (_sections.isEmpty) {
@@ -1541,6 +1878,15 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                               _sumRow('خصومات أخرى', _otherDeductions),
                               const Divider(),
                               _sumRow('المستحق', _amountDue, bold: true, due: true),
+                              if (_showCashLedger) ...[
+                                _sumRow('المصروف', _paidAmount),
+                                _sumRow(
+                                  'الباقي للصرف',
+                                  _remainingCash,
+                                  bold: true,
+                                  due: true,
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -1661,19 +2007,111 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                           ),
                         ),
                       ],
-                      if (_canMarkPaid) ...[
-                        const SizedBox(height: 10),
-                        FilledButton.icon(
-                          onPressed: busy
-                              ? null
-                              : () => _runWorkflow(
-                                    () => _api.markContInvoicePaid(
-                                      id: _effectiveInvoiceId!,
-                                      userId: widget.currentUser.id,
+                      if (_showCashLedger && _payments.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          'سجل الصرف',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        ..._payments.map((p) {
+                          final when = p.createdAt == null
+                              ? '—'
+                              : DateFormat('dd/MM/yyyy HH:mm')
+                                  .format(p.createdAt!.toLocal());
+                          final who = p.createdByUserName.trim();
+                          final files = p.attachments.isNotEmpty
+                              ? p.attachments
+                              : (p.hasAttachment
+                                  ? [
+                                      ContInvoicePaymentAttachmentModel(
+                                        fileName: p.fileName,
+                                        mimeType: p.mimeType,
+                                        sizeBytes: p.sizeBytes,
+                                      ),
+                                    ]
+                                  : const <ContInvoicePaymentAttachmentModel>[]);
+                          return Card(
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Column(
+                                children: [
+                                  ListTile(
+                                    dense: true,
+                                    leading: const Icon(Icons.payments_outlined),
+                                    title: Text(
+                                      _moneyFmt.format(p.amount),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    subtitle: Text(
+                                      [
+                                        if (who.isNotEmpty) who,
+                                        when,
+                                        if (p.note.trim().isNotEmpty)
+                                          p.note.trim(),
+                                      ].join(' · '),
                                     ),
                                   ),
+                                  ...files.map(
+                                    (att) => ListTile(
+                                      dense: true,
+                                      leading: const Icon(Icons.attach_file),
+                                      title: Text(
+                                        att.fileName.isEmpty
+                                            ? 'مرفق صرف'
+                                            : att.fileName,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      trailing: Wrap(
+                                        spacing: 0,
+                                        children: [
+                                          IconButton(
+                                            tooltip: 'فتح',
+                                            onPressed: () => _openPaymentVoucher(
+                                              payment: p,
+                                              attachment: att,
+                                            ),
+                                            icon: const Icon(Icons.visibility_outlined),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'تنزيل',
+                                            onPressed: () =>
+                                                _downloadPaymentVoucher(
+                                              payment: p,
+                                              attachment: att,
+                                            ),
+                                            icon: const Icon(Icons.download_outlined),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'طباعة',
+                                            onPressed: () => _printPaymentVoucher(
+                                              payment: p,
+                                              attachment: att,
+                                            ),
+                                            icon: const Icon(Icons.print_outlined),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                      if (_canRecordPayment) ...[
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: busy ? null : _confirmRecordPayment,
                           icon: const Icon(Icons.payments),
-                          label: const Text('تسجيل تم الصرف'),
+                          label: Text(
+                            _paidAmount > 0
+                                ? 'تسجيل دفعة صرف'
+                                : 'تسجيل صرف',
+                          ),
                           style: FilledButton.styleFrom(
                             minimumSize: const Size.fromHeight(48),
                             backgroundColor: Colors.indigo,

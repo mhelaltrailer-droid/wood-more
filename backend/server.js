@@ -2005,6 +2005,7 @@ async function ensureHomeIconsVisibilitySetting() {
         reports_sys: true,
         invoices_owner: true,
         cont_invoices: false,
+        contractor_accounts: false,
       },
       site_engineer_manager: {
         attendance_reports: true,
@@ -2036,6 +2037,7 @@ async function ensureHomeIconsVisibilitySetting() {
         shop_drawing: true,
         invoices_owner: true,
         cont_invoices: false,
+        contractor_accounts: false,
       },
       general_supervisor: {
         attendance: true,
@@ -2068,6 +2070,7 @@ async function ensureHomeIconsVisibilitySetting() {
         meetings: true,
         invoices_owner: true,
         cont_invoices: false,
+        contractor_accounts: false,
       },
       app_admin: {
         attendance_reports: true,
@@ -2092,6 +2095,7 @@ async function ensureHomeIconsVisibilitySetting() {
         cont_invoices: false,
         invoice_structure: false,
         cont_progress: false,
+        contractor_accounts: true,
       },
       document_controller: {
         ir_mir: true,
@@ -2117,9 +2121,11 @@ async function ensureHomeIconsVisibilitySetting() {
       qs: {
         invoices_owner: true,
         cont_invoices: false,
+        contractor_accounts: false,
       },
       finance: {
         invoices_owner: true,
+        contractor_accounts: false,
       },
       purchaser: {
         engineer_finances: true,

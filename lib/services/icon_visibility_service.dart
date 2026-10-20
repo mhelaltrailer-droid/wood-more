@@ -102,6 +102,11 @@ class IconVisibilityService {
     label: 'مستخلص مقاول-Progress',
   );
 
+  static const HomeIconItem contractorAccountsIcon = HomeIconItem(
+    id: 'contractor_accounts',
+    label: 'حسابات المقاولين',
+  );
+
   static const HomeIconItem invoiceStructureIcon = HomeIconItem(
     id: 'invoice_structure',
     label: 'هيكلة المستخلصات',
@@ -163,6 +168,7 @@ class IconVisibilityService {
     'cont_invoices',
     'invoice_structure',
     'cont_progress',
+    'contractor_accounts',
   };
 
   static const Map<String, List<HomeIconItem>> roleIcons = {
@@ -172,9 +178,11 @@ class IconVisibilityService {
     roleQs: [
       invoicesOwnerIcon,
       contInvoicesIcon,
+      contractorAccountsIcon,
     ],
     roleFinance: [
       invoicesOwnerIcon,
+      contractorAccountsIcon,
     ],
     rolePurchaser: [
       HomeIconItem(id: 'engineer_finances', label: 'العهدة/المصروفات'),
@@ -209,6 +217,7 @@ class IconVisibilityService {
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       invoicesOwnerIcon,
       contInvoicesIcon,
+      contractorAccountsIcon,
     ],
     roleDocumentController: _documentControllerHomeIcons,
     roleSiteEngineerManager: [
@@ -227,6 +236,7 @@ class IconVisibilityService {
       meetingsIcon,
       invoicesOwnerIcon,
       contInvoicesIcon,
+      contractorAccountsIcon,
     ],
     roleGeneralSupervisor: [
       HomeIconItem(id: 'attendance', label: 'تسجيل الحضور والانصراف'),
@@ -259,6 +269,7 @@ class IconVisibilityService {
       meetingsIcon,
       invoicesOwnerIcon,
       contInvoicesIcon,
+      contractorAccountsIcon,
     ],
     roleAppAdmin: [
       HomeIconItem(id: 'attendance_reports', label: 'تقارير الحضور والانصراف'),
@@ -289,6 +300,7 @@ class IconVisibilityService {
       invoicesOwnerIcon,
       contInvoicesIcon,
       contProgressIcon,
+      contractorAccountsIcon,
     ],
   };
 
@@ -296,7 +308,9 @@ class IconVisibilityService {
     final items = roleIcons[role] ?? const <HomeIconItem>[];
     return {
       for (final item in items)
-        item.id: !hiddenByDefaultIconIds.contains(item.id),
+        item.id: item.id == 'contractor_accounts'
+            ? role == roleAppAdmin
+            : !hiddenByDefaultIconIds.contains(item.id),
     };
   }
 

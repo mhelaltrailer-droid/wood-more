@@ -221,12 +221,18 @@ class UserModel {
       isOperationManager ||
       isAdmin;
 
-  /// مستخلص مقاول-Progress — مهندس الموقع (+ مدير/مشرف/أدمن) عبر Icons Control.
-  bool get canAccessContProgress =>
-      isSiteEngineer ||
-      isSiteEngineerManager ||
-      isGeneralSupervisor ||
-      isAdmin;
+  /// حسابات المقاولين — أهلية الدور؛ الظهور الفعلي عبر Icons Control
+  /// (افتراضي On لكل app_admin فقط).
+  bool get canAccessContractorAccounts =>
+      isAdmin ||
+      isQs ||
+      isAccountant ||
+      isFinance ||
+      isOperationManager ||
+      isProjectsManager;
+
+  /// مستخلص مقاول-Progress — Hold: إدخال الموقع متوقف؛ البداية من QS.
+  bool get canAccessContProgress => isAdmin;
 
   /// أيقونة Invoices (Owner) — QS، Finance، المكتب الفني، العمليات، Projects Manager، Ah.Amin، والمسؤول الأساسي.
   bool get canAccessInvoicesOwner =>

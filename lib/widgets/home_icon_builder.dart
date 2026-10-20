@@ -38,6 +38,7 @@ import '../screens/meetings_screen.dart';
 import '../screens/invoices_owner_hub_screen.dart';
 import '../screens/cont_invoices_hub_screen.dart';
 import '../screens/cont_progress_screen.dart';
+import '../screens/contractor_accounts_hub_screen.dart';
 import '../core/cont_invoices_constants.dart';
 import '../services/api_storage_service.dart';
 import '../services/home_icon_order_service.dart';
@@ -574,6 +575,22 @@ class HomeIconBuilder {
             context,
             contProgressRouteName,
             ContProgressScreen(currentUser: user),
+          ),
+        );
+      case contractorAccountsIconId:
+        if (!user.canAccessContractorAccounts) {
+          return const SizedBox.shrink();
+        }
+        return _lightCard(
+          icon: Icons.account_balance_wallet_outlined,
+          iconSize: 56,
+          title: contractorAccountsHomeLabel,
+          subtitle: 'مستحق / مصروف / باقي لكل مقاول',
+          padding: 28,
+          onTap: () => pushAndSaveRoute(
+            context,
+            contractorAccountsRouteName,
+            ContractorAccountsHubScreen(currentUser: user),
           ),
         );
       default:

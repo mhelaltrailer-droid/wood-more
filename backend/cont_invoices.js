@@ -1,12 +1,30 @@
 /**
  * Cont-Invoices — مستخلصات المقاول (مسودات + بنود كميات/أسعار).
- * تداول: draft → pending_price → pending_pm → pending_om → approved → paid
+ * تداول: draft → pending_price → pending_pm → pending_om → approved
+ *        → partially_paid → paid (دفعات خزينة بعد الاعتماد)
  */
 
+const crypto = require('crypto');
 const {
   applyViewAsToUser,
   primaryAdminPowersActiveForUser,
 } = require('./view_as');
+const {
+  isR2Configured,
+  stripBase64Payload,
+  r2PutObject,
+  r2GetObjectBuffer,
+} = require('./lib/r2');
+
+const CI_PAYMENT_MAX_BYTES = 10 * 1024 * 1024;
+const CI_PAYMENT_MAX_FILES = 8;
+const CI_PAYMENT_ALLOWED_MIME = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+]);
 
 function ciNum(raw, fallback = 0) {
   const n = parseFloat(String(raw ?? '').replace(/,/g, ''));
@@ -55,13 +73,19 @@ function ciIsOm(user) {
 }
 
 function ciCanAccessList(user, req) {
+  const role = ciStr(user?.role);
   return (
     ciIsAppAdmin(user) ||
     ciIsPrimaryAdmin(user, req) ||
     ciIsQs(user) ||
     ciIsAhAmin(user) ||
     ciIsPm(user) ||
-    ciIsOm(user)
+    ciIsOm(user) ||
+    role === 'qs' ||
+    role === 'accountant' ||
+    role === 'finance' ||
+    role === 'projects_manager' ||
+    role === 'operation_manager'
   );
 }
 
@@ -85,6 +109,8 @@ function ciStatusLabelAr(status) {
       return 'اعتماد العمليات';
     case 'approved':
       return 'معتمد';
+    case 'partially_paid':
+      return 'صرف جزئي';
     case 'paid':
       return 'تم الصرف';
     default:
@@ -326,14 +352,139 @@ function ciNormalizeLine(raw, index) {
   };
 }
 
-function ciRowToJson(row, lines = [], actions = null) {
+function ciRound2(n) {
+  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+
+function ciPaymentAttachmentToJson(row) {
+  return {
+    id: row.id != null ? parseInt(row.id, 10) : null,
+    payment_id:
+      row.payment_id != null ? parseInt(row.payment_id, 10) : null,
+    file_name: ciStr(row.file_name),
+    mime_type: ciStr(row.mime_type),
+    size_bytes: parseInt(String(row.size_bytes || 0), 10) || 0,
+  };
+}
+
+function ciPaymentToJson(row) {
+  let attachments = Array.isArray(row._attachments) ? row._attachments : [];
+  if (!attachments.length && ciStr(row.file_name)) {
+    attachments = [
+      {
+        id: null,
+        payment_id: row.id,
+        file_name: row.file_name,
+        mime_type: row.mime_type,
+        size_bytes: row.size_bytes,
+      },
+    ];
+  }
+  return {
+    id: row.id != null ? parseInt(row.id, 10) : null,
+    invoice_id:
+      row.invoice_id != null ? parseInt(row.invoice_id, 10) : null,
+    amount: ciNum(row.amount),
+    note: row.note || '',
+    has_attachment: attachments.length > 0,
+    file_name: attachments[0] ? ciStr(attachments[0].file_name) : '',
+    mime_type: attachments[0] ? ciStr(attachments[0].mime_type) : '',
+    size_bytes: attachments[0]
+      ? parseInt(String(attachments[0].size_bytes || 0), 10) || 0
+      : 0,
+    attachments: attachments.map(ciPaymentAttachmentToJson),
+    created_by_user_id:
+      row.created_by_user_id != null
+        ? parseInt(row.created_by_user_id, 10)
+        : null,
+    created_by_user_name: row.created_by_user_name || '',
+    created_at: row.created_at || null,
+  };
+}
+
+function ciSafeFileSuffix(name) {
+  const base = String(name || 'voucher').replace(/[^a-zA-Z0-9._-]+/g, '_');
+  return base.slice(0, 80) || 'voucher';
+}
+
+function ciMimeFromName(name) {
+  const ext = String(name || '')
+    .split('.')
+    .pop()
+    .toLowerCase();
+  if (ext === 'pdf') return 'application/pdf';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  return '';
+}
+
+function ciReadPaymentAttachment(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const name = ciStr(src.file_name ?? src.fileName);
+  const mime = ciStr(src.mime_type ?? src.mimeType) || ciMimeFromName(name);
+  const size = parseInt(String(src.size_bytes ?? src.sizeBytes ?? '0'), 10) || 0;
+  const data = String(src.data_base64 ?? src.dataBase64 ?? '').trim();
+  if (!name || !data) return { error: 'attachment_required' };
+  const mimeOk = CI_PAYMENT_ALLOWED_MIME.has(mime.toLowerCase());
+  if (!mimeOk) return { error: 'attachment_type_not_allowed' };
+  if (size <= 0 || size > CI_PAYMENT_MAX_BYTES) {
+    return { error: 'attachment_too_large' };
+  }
+  return { ok: true, name, mime, size, data };
+}
+
+function ciReadPaymentAttachments(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  let list = [];
+  if (Array.isArray(b.attachments)) list = b.attachments;
+  else if (b.attachment && typeof b.attachment === 'object') {
+    list = [b.attachment];
+  } else if (ciStr(b.file_name ?? b.fileName)) {
+    list = [b];
+  }
+  if (!list.length) return { error: 'attachment_required' };
+  if (list.length > CI_PAYMENT_MAX_FILES) {
+    return { error: 'too_many_attachments' };
+  }
+  const out = [];
+  for (const raw of list) {
+    const one = ciReadPaymentAttachment(raw);
+    if (one.error) return one;
+    out.push(one);
+  }
+  return { ok: true, items: out };
+}
+
+async function ciStorePaymentBlob({ invoiceId, name, mime, size, dataBase64 }) {
+  const rawB64 = stripBase64Payload(dataBase64);
+  if (isR2Configured()) {
+    const key = `cont-invoices/${invoiceId}/payments/${crypto.randomUUID()}-${ciSafeFileSuffix(name)}`;
+    const body = Buffer.from(rawB64, 'base64');
+    await r2PutObject({ key, body, contentType: mime });
+    return {
+      storage_backend: 'r2',
+      storage_key: key,
+      data_base64: null,
+      size_bytes: size || body.length,
+    };
+  }
+  return {
+    storage_backend: 'db',
+    storage_key: null,
+    data_base64: rawB64,
+    size_bytes: size,
+  };
+}
+
+function ciRowToJson(row, lines = [], actions = null, payments = null) {
   const totalAmount = ciNum(row.total_amount);
   const previouslyPaid = ciNum(row.previously_paid);
   const otherDeductions = ciNum(row.other_deductions);
   const amountDue =
     row.amount_due != null
       ? ciNum(row.amount_due)
-      : Math.round((totalAmount - previouslyPaid - otherDeductions) * 100) / 100;
+      : ciRound2(totalAmount - previouslyPaid - otherDeductions);
   const status = row.status || 'draft';
   const out = {
     id: parseInt(row.id, 10),
@@ -371,6 +522,8 @@ function ciRowToJson(row, lines = [], actions = null) {
     created_by_user_name: row.created_by_user_name || '',
     created_at: row.created_at,
     updated_at: row.updated_at,
+    paid_amount: 0,
+    remaining_amount: 0,
     lines: lines.map((l) => ({
       id: l.id != null ? parseInt(l.id, 10) : null,
       sort_order: parseInt(l.sort_order, 10) || 0,
@@ -402,7 +555,47 @@ function ciRowToJson(row, lines = [], actions = null) {
   if (actions != null) {
     out.actions = actions;
   }
+  let paidAmount =
+    row.paid_amount != null ? ciNum(row.paid_amount) : 0;
+  if (Array.isArray(payments)) {
+    paidAmount = ciRound2(
+      payments.reduce((sum, p) => sum + ciNum(p.amount), 0),
+    );
+    out.payments = payments.map(ciPaymentToJson);
+  }
+  out.paid_amount = paidAmount;
+  out.remaining_amount = ciRound2(Math.max(0, amountDue - paidAmount));
   return out;
+}
+
+async function ciLoadPayments(pool, invoiceId) {
+  const r = await pool.query(
+    `SELECT * FROM cont_invoice_payments
+     WHERE invoice_id = $1
+     ORDER BY created_at ASC, id ASC`,
+    [invoiceId],
+  );
+  const ids = r.rows
+    .map((row) => parseInt(row.id, 10))
+    .filter((id) => Number.isFinite(id));
+  const attByPay = new Map();
+  if (ids.length) {
+    const a = await pool.query(
+      `SELECT * FROM cont_invoice_payment_attachments
+       WHERE payment_id = ANY($1::int[])
+       ORDER BY id ASC`,
+      [ids],
+    );
+    for (const row of a.rows) {
+      const pid = parseInt(row.payment_id, 10);
+      if (!attByPay.has(pid)) attByPay.set(pid, []);
+      attByPay.get(pid).push(row);
+    }
+  }
+  return r.rows.map((row) => ({
+    ...row,
+    _attachments: attByPay.get(parseInt(row.id, 10)) || [],
+  }));
 }
 
 async function ciLoadLines(pool, invoiceId) {
@@ -794,6 +987,92 @@ async function ensureContInvoicesTables(pool) {
     CREATE INDEX IF NOT EXISTS idx_cont_invoice_actions_invoice
     ON cont_invoice_actions (invoice_id, created_at ASC)
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cont_invoice_payments (
+      id SERIAL PRIMARY KEY,
+      invoice_id INTEGER NOT NULL REFERENCES cont_invoices(id) ON DELETE CASCADE,
+      amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+      note TEXT NOT NULL DEFAULT '',
+      created_by_user_id INTEGER,
+      created_by_user_name TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_cont_invoice_payments_invoice
+    ON cont_invoice_payments (invoice_id, created_at ASC)
+  `);
+  await pool.query(
+    `ALTER TABLE cont_invoice_payments ADD COLUMN IF NOT EXISTS file_name TEXT NOT NULL DEFAULT ''`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoice_payments ADD COLUMN IF NOT EXISTS mime_type TEXT NOT NULL DEFAULT ''`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoice_payments ADD COLUMN IF NOT EXISTS size_bytes INTEGER NOT NULL DEFAULT 0`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoice_payments ADD COLUMN IF NOT EXISTS data_base64 TEXT`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoice_payments ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'db'`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoice_payments ADD COLUMN IF NOT EXISTS storage_key TEXT`,
+  );
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cont_invoice_payment_attachments (
+      id SERIAL PRIMARY KEY,
+      payment_id INTEGER NOT NULL REFERENCES cont_invoice_payments(id) ON DELETE CASCADE,
+      invoice_id INTEGER NOT NULL REFERENCES cont_invoices(id) ON DELETE CASCADE,
+      file_name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT '',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      data_base64 TEXT,
+      storage_backend TEXT NOT NULL DEFAULT 'db',
+      storage_key TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_cont_payment_attachments_payment
+    ON cont_invoice_payment_attachments (payment_id, id)
+  `);
+  await pool.query(`
+    INSERT INTO cont_invoice_payment_attachments (
+      payment_id, invoice_id, file_name, mime_type, size_bytes,
+      data_base64, storage_backend, storage_key, created_at
+    )
+    SELECT
+      p.id, p.invoice_id, p.file_name, p.mime_type, p.size_bytes,
+      p.data_base64, COALESCE(NULLIF(p.storage_backend, ''), 'db'),
+      p.storage_key, p.created_at
+    FROM cont_invoice_payments p
+    WHERE COALESCE(p.file_name, '') <> ''
+      AND NOT EXISTS (
+        SELECT 1 FROM cont_invoice_payment_attachments a
+        WHERE a.payment_id = p.id
+      )
+  `);
+  await pool.query(`
+    INSERT INTO cont_invoice_payments (
+      invoice_id, amount, note,
+      created_by_user_id, created_by_user_name, created_at
+    )
+    SELECT
+      i.id,
+      i.amount_due,
+      'ترحيل صرف سابق',
+      i.paid_by_user_id,
+      COALESCE(i.paid_by_user_name, ''),
+      COALESCE(i.paid_at, i.updated_at, NOW())
+    FROM cont_invoices i
+    WHERE i.status = 'paid'
+      AND i.amount_due > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM cont_invoice_payments p WHERE p.invoice_id = i.id
+      )
+  `);
 }
 
 function registerContInvoicesRoutes(app, pool) {
@@ -1104,8 +1383,14 @@ function registerContInvoicesRoutes(app, pool) {
       }
 
       const r = await pool.query(
-        `SELECT * FROM cont_invoices
-         ORDER BY updated_at DESC, id DESC`,
+        `SELECT i.*, COALESCE(pay.paid_amount, 0) AS paid_amount
+         FROM cont_invoices i
+         LEFT JOIN (
+           SELECT invoice_id, SUM(amount)::numeric(14,2) AS paid_amount
+           FROM cont_invoice_payments
+           GROUP BY invoice_id
+         ) pay ON pay.invoice_id = i.id
+         ORDER BY i.updated_at DESC, i.id DESC`,
       );
       res.json(r.rows.map((row) => ciRowToJson(row)));
     } catch (e) {
@@ -1132,7 +1417,8 @@ function registerContInvoicesRoutes(app, pool) {
       if (!r.rows.length) return res.status(404).json({ error: 'not found' });
       const lines = await ciLoadLines(pool, id);
       const actions = await ciLoadActions(pool, id);
-      res.json(ciRowToJson(r.rows[0], lines, actions));
+      const payments = await ciLoadPayments(pool, id);
+      res.json(ciRowToJson(r.rows[0], lines, actions, payments));
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }
@@ -1413,7 +1699,8 @@ function registerContInvoicesRoutes(app, pool) {
     }
     const lines = await ciLoadLines(pool, invoiceId);
     const actions = await ciLoadActions(pool, invoiceId);
-    res.json(ciRowToJson(r.rows[0], lines, actions));
+    const payments = await ciLoadPayments(pool, invoiceId);
+    res.json(ciRowToJson(r.rows[0], lines, actions, payments));
   }
 
   app.post('/cont-invoices/:id/submit', async (req, res) => {
@@ -1645,31 +1932,123 @@ function registerContInvoicesRoutes(app, pool) {
       if (!ciIsAhAmin(user) && !ciIsPrimaryAdmin(user, req)) {
         return res.status(403).json({ error: 'forbidden' });
       }
-      const comment = ciStr(b.comment ?? b.notes);
+      const comment = ciStr(b.comment ?? b.notes ?? b.note);
       const existing = await pool.query(
-        'SELECT id, status FROM cont_invoices WHERE id = $1',
+        'SELECT id, status, amount_due FROM cont_invoices WHERE id = $1',
         [id],
       );
       if (!existing.rows.length) {
         return res.status(404).json({ error: 'not found' });
       }
-      if (String(existing.rows[0].status) !== 'approved') {
+      const status = String(existing.rows[0].status || '');
+      if (status !== 'approved' && status !== 'partially_paid') {
         return res.status(400).json({ error: 'invalid_status' });
       }
+      const amountDue = ciNum(existing.rows[0].amount_due);
+      const paidR = await pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS paid_amount
+         FROM cont_invoice_payments WHERE invoice_id = $1`,
+        [id],
+      );
+      const alreadyPaid = ciNum(paidR.rows[0]?.paid_amount);
+      const remaining = ciRound2(Math.max(0, amountDue - alreadyPaid));
+      if (remaining <= 0) {
+        return res.status(400).json({ error: 'already_paid' });
+      }
+      const amountRaw = b.amount ?? b.paid_amount ?? b.paidAmount;
+      const amount =
+        amountRaw == null || amountRaw === ''
+          ? remaining
+          : ciRound2(ciNum(amountRaw));
+      if (!(amount > 0)) {
+        return res.status(400).json({ error: 'amount_required' });
+      }
+      if (amount > remaining + 0.009) {
+        return res.status(400).json({ error: 'amount_exceeds_remaining' });
+      }
+      const newPaid = ciRound2(alreadyPaid + amount);
+      const newRemaining = ciRound2(Math.max(0, amountDue - newPaid));
+      const newStatus = newRemaining <= 0.009 ? 'paid' : 'partially_paid';
+      const attCheck = ciReadPaymentAttachments(b);
+      if (attCheck.error) {
+        return res.status(400).json({ error: attCheck.error });
+      }
+      const storedFiles = [];
+      for (const item of attCheck.items) {
+        storedFiles.push({
+          meta: item,
+          stored: await ciStorePaymentBlob({
+            invoiceId: id,
+            name: item.name,
+            mime: item.mime,
+            size: item.size,
+            dataBase64: item.data,
+          }),
+        });
+      }
+      const first = storedFiles[0];
+
       await client.query('BEGIN');
+      const payIns = await client.query(
+        `INSERT INTO cont_invoice_payments (
+          invoice_id, amount, note,
+          created_by_user_id, created_by_user_name,
+          file_name, mime_type, size_bytes, data_base64,
+          storage_backend, storage_key
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id`,
+        [
+          id,
+          amount,
+          comment,
+          userId,
+          user.name || '',
+          first.meta.name,
+          first.meta.mime,
+          first.stored.size_bytes,
+          first.stored.data_base64,
+          first.stored.storage_backend,
+          first.stored.storage_key,
+        ],
+      );
+      const paymentId = parseInt(payIns.rows[0].id, 10);
+      for (const file of storedFiles) {
+        await client.query(
+          `INSERT INTO cont_invoice_payment_attachments (
+            payment_id, invoice_id, file_name, mime_type, size_bytes,
+            data_base64, storage_backend, storage_key
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            paymentId,
+            id,
+            file.meta.name,
+            file.meta.mime,
+            file.stored.size_bytes,
+            file.stored.data_base64,
+            file.stored.storage_backend,
+            file.stored.storage_key,
+          ],
+        );
+      }
       await client.query(
         `UPDATE cont_invoices SET
-          status = 'paid',
-          paid_at = NOW(),
-          paid_by_user_id = $1,
-          paid_by_user_name = $2,
+          status = $1,
+          paid_at = CASE WHEN $1 = 'paid' THEN NOW() ELSE paid_at END,
+          paid_by_user_id = $2,
+          paid_by_user_name = $3,
           current_assignee_user_id = NULL,
           current_assignee_user_name = '',
           updated_at = NOW()
-         WHERE id = $3`,
-        [userId, user.name || '', id],
+         WHERE id = $4`,
+        [newStatus, userId, user.name || '', id],
       );
-      await ciLogAction(client, id, user, 'mark_paid', comment);
+      await ciLogAction(
+        client,
+        id,
+        user,
+        newStatus === 'paid' ? 'mark_paid' : 'partial_pay',
+        comment || String(amount),
+      );
       await client.query('COMMIT');
       await ciWorkflowRespond(pool, id, res);
     } catch (e) {
@@ -1679,6 +2058,94 @@ function registerContInvoicesRoutes(app, pool) {
       res.status(500).json({ error: String(e.message) });
     } finally {
       client.release();
+    }
+  });
+
+  async function ciSendPaymentFile(res, row) {
+    if (!row || !ciStr(row.file_name)) {
+      return res.status(404).json({ error: 'attachment_empty' });
+    }
+    let dataBase64 = '';
+    if (String(row.storage_backend || 'db') === 'r2' && row.storage_key) {
+      const buf = await r2GetObjectBuffer(row.storage_key);
+      dataBase64 = buf.toString('base64');
+    } else {
+      dataBase64 = stripBase64Payload(row.data_base64 || '');
+    }
+    if (!dataBase64) return res.status(404).json({ error: 'attachment_empty' });
+    return res.json({
+      file_name: row.file_name,
+      mime_type: row.mime_type || 'application/octet-stream',
+      data_base64: dataBase64,
+    });
+  }
+
+  app.get(
+    '/cont-invoices/:id/payments/:paymentId/attachments/:attachmentId/file',
+    async (req, res) => {
+      try {
+        const invoiceId = parseInt(String(req.params.id || ''), 10);
+        const paymentId = parseInt(String(req.params.paymentId || ''), 10);
+        const attachmentId = parseInt(String(req.params.attachmentId || ''), 10);
+        const userId = parseInt(String(req.query.userId || ''), 10);
+        if (
+          Number.isNaN(invoiceId) ||
+          Number.isNaN(paymentId) ||
+          Number.isNaN(attachmentId) ||
+          Number.isNaN(userId)
+        ) {
+          return res.status(400).json({ error: 'ids and userId required' });
+        }
+        const user = await ciGetUser(pool, userId, req);
+        if (!user) return res.status(404).json({ error: 'user not found' });
+        if (!ciCanAccessList(user, req)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        const r = await pool.query(
+          `SELECT * FROM cont_invoice_payment_attachments
+           WHERE id = $1 AND payment_id = $2 AND invoice_id = $3`,
+          [attachmentId, paymentId, invoiceId],
+        );
+        if (!r.rows.length) return res.status(404).json({ error: 'not found' });
+        await ciSendPaymentFile(res, r.rows[0]);
+      } catch (e) {
+        res.status(500).json({ error: String(e.message) });
+      }
+    },
+  );
+
+  app.get('/cont-invoices/:id/payments/:paymentId/file', async (req, res) => {
+    try {
+      const invoiceId = parseInt(String(req.params.id || ''), 10);
+      const paymentId = parseInt(String(req.params.paymentId || ''), 10);
+      const userId = parseInt(String(req.query.userId || ''), 10);
+      if (Number.isNaN(invoiceId) || Number.isNaN(paymentId) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'id, paymentId and userId required' });
+      }
+      const user = await ciGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!ciCanAccessList(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const child = await pool.query(
+        `SELECT * FROM cont_invoice_payment_attachments
+         WHERE payment_id = $1 AND invoice_id = $2
+         ORDER BY id ASC LIMIT 1`,
+        [paymentId, invoiceId],
+      );
+      if (child.rows.length) {
+        await ciSendPaymentFile(res, child.rows[0]);
+        return;
+      }
+      const r = await pool.query(
+        `SELECT * FROM cont_invoice_payments
+         WHERE id = $1 AND invoice_id = $2`,
+        [paymentId, invoiceId],
+      );
+      if (!r.rows.length) return res.status(404).json({ error: 'not found' });
+      await ciSendPaymentFile(res, r.rows[0]);
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
     }
   });
 

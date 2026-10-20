@@ -214,6 +214,117 @@ class ContInvoiceActionModel {
   }
 }
 
+class ContInvoicePaymentAttachmentModel {
+  final int? id;
+  final int? paymentId;
+  final String fileName;
+  final String mimeType;
+  final int sizeBytes;
+
+  const ContInvoicePaymentAttachmentModel({
+    this.id,
+    this.paymentId,
+    this.fileName = '',
+    this.mimeType = '',
+    this.sizeBytes = 0,
+  });
+
+  factory ContInvoicePaymentAttachmentModel.fromMap(Map<String, dynamic> m) {
+    return ContInvoicePaymentAttachmentModel(
+      id: _ciInt(m['id']),
+      paymentId: _ciInt(m['payment_id'] ?? m['paymentId']),
+      fileName: (m['file_name'] ?? m['fileName'] ?? '').toString(),
+      mimeType: (m['mime_type'] ?? m['mimeType'] ?? '').toString(),
+      sizeBytes: _ciInt(m['size_bytes'] ?? m['sizeBytes']) ?? 0,
+    );
+  }
+}
+
+class ContInvoicePaymentModel {
+  final int? id;
+  final int? invoiceId;
+  final double amount;
+  final String note;
+  final bool hasAttachment;
+  final String fileName;
+  final String mimeType;
+  final int sizeBytes;
+  final List<ContInvoicePaymentAttachmentModel> attachments;
+  final int? createdByUserId;
+  final String createdByUserName;
+  final DateTime? createdAt;
+
+  const ContInvoicePaymentModel({
+    this.id,
+    this.invoiceId,
+    this.amount = 0,
+    this.note = '',
+    this.hasAttachment = false,
+    this.fileName = '',
+    this.mimeType = '',
+    this.sizeBytes = 0,
+    this.attachments = const [],
+    this.createdByUserId,
+    this.createdByUserName = '',
+    this.createdAt,
+  });
+
+  factory ContInvoicePaymentModel.fromMap(Map<String, dynamic> m) {
+    DateTime? parseDate(dynamic v) {
+      if (v == null) return null;
+      if (v is DateTime) return v;
+      return DateTime.tryParse(v.toString());
+    }
+
+    final rawAtt = m['attachments'];
+    final attachments = rawAtt is List
+        ? rawAtt
+            .map(
+              (e) => ContInvoicePaymentAttachmentModel.fromMap(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
+            .toList()
+        : <ContInvoicePaymentAttachmentModel>[];
+    final fileName = (m['file_name'] ?? m['fileName'] ?? '').toString();
+    if (attachments.isEmpty && fileName.trim().isNotEmpty) {
+      attachments.add(
+        ContInvoicePaymentAttachmentModel(
+          fileName: fileName,
+          mimeType: (m['mime_type'] ?? m['mimeType'] ?? '').toString(),
+          sizeBytes: _ciInt(m['size_bytes'] ?? m['sizeBytes']) ?? 0,
+        ),
+      );
+    }
+    final hasAtt = m['has_attachment'] == true ||
+        m['hasAttachment'] == true ||
+        attachments.isNotEmpty;
+    return ContInvoicePaymentModel(
+      id: _ciInt(m['id']),
+      invoiceId: _ciInt(m['invoice_id'] ?? m['invoiceId']),
+      amount: _ciNum(m['amount']),
+      note: (m['note'] ?? m['comment'] ?? '').toString(),
+      hasAttachment: hasAtt,
+      fileName: attachments.isNotEmpty ? attachments.first.fileName : fileName,
+      mimeType: attachments.isNotEmpty
+          ? attachments.first.mimeType
+          : (m['mime_type'] ?? m['mimeType'] ?? '').toString(),
+      sizeBytes: attachments.isNotEmpty
+          ? attachments.first.sizeBytes
+          : (_ciInt(m['size_bytes'] ?? m['sizeBytes']) ?? 0),
+      attachments: attachments,
+      createdByUserId: _ciInt(
+        m['created_by_user_id'] ?? m['createdByUserId'],
+      ),
+      createdByUserName: (m['created_by_user_name'] ??
+              m['createdByUserName'] ??
+              '')
+          .toString(),
+      createdAt: parseDate(m['created_at'] ?? m['createdAt']),
+    );
+  }
+}
+
 class ContInvoiceModel {
   final int? id;
   final int? contractorId;
@@ -236,12 +347,15 @@ class ContInvoiceModel {
   final DateTime? paidAt;
   final int? paidByUserId;
   final String paidByUserName;
+  final double paidAmount;
+  final double remainingAmount;
   final int? createdByUserId;
   final String createdByUserName;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final List<ContInvoiceLineModel> lines;
   final List<ContInvoiceActionModel> actions;
+  final List<ContInvoicePaymentModel> payments;
 
   const ContInvoiceModel({
     this.id,
@@ -265,12 +379,15 @@ class ContInvoiceModel {
     this.paidAt,
     this.paidByUserId,
     this.paidByUserName = '',
+    this.paidAmount = 0,
+    this.remainingAmount = 0,
     this.createdByUserId,
     this.createdByUserName = '',
     this.createdAt,
     this.updatedAt,
     this.lines = const [],
     this.actions = const [],
+    this.payments = const [],
   });
 
   double get computedTotal => lines.fold<double>(
@@ -305,8 +422,11 @@ class ContInvoiceModel {
     DateTime? paidAt,
     int? paidByUserId,
     String? paidByUserName,
+    double? paidAmount,
+    double? remainingAmount,
     List<ContInvoiceLineModel>? lines,
     List<ContInvoiceActionModel>? actions,
+    List<ContInvoicePaymentModel>? payments,
   }) {
     return ContInvoiceModel(
       id: id ?? this.id,
@@ -332,12 +452,15 @@ class ContInvoiceModel {
       paidAt: paidAt ?? this.paidAt,
       paidByUserId: paidByUserId ?? this.paidByUserId,
       paidByUserName: paidByUserName ?? this.paidByUserName,
+      paidAmount: paidAmount ?? this.paidAmount,
+      remainingAmount: remainingAmount ?? this.remainingAmount,
       createdByUserId: createdByUserId,
       createdByUserName: createdByUserName,
       createdAt: createdAt,
       updatedAt: updatedAt,
       lines: lines ?? this.lines,
       actions: actions ?? this.actions,
+      payments: payments ?? this.payments,
     );
   }
 
@@ -391,8 +514,25 @@ class ContInvoiceModel {
             .toList()
         : <ContInvoiceActionModel>[];
 
+    final rawPayments = m['payments'];
+    final payments = rawPayments is List
+        ? rawPayments
+            .map(
+              (e) => ContInvoicePaymentModel.fromMap(
+                Map<String, dynamic>.from(e as Map),
+              ),
+            )
+            .toList()
+        : <ContInvoicePaymentModel>[];
+
     final status = (m['status'] ?? 'draft').toString();
     final statusLabelRaw = m['status_label_ar'] ?? m['statusLabelAr'];
+    final amountDue = _ciNum(m['amount_due'] ?? m['amountDue']);
+    final paidAmount = _ciNum(m['paid_amount'] ?? m['paidAmount']);
+    final remainingRaw = m['remaining_amount'] ?? m['remainingAmount'];
+    final remainingAmount = remainingRaw == null
+        ? double.parse((amountDue - paidAmount).toStringAsFixed(2))
+        : _ciNum(remainingRaw);
 
     return ContInvoiceModel(
       id: _ciInt(m['id']),
@@ -407,7 +547,7 @@ class ContInvoiceModel {
       previouslyPaid: _ciNum(m['previously_paid'] ?? m['previouslyPaid']),
       otherDeductions: _ciNum(m['other_deductions'] ?? m['otherDeductions']),
       totalAmount: _ciNum(m['total_amount'] ?? m['totalAmount']),
-      amountDue: _ciNum(m['amount_due'] ?? m['amountDue']),
+      amountDue: amountDue,
       notes: (m['notes'] ?? '').toString(),
       status: status,
       statusLabelAr: statusLabelRaw != null &&
@@ -427,6 +567,8 @@ class ContInvoiceModel {
       paidByUserId: _ciInt(m['paid_by_user_id'] ?? m['paidByUserId']),
       paidByUserName:
           (m['paid_by_user_name'] ?? m['paidByUserName'] ?? '').toString(),
+      paidAmount: paidAmount,
+      remainingAmount: remainingAmount,
       createdByUserId: _ciInt(m['created_by_user_id'] ?? m['createdByUserId']),
       createdByUserName:
           (m['created_by_user_name'] ?? m['createdByUserName'] ?? '')
@@ -435,6 +577,7 @@ class ContInvoiceModel {
       updatedAt: parseDate(m['updated_at'] ?? m['updatedAt']),
       lines: lines,
       actions: actions,
+      payments: payments,
     );
   }
 }

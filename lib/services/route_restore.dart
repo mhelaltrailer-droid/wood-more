@@ -43,6 +43,7 @@ import '../screens/meetings_screen.dart';
 import '../screens/invoices_owner_hub_screen.dart';
 import '../screens/cont_invoices_hub_screen.dart';
 import '../screens/cont_progress_screen.dart';
+import '../screens/contractor_accounts_hub_screen.dart';
 import '../core/cont_invoices_constants.dart';
 import '../screens/admin_invoice_structure_screen.dart';
 import '../core/invoice_structure_constants.dart';
@@ -175,9 +176,17 @@ Widget? getScreenForRoute(String name, UserModel user) {
     case 'invoices-owner':
       return InvoicesOwnerHubScreen(currentUser: user);
     case contInvoicesRouteName:
-      return ContInvoicesHubScreen(currentUser: user);
+      return user.canAccessContInvoices
+          ? ContInvoicesHubScreen(currentUser: user)
+          : null;
     case contProgressRouteName:
-      return ContProgressScreen(currentUser: user);
+      return user.canAccessContProgress
+          ? ContProgressScreen(currentUser: user)
+          : null;
+    case contractorAccountsRouteName:
+      return user.canAccessContractorAccounts
+          ? ContractorAccountsHubScreen(currentUser: user)
+          : null;
     case invoiceStructureRouteName:
       return AdminInvoiceStructureScreen(admin: user);
     default:

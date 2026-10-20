@@ -53,6 +53,7 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
         case contStatusPendingOm:
           return isContInvoicesOmEmail(email);
         case contStatusApproved:
+        case contStatusPartiallyPaid:
           return isContInvoicesAhAminEmail(email);
         default:
           return false;
@@ -290,8 +291,15 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
                                         ),
                                       ),
                                       subtitle: Text(
-                                        'تاريخ: $dateLabel  |  إجمالي: ${_moneyFmt.format(item.totalAmount)}\n'
-                                        'مستحق: ${_moneyFmt.format(item.amountDue)}  |  الحالة: $statusLabel$assignee',
+                                        item.status == contStatusApproved ||
+                                                item.status ==
+                                                    contStatusPartiallyPaid ||
+                                                item.status == contStatusPaid
+                                            ? 'تاريخ: $dateLabel  |  مستحق: ${_moneyFmt.format(item.amountDue)}\n'
+                                                'مصروف: ${_moneyFmt.format(item.paidAmount)}  |  باقي: ${_moneyFmt.format(item.remainingAmount)}\n'
+                                                'الحالة: $statusLabel$assignee'
+                                            : 'تاريخ: $dateLabel  |  إجمالي: ${_moneyFmt.format(item.totalAmount)}\n'
+                                                'مستحق: ${_moneyFmt.format(item.amountDue)}  |  الحالة: $statusLabel$assignee',
                                       ),
                                       isThreeLine: true,
                                       onTap: () =>
