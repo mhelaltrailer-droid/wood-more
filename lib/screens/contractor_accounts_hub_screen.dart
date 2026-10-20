@@ -1030,6 +1030,7 @@ class _ContractorAccountDetailScreenState
   bool _printing = false;
   bool _paying = false;
   bool _exportingInvoice = false;
+  bool _mutatingPayment = false;
   late _ContractorAccountRow _row;
 
   @override
@@ -1115,6 +1116,119 @@ class _ContractorAccountDetailScreenState
       );
     } finally {
       if (mounted) setState(() => _paying = false);
+    }
+  }
+
+  Future<void> _editPayment(
+    ContInvoiceModel inv,
+    ContInvoicePaymentModel payment,
+  ) async {
+    if (_mutatingPayment ||
+        !canAdminManageContInvoicePayment(widget.currentUser, inv) ||
+        inv.id == null ||
+        payment.id == null) {
+      return;
+    }
+    final maxAmount = inv.remainingAmount + payment.amount;
+    if (maxAmount <= 0) return;
+    final dateLabel = inv.statementDate == null
+        ? ''
+        : widget.dateFmt.format(inv.statementDate!);
+    final draft = await showContInvoicePaymentDialog(
+      context: context,
+      remaining: maxAmount,
+      moneyFmt: widget.moneyFmt,
+      invoiceLabel:
+          '${inv.projectName}${dateLabel.isEmpty ? '' : ' — $dateLabel'}',
+      isEdit: true,
+      initialAmount: payment.amount,
+      initialComment: payment.note,
+      existingFileNames: contInvoicePaymentFileNames(payment),
+    );
+    if (draft == null) return;
+    final storage = getStorage();
+    if (storage is! ApiStorageService) return;
+    setState(() => _mutatingPayment = true);
+    try {
+      await storage.updateContInvoicePayment(
+        invoiceId: inv.id!,
+        paymentId: payment.id!,
+        userId: widget.currentUser.id,
+        amount: draft.amount,
+        comment: draft.comment,
+        attachments: draft.replaceAttachments ? draft.attachments : null,
+      );
+      await _refreshRow();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم تعديل الدفعة')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تعديل الدفعة: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _mutatingPayment = false);
+    }
+  }
+
+  Future<void> _deletePayment(
+    ContInvoiceModel inv,
+    ContInvoicePaymentModel payment,
+  ) async {
+    if (_mutatingPayment ||
+        !canAdminManageContInvoicePayment(widget.currentUser, inv) ||
+        inv.id == null ||
+        payment.id == null) {
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('حذف الدفعة'),
+          content: Text(
+            'سيتم حذف الدفعة ${widget.moneyFmt.format(payment.amount)} ومرفقاتها. '
+            'مستحق المستخلص لا يتغير، ويتحدث المتبقي والحالة.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('حذف'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    final storage = getStorage();
+    if (storage is! ApiStorageService) return;
+    setState(() => _mutatingPayment = true);
+    try {
+      await storage.deleteContInvoicePayment(
+        invoiceId: inv.id!,
+        paymentId: payment.id!,
+        userId: widget.currentUser.id,
+      );
+      await _refreshRow();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم حذف الدفعة')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر حذف الدفعة: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _mutatingPayment = false);
     }
   }
 
@@ -1233,20 +1347,57 @@ class _ContractorAccountDetailScreenState
                         )
                       else
                         ...payments.map((p) {
-                          final files = p.attachments
-                              .map((a) => a.fileName)
-                              .where((n) => n.trim().isNotEmpty)
-                              .join('، ');
+                          final files = contInvoicePaymentFileNames(p).join('، ');
                           final when = p.createdAt == null
                               ? '—'
                               : widget.dateFmt.format(p.createdAt!.toLocal());
-                          return Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                            child: Text(
-                              'دفعة $when: ${widget.moneyFmt.format(p.amount)}'
-                              '${p.note.trim().isEmpty ? '' : ' — ${p.note}'}'
-                              '${files.isEmpty ? '' : ' — $files'}',
+                          final canManage =
+                              canAdminManageContInvoicePayment(
+                                    widget.currentUser,
+                                    inv,
+                                  ) &&
+                                  p.id != null;
+                          return ListTile(
+                            dense: true,
+                            contentPadding: const EdgeInsets.fromLTRB(
+                              16,
+                              0,
+                              8,
+                              0,
                             ),
+                            title: Text(
+                              'دفعة $when: ${widget.moneyFmt.format(p.amount)}',
+                            ),
+                            subtitle: Text(
+                              [
+                                if (p.note.trim().isNotEmpty) p.note.trim(),
+                                if (files.isNotEmpty) files,
+                              ].join(' — '),
+                            ),
+                            trailing: canManage
+                                ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip: 'تعديل الدفعة',
+                                        onPressed: _mutatingPayment
+                                            ? null
+                                            : () => _editPayment(inv, p),
+                                        icon: const Icon(Icons.edit_outlined),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'حذف الدفعة',
+                                        onPressed: _mutatingPayment
+                                            ? null
+                                            : () => _deletePayment(inv, p),
+                                        icon: const Icon(
+                                          Icons.delete_outline,
+                                          color: Colors.red,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : null,
                           );
                         }),
                     ],

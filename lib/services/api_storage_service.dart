@@ -3676,6 +3676,46 @@ class ApiStorageService {
     );
   }
 
+  Future<ContInvoiceModel> updateContInvoicePayment({
+    required int invoiceId,
+    required int paymentId,
+    required int userId,
+    required double amount,
+    String? comment,
+    List<Map<String, dynamic>>? attachments,
+  }) async {
+    final uri = Uri.parse(_path('cont-invoices/$invoiceId/payments/$paymentId'));
+    final r = await http.put(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode({
+        'userId': userId,
+        'amount': amount,
+        if (comment != null) 'comment': comment,
+        if (attachments != null) 'attachments': attachments,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ContInvoiceModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ContInvoiceModel> deleteContInvoicePayment({
+    required int invoiceId,
+    required int paymentId,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(
+      _path('cont-invoices/$invoiceId/payments/$paymentId'),
+    ).replace(queryParameters: {'userId': userId.toString()});
+    final r = await http.delete(uri, headers: _reqHeaders());
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ContInvoiceModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
   Future<Map<String, String>> getContInvoicePaymentFile({
     required int invoiceId,
     required int paymentId,

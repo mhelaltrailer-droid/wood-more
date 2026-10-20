@@ -210,6 +210,9 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         widget.currentUser.isPrimaryAppAdmin;
   }
 
+  bool get _canAdminManagePayments =>
+      widget.currentUser.isPrimaryAppAdmin && _showCashLedger;
+
   bool get _showCashLedger =>
       _status == contStatusApproved ||
       _status == contStatusPartiallyPaid ||
@@ -342,6 +345,10 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   }
 
   void _applyExisting(ContInvoiceModel inv) {
+    for (final s in _sections) {
+      s.dispose();
+    }
+    _sections.clear();
     _invoiceId = inv.id;
     _status = inv.status;
     _returnReason = inv.returnReason;
@@ -533,21 +540,41 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   List<ContractorModel> get _otherContractors =>
       _contractors.where((c) => c.id != widget.contractor.id).toList();
 
-  Future<void> _addManual(_SectionState section, String kind) async {
+  List<ContractorModel> _contractorChoices(ContractorModel? selected) {
+    final out = List<ContractorModel>.from(_otherContractors);
+    if (selected != null && !out.any((c) => c.id == selected.id)) {
+      out.insert(0, selected);
+    }
+    return out;
+  }
+
+  ContractorModel? _matchContractor(ContractorModel? selected) {
+    if (selected == null) return null;
+    for (final c in _otherContractors) {
+      if (c.id == selected.id) return c;
+    }
+    return selected;
+  }
+
+  Future<void> _addManual(
+    _SectionState section,
+    String kind, [
+    _ManualLineState? existing,
+  ]) async {
     if (kind == contLineKindNoteOnOther) {
-      await _addNotesDialog(section);
+      await _addNotesDialog(section, existing: existing);
       return;
     }
     if (kind == contLineKindDeduction) {
-      await _addDeductionDialog(section);
+      await _addDeductionDialog(section, existing: existing);
       return;
     }
     if (kind == contLineKindHoliday) {
-      await _addHolidayDialog(section);
+      await _addHolidayDialog(section, existing: existing);
       return;
     }
     // transport — قيمة واحدة
-    final amountC = TextEditingController();
+    final amountC = TextEditingController(text: existing?.amount.text ?? '');
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -571,13 +598,18 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
               if (_parse(amountC.text) <= 0) return;
               Navigator.pop(ctx, true);
             },
-            child: const Text('إضافة'),
+            child: Text(existing == null ? 'إضافة' : 'حفظ'),
           ),
         ],
       ),
     );
     if (ok != true) return;
     setState(() {
+      if (existing != null) {
+        existing.amount.text = amountC.text.trim();
+        existing.description.text = 'انتقالات';
+        return;
+      }
       section.manuals.add(
         _ManualLineState(
           kind: kind,
@@ -588,9 +620,12 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     });
   }
 
-  Future<void> _addHolidayDialog(_SectionState section) async {
-    final daysC = TextEditingController(text: '1');
-    final rateC = TextEditingController();
+  Future<void> _addHolidayDialog(
+    _SectionState section, {
+    _ManualLineState? existing,
+  }) async {
+    final daysC = TextEditingController(text: existing?.days.text ?? '1');
+    final rateC = TextEditingController(text: existing?.amount.text ?? '');
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -648,7 +683,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                   }
                   Navigator.pop(ctx, true);
                 },
-                child: const Text('إضافة'),
+                child: Text(existing == null ? 'إضافة' : 'حفظ'),
               ),
             ],
           );
@@ -659,6 +694,12 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     final days = _parse(daysC.text);
     final rate = _parse(rateC.text);
     setState(() {
+      if (existing != null) {
+        existing.days.text = _trim(days);
+        existing.amount.text = _trim(rate);
+        existing.description.text = 'عطلات — ${_trim(days)} × ${_trim(rate)}';
+        return;
+      }
       section.manuals.add(
         _ManualLineState(
           kind: contLineKindHoliday,
@@ -672,12 +713,20 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     });
   }
 
-  Future<void> _addDeductionDialog(_SectionState section) async {
-    String dedKind = contDeductionKindOptions.first;
-    bool creditOther = false;
-    ContractorModel? other;
-    final amountC = TextEditingController();
-    final otherDesc = TextEditingController();
+  Future<void> _addDeductionDialog(
+    _SectionState section, {
+    _ManualLineState? existing,
+  }) async {
+    String dedKind = existing?.deductionKind ?? contDeductionKindOptions.first;
+    if (!contDeductionKindOptions.contains(dedKind)) {
+      dedKind = 'أخرى';
+    }
+    bool creditOther = existing?.counterparty != null;
+    ContractorModel? other = _matchContractor(existing?.counterparty);
+    final amountC = TextEditingController(text: existing?.amount.text ?? '');
+    final otherDesc = TextEditingController(
+      text: dedKind == 'أخرى' ? (existing?.description.text ?? '') : '',
+    );
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -735,7 +784,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                       labelText: 'المقاول',
                       border: OutlineInputBorder(),
                     ),
-                    items: _otherContractors
+                    items: _contractorChoices(other)
                         .map(
                           (c) =>
                               DropdownMenuItem(value: c, child: Text(c.name)),
@@ -758,7 +807,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                 if (creditOther && other == null) return;
                 Navigator.pop(ctx, true);
               },
-              child: const Text('إضافة'),
+              child: Text(existing == null ? 'إضافة' : 'حفظ'),
             ),
           ],
         ),
@@ -772,6 +821,13 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
             ? 'خصم — $dedKind لصالح ${counterparty.name}'
             : 'خصم — $dedKind');
     setState(() {
+      if (existing != null) {
+        existing.amount.text = amountC.text.trim();
+        existing.description.text = desc;
+        existing.deductionKind = dedKind;
+        existing.counterparty = counterparty;
+        return;
+      }
       section.manuals.add(
         _ManualLineState(
           kind: contLineKindDeduction,
@@ -784,12 +840,19 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     });
   }
 
-  Future<void> _addNotesDialog(_SectionState section) async {
-    bool deductOther = false;
-    ContractorModel? other;
-    final daysC = TextEditingController(text: '1');
-    final rateC = TextEditingController();
-    final descC = TextEditingController(text: 'يوميات ملاحظات');
+  Future<void> _addNotesDialog(
+    _SectionState section, {
+    _ManualLineState? existing,
+  }) async {
+    bool deductOther = existing?.counterparty != null;
+    ContractorModel? other = _matchContractor(existing?.counterparty);
+    final daysC = TextEditingController(text: existing?.days.text ?? '1');
+    final rateC = TextEditingController(text: existing?.amount.text ?? '');
+    final descC = TextEditingController(
+      text: existing?.description.text.isNotEmpty == true
+          ? existing!.description.text
+          : 'يوميات ملاحظات',
+    );
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -850,14 +913,14 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                         labelText: 'المقاول الآخر',
                         border: OutlineInputBorder(),
                       ),
-                      items: _otherContractors
-                          .map(
-                            (c) =>
-                                DropdownMenuItem(value: c, child: Text(c.name)),
-                          )
-                          .toList(),
-                      onChanged: (v) => setLocal(() => other = v),
-                    ),
+                    items: _contractorChoices(other)
+                        .map(
+                          (c) =>
+                              DropdownMenuItem(value: c, child: Text(c.name)),
+                        )
+                        .toList(),
+                    onChanged: (v) => setLocal(() => other = v),
+                  ),
                     const SizedBox(height: 12),
                   ],
                   TextField(
@@ -883,7 +946,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                   if (deductOther && other == null) return;
                   Navigator.pop(ctx, true);
                 },
-                child: const Text('إضافة'),
+                child: Text(existing == null ? 'إضافة' : 'حفظ'),
               ),
             ],
           );
@@ -894,6 +957,13 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     final days = _parse(daysC.text);
     final rate = _parse(rateC.text);
     setState(() {
+      if (existing != null) {
+        existing.days.text = _trim(days);
+        existing.amount.text = _trim(rate);
+        existing.description.text = descC.text.trim();
+        existing.counterparty = deductOther ? other : null;
+        return;
+      }
       section.manuals.add(
         _ManualLineState(
           kind: contLineKindNoteOnOther,
@@ -1164,6 +1234,76 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         amount: draft.amount,
         comment: draft.comment,
         attachments: draft.attachments,
+      ),
+      popOnSuccess: false,
+    );
+  }
+
+  Future<void> _confirmEditPayment(ContInvoicePaymentModel payment) async {
+    if (!_canAdminManagePayments || payment.id == null) return;
+    final invoiceId = _effectiveInvoiceId;
+    if (invoiceId == null) return;
+    final maxAmount = _remainingCash + payment.amount;
+    if (maxAmount <= 0) return;
+    final draft = await showContInvoicePaymentDialog(
+      context: context,
+      remaining: maxAmount,
+      moneyFmt: _moneyFmt,
+      invoiceLabel:
+          '${widget.project.name} — ${DateFormat('dd/MM/yyyy').format(_statementDate)}',
+      isEdit: true,
+      initialAmount: payment.amount,
+      initialComment: payment.note,
+      existingFileNames: contInvoicePaymentFileNames(payment),
+    );
+    if (draft == null) return;
+    await _runWorkflow(
+      () => _api.updateContInvoicePayment(
+        invoiceId: invoiceId,
+        paymentId: payment.id!,
+        userId: widget.currentUser.id,
+        amount: draft.amount,
+        comment: draft.comment,
+        attachments: draft.replaceAttachments ? draft.attachments : null,
+      ),
+      popOnSuccess: false,
+    );
+  }
+
+  Future<void> _confirmDeletePayment(ContInvoicePaymentModel payment) async {
+    if (!_canAdminManagePayments || payment.id == null) return;
+    final invoiceId = _effectiveInvoiceId;
+    if (invoiceId == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('حذف الدفعة'),
+          content: Text(
+            'سيتم حذف الدفعة ${_moneyFmt.format(payment.amount)} ومرفقاتها. '
+            'مستحق المستخلص لا يتغير، ويتحدث المتبقي والحالة.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('حذف'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    await _runWorkflow(
+      () => _api.deleteContInvoicePayment(
+        invoiceId: invoiceId,
+        paymentId: payment.id!,
+        userId: widget.currentUser.id,
       ),
       popOnSuccess: false,
     );
@@ -1523,8 +1663,15 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                 return ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
+                  onTap: (!readOnly && !priceOnly)
+                      ? () => _addManual(s, m.kind, m)
+                      : null,
                   title: Text(m.description.text),
-                  subtitle: sub != null ? Text(sub) : null,
+                  subtitle: sub != null
+                      ? Text(sub)
+                      : (!readOnly && !priceOnly
+                          ? const Text('اضغط للتعديل')
+                          : null),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -1537,14 +1684,21 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                               : Colors.green.shade800,
                         ),
                       ),
-                      if (!readOnly && !priceOnly)
+                      if (!readOnly && !priceOnly) ...[
                         IconButton(
+                          tooltip: 'تعديل',
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          onPressed: () => _addManual(s, m.kind, m),
+                        ),
+                        IconButton(
+                          tooltip: 'حذف',
                           icon: const Icon(Icons.close, size: 18),
                           onPressed: () => setState(() {
                             m.dispose();
                             s.manuals.removeAt(i);
                           }),
                         ),
+                      ],
                     ],
                   ),
                 );
@@ -2007,6 +2161,37 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                                           p.note.trim(),
                                       ].join(' · '),
                                     ),
+                                    trailing: _canAdminManagePayments &&
+                                            p.id != null
+                                        ? Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              IconButton(
+                                                tooltip: 'تعديل الدفعة',
+                                                onPressed: busy
+                                                    ? null
+                                                    : () =>
+                                                        _confirmEditPayment(p),
+                                                icon: const Icon(
+                                                  Icons.edit_outlined,
+                                                ),
+                                              ),
+                                              IconButton(
+                                                tooltip: 'حذف الدفعة',
+                                                onPressed: busy
+                                                    ? null
+                                                    : () =>
+                                                        _confirmDeletePayment(
+                                                      p,
+                                                    ),
+                                                icon: const Icon(
+                                                  Icons.delete_outline,
+                                                  color: Colors.red,
+                                                ),
+                                              ),
+                                            ],
+                                          )
+                                        : null,
                                   ),
                                   ...files.map(
                                     (att) => ListTile(

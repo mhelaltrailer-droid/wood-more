@@ -13,11 +13,13 @@ class ContInvoicePaymentDraft {
   final double amount;
   final String comment;
   final List<Map<String, dynamic>> attachments;
+  final bool replaceAttachments;
 
   const ContInvoicePaymentDraft({
     required this.amount,
     required this.comment,
     required this.attachments,
+    this.replaceAttachments = true,
   });
 }
 
@@ -31,19 +33,42 @@ bool canRecordContInvoicePayment(UserModel user, ContInvoiceModel inv) {
   return isContInvoicesAhAminEmail(user.email) || user.isPrimaryAppAdmin;
 }
 
+bool canAdminManageContInvoicePayment(UserModel user, ContInvoiceModel inv) {
+  if (!user.isPrimaryAppAdmin || inv.id == null) return false;
+  return inv.status == contStatusApproved ||
+      inv.status == contStatusPartiallyPaid ||
+      inv.status == contStatusPaid;
+}
+
+List<String> contInvoicePaymentFileNames(ContInvoicePaymentModel p) {
+  final names = p.attachments
+      .map((a) => a.fileName.trim())
+      .where((n) => n.isNotEmpty)
+      .toList();
+  if (names.isEmpty && p.fileName.trim().isNotEmpty) {
+    return [p.fileName.trim()];
+  }
+  return names;
+}
+
 Future<ContInvoicePaymentDraft?> showContInvoicePaymentDialog({
   required BuildContext context,
   required double remaining,
   required NumberFormat moneyFmt,
   String? invoiceLabel,
+  bool isEdit = false,
+  double? initialAmount,
+  String? initialComment,
+  List<String> existingFileNames = const [],
 }) async {
   if (remaining <= 0) return null;
+  final seed = initialAmount ?? remaining;
   final amountC = TextEditingController(
-    text: remaining == remaining.roundToDouble()
-        ? remaining.toInt().toString()
-        : remaining.toStringAsFixed(2),
+    text: seed == seed.roundToDouble()
+        ? seed.toInt().toString()
+        : seed.toStringAsFixed(2),
   );
-  final noteC = TextEditingController();
+  final noteC = TextEditingController(text: initialComment ?? '');
   final vouchers = <Map<String, dynamic>>[];
   final ok = await showDialog<bool>(
     context: context,
@@ -51,7 +76,7 @@ Future<ContInvoicePaymentDraft?> showContInvoicePaymentDialog({
       textDirection: TextDirection.rtl,
       child: StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
-          title: const Text('تسجيل دفعة صرف'),
+          title: Text(isEdit ? 'تعديل دفعة صرف' : 'تسجيل دفعة صرف'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -63,12 +88,16 @@ Future<ContInvoicePaymentDraft?> showContInvoicePaymentDialog({
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 Text(
-                  'باقي هذا المستخلص فقط: ${moneyFmt.format(remaining)}',
+                  isEdit
+                      ? 'الحد الأقصى لهذه الدفعة: ${moneyFmt.format(remaining)}'
+                      : 'باقي هذا المستخلص فقط: ${moneyFmt.format(remaining)}',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'الصرف على المستخلص ده وحده. مستند الاستلام إلزامي مع أي صرف جزئي أو كلي.',
+                Text(
+                  isEdit
+                      ? 'المستحق لا يتغير. تعديل المبلغ يحدّث المتبقي والحالة. المرفقات الحالية تبقى إن لم ترفق ملفات جديدة.'
+                      : 'الصرف على المستخلص ده وحده. مستند الاستلام إلزامي مع أي صرف جزئي أو كلي.',
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -110,10 +139,29 @@ Future<ContInvoicePaymentDraft?> showContInvoicePaymentDialog({
                   icon: const Icon(Icons.attach_file),
                   label: Text(
                     vouchers.isEmpty
-                        ? 'إرفاق مستند الاستلام (إلزامي)'
+                        ? (isEdit
+                            ? 'استبدال مستند الاستلام (اختياري)'
+                            : 'إرفاق مستند الاستلام (إلزامي)')
                         : 'إضافة ملف (${vouchers.length})',
                   ),
                 ),
+                if (isEdit &&
+                    vouchers.isEmpty &&
+                    existingFileNames.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'المرفقات الحالية',
+                    style: Theme.of(ctx).textTheme.labelLarge,
+                  ),
+                  ...existingFileNames.map(
+                    (name) => ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.insert_drive_file_outlined),
+                      title: Text(name, overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+                ],
                 ...vouchers.asMap().entries.map(
                   (e) => ListTile(
                     dense: true,
@@ -138,9 +186,10 @@ Future<ContInvoicePaymentDraft?> showContInvoicePaymentDialog({
               child: const Text('إلغاء'),
             ),
             FilledButton(
-              onPressed:
-                  vouchers.isEmpty ? null : () => Navigator.pop(ctx, true),
-              child: const Text('تأكيد الصرف'),
+              onPressed: (!isEdit && vouchers.isEmpty)
+                  ? null
+                  : () => Navigator.pop(ctx, true),
+              child: Text(isEdit ? 'حفظ التعديل' : 'تأكيد الصرف'),
             ),
           ],
         ),
@@ -150,11 +199,12 @@ Future<ContInvoicePaymentDraft?> showContInvoicePaymentDialog({
   if (ok != true) return null;
   final amount = double.tryParse(amountC.text.replaceAll(',', '').trim());
   if (amount == null || amount <= 0) return null;
-  if (vouchers.isEmpty) return null;
+  if (!isEdit && vouchers.isEmpty) return null;
   return ContInvoicePaymentDraft(
     amount: amount,
     comment: noteC.text.trim(),
     attachments: List<Map<String, dynamic>>.from(vouchers),
+    replaceAttachments: !isEdit || vouchers.isNotEmpty,
   );
 }
 
