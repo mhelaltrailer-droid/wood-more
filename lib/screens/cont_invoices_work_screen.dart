@@ -109,6 +109,7 @@ class _ManualLineState {
 class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   final _storage = getStorage();
   final _moneyFmt = NumberFormat('#,##0.00', 'en_US');
+  final _dateFmt = DateFormat('dd/MM/yyyy');
 
   bool _loading = true;
   bool _saving = false;
@@ -129,6 +130,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   String _returnReason = '';
   List<ContInvoiceActionModel> _actions = const [];
   List<ContInvoicePaymentModel> _payments = const [];
+  List<ContInvoiceModel> _openRemainders = const [];
   double _paidAmount = 0;
   double _remainingAmount = 0;
   bool _workflowBusy = false;
@@ -286,6 +288,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
       } else {
         await _autofillPreviouslyPaid();
       }
+      await _loadOpenRemainders();
     } catch (e) {
       _error = e.toString();
     }
@@ -305,6 +308,36 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
       _previouslyPaidCtrl.text = amount == amount.roundToDouble()
           ? amount.toInt().toString()
           : amount.toString();
+    } catch (_) {}
+  }
+
+  bool _sameContractor(ContInvoiceModel inv) {
+    if (widget.contractor.id != 0 && inv.contractorId == widget.contractor.id) {
+      return true;
+    }
+    return inv.contractorName.trim().toLowerCase() ==
+        widget.contractor.name.trim().toLowerCase();
+  }
+
+  Future<void> _loadOpenRemainders() async {
+    try {
+      final list = await _api.getContInvoices(widget.currentUser.id);
+      final currentId = _effectiveInvoiceId;
+      final open = list.where((inv) {
+        if (currentId != null && inv.id == currentId) return false;
+        if (inv.status != contStatusApproved &&
+            inv.status != contStatusPartiallyPaid) {
+          return false;
+        }
+        if (inv.remainingAmount <= 0.009) return false;
+        return _sameContractor(inv);
+      }).toList()
+        ..sort((a, b) {
+          final ad = a.statementDate ?? DateTime(1970);
+          final bd = b.statementDate ?? DateTime(1970);
+          return ad.compareTo(bd);
+        });
+      if (mounted) setState(() => _openRemainders = open);
     } catch (_) {}
   }
 
@@ -939,6 +972,8 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
       final updated = await call();
       if (!mounted) return;
       _applyExisting(updated);
+      await _loadOpenRemainders();
+      if (!mounted) return;
       setState(() {});
       if (popOnSuccess) {
         Navigator.of(context).pop(updated);
@@ -1584,6 +1619,42 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                           ),
                         ),
                       ),
+                      if (_openRemainders.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Card(
+                          color: const Color(0xFFFFF3E0),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const Text(
+                                  'مستحقات غير مصروفة سابقة',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'كل مستخلص لوحده. الباقي لا يُضاف لمستحق هذا المستخلص ولا يُدمج.',
+                                ),
+                                const SizedBox(height: 8),
+                                ..._openRemainders.map((inv) {
+                                  final dateLabel = inv.statementDate == null
+                                      ? '—'
+                                      : _dateFmt.format(inv.statementDate!);
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: Text(
+                                      '${inv.projectName} — $dateLabel\n'
+                                      'باقي هذا المستخلص: ${_moneyFmt.format(inv.remainingAmount)}'
+                                      '  |  ${inv.statusLabelAr.isNotEmpty ? inv.statusLabelAr : contInvoiceStatusLabelAr(inv.status)}',
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       Card(
                         color: const Color(0xFFE8F5E9),
