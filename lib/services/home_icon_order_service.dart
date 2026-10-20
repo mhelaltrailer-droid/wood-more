@@ -96,7 +96,8 @@ bool _isHomeIconAvailable({
           IconVisibilityService.isVisible(iconConfig, iconId);
     case homeIconIdContInvoices:
       return user.canAccessContInvoices &&
-          IconVisibilityService.isVisible(iconConfig, iconId);
+          (user.isPrimaryAppAdmin ||
+              IconVisibilityService.isVisible(iconConfig, iconId));
     case homeIconIdContProgress:
       return user.canAccessContProgress &&
           IconVisibilityService.isVisible(iconConfig, iconId);
