@@ -225149,3 +225149,13 @@ END $$;
 -- Projects Dashboard removed from the product: drop leftover dump tables/data.
 DROP TABLE IF EXISTS public.projects_dashboard_notes CASCADE;
 DROP TABLE IF EXISTS public.projects_dashboard_sheet CASCADE;
+
+-- Legacy catalog + daily reports removed from the product.
+ALTER TABLE IF EXISTS public.detailed_report_lines DROP CONSTRAINT IF EXISTS detailed_report_lines_zone_id_fkey;
+ALTER TABLE IF EXISTS public.detailed_report_lines DROP CONSTRAINT IF EXISTS detailed_report_lines_building_id_fkey;
+DROP TABLE IF EXISTS public.units CASCADE;
+DROP TABLE IF EXISTS public.building_materials CASCADE;
+DROP TABLE IF EXISTS public.building_cutlist_images CASCADE;
+DROP TABLE IF EXISTS public.daily_reports CASCADE;
+DROP TABLE IF EXISTS public.buildings CASCADE;
+DROP TABLE IF EXISTS public.zones CASCADE;

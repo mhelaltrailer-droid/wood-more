@@ -18,7 +18,7 @@ void main() {
     final resolved = resolveHomeIconOrder(
       user: _user('site_engineer'),
       iconConfig: iconConfig,
-      savedOrder: const ['ir_mir', 'attendance', 'engineer_projects'],
+      savedOrder: const ['ir_mir', 'attendance', 'operation_reports'],
     );
 
     expect(resolved.first, 'ir_mir');

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../services/route_persistence.dart';
 import 'contractor_report_screen.dart';
-import 'workers_report_screen.dart';
 import 'user_custody_report_screen.dart';
 import 'attendance_sub_report_screen.dart';
 import 'home_screen.dart';
@@ -21,12 +20,6 @@ class SubReportsScreen extends StatelessWidget {
         'تقرير باسم المقاول مع تحديد التاريخ - المشاريع وعدد العمال في كل تقرير',
         Icons.engineering,
         () => Navigator.push(context, MaterialPageRoute(builder: (_) => ContractorReportScreen(admin: admin))),
-      ),
-      _SubItem(
-        'تقرير عدد العمال',
-        'تحديد المدة من يوم ليوم - عدد العمال مع اسم المشروع والمقاول والمهندس',
-        Icons.groups,
-        () => Navigator.push(context, MaterialPageRoute(builder: (_) => WorkersReportScreen(admin: admin))),
       ),
       _SubItem(
         'تقرير عهدة المستخدم',

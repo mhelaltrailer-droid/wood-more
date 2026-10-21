@@ -1,14 +1,10 @@
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
-import '../models/daily_report_model.dart';
 import '../screens/attendance_screen.dart';
 import '../screens/attendance_reports_screen.dart';
-import '../screens/reports_screen.dart';
 import '../screens/admin_dashboard_screen.dart';
 import '../screens/finance_screen.dart';
-import '../screens/engineer_projects_screen.dart';
 import '../screens/engineer_withdraw_materials_screen.dart';
-import '../screens/daily_report_step1_screen.dart';
 import '../screens/detailed_report_finances_screen.dart';
 import '../screens/tomorrow_work_plan_screen.dart';
 import '../screens/today_work_plan_screen.dart';
@@ -52,13 +48,6 @@ Widget? getScreenForRoute(String name, UserModel user) {
   switch (name) {
     case 'attendance':
       return AttendanceScreen(currentUser: user);
-    case 'daily-report':
-      final report = DailyReportData(
-        userName: user.name,
-        userId: user.id,
-        reportDate: DateTime.now(),
-      );
-      return DailyReportStep1Screen(user: user, report: report);
     case 'detailed-report':
       // أُزيل مسار التقرير المفصل من الواجهة؛ خطط اليوم/الغد منفصلة.
       return null;
@@ -70,8 +59,6 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return TodayWorkPlanScreen(user: user);
     case 'site-engineer-reports':
       return SiteEngineerReportsScreen(user: user);
-    case 'engineer-projects':
-      return EngineerProjectsScreen(user: user);
     case 'engineer-withdraw-materials':
       return EngineerWithdrawMaterialsScreen(user: user);
     case 'accountant-custody':
@@ -119,8 +106,6 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return OperationManagerBalancesViewScreen(currentUser: user);
     case 'attendance-reports':
       return AttendanceReportsScreen(currentUser: user);
-    case 'reports':
-      return ReportsScreen(currentUser: user);
     case 'finance':
       return FinanceScreen(currentUser: user);
     case 'manager-custody':

@@ -14,6 +14,7 @@ const {
   storeInlineBlob,
   loadInlineBlobToDataUrl,
   storeInlineBlobList,
+  deleteInlineBlobListIfR2,
   parseR2Ref,
 } = require('./lib/inline_blob_storage');
 const { splitSqlChunks } = require('./scripts/lib/xlsx_project_locations');
@@ -866,6 +867,68 @@ function withdrawalParsePermitImages(raw) {
   return images;
 }
 
+/// مصفوفة أذن الصرف المخزّنة: data URL قديم أو مرجع R2 JSON.
+function withdrawalParseStoredPermitArray(raw) {
+  if (raw == null) return [];
+  const list = Array.isArray(raw)
+    ? raw
+    : (() => {
+        const s = String(raw).trim();
+        if (!s) return [];
+        try {
+          const parsed = JSON.parse(s);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (_) {
+          return [];
+        }
+      })();
+  return list
+    .map((v) => (v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '').trim()))
+    .filter(Boolean);
+}
+
+async function withdrawalExpandPermitImagesJson(raw) {
+  const items = withdrawalParseStoredPermitArray(raw);
+  if (items.length === 0) return '[]';
+  const urls = [];
+  for (const item of items) {
+    try {
+      const dataUrl = await loadInlineBlobToDataUrl(item);
+      if (dataUrl) urls.push(dataUrl);
+    } catch (e) {
+      console.warn('withdrawalExpandPermitImagesJson:', e && e.message ? e.message : e);
+    }
+  }
+  return JSON.stringify(urls);
+}
+
+async function withdrawalRowToJson(row) {
+  return {
+    id: parseInt(row.id),
+    location_id: parseInt(row.location_id),
+    phase: row.phase || 'first_fix',
+    user_id: parseInt(row.user_id),
+    user_name: row.user_name,
+    created_at: row.created_at,
+    disbursement_permit_images_json: await withdrawalExpandPermitImagesJson(
+      row.disbursement_permit_images_json,
+    ),
+    delivery_permit_images_json: await withdrawalExpandPermitImagesJson(
+      row.delivery_permit_images_json,
+    ),
+  };
+}
+
+async function withdrawalDeletePermitBlobs(row) {
+  if (!row) return;
+  await deleteInlineBlobListIfR2(
+    withdrawalParseStoredPermitArray(row.disbursement_permit_images_json),
+  );
+  await deleteInlineBlobListIfR2(
+    withdrawalParseStoredPermitArray(row.delivery_permit_images_json),
+  );
+}
+
 async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
   const title = fields.title;
   const body = fields.body;
@@ -1641,10 +1704,6 @@ function _resolveActivityAction(method, path, body) {
     if (status === 'postponed') return { type: 'plan_postpone', label: 'تأجيل خطة عمل' };
     return { type: 'plan_execute', label: 'تنفيذ خطة عمل' };
   }
-  if (p.startsWith('/daily-reports') && m === 'GET') return { type: 'daily_report_view', label: 'عرض تقرير يومي' };
-  if (p.startsWith('/daily-reports') && m === 'POST') return { type: 'daily_report_create', label: 'إنشاء تقرير يومي' };
-  if (p.startsWith('/daily-reports') && m === 'PUT') return { type: 'daily_report_update', label: 'تعديل تقرير يومي' };
-  if (p.startsWith('/daily-reports') && m === 'DELETE') return { type: 'daily_report_delete', label: 'حذف تقرير يومي' };
   if (p.startsWith('/detailed-reports') && m === 'GET') return { type: 'detailed_report_view', label: 'عرض تقرير مفصل' };
   if (p.startsWith('/detailed-reports') && m === 'POST') return _planSaveAction(b);
   if (p.startsWith('/detailed-reports') && m === 'PUT') return _planUpdateAction(b);
@@ -1989,7 +2048,6 @@ async function ensureHomeIconsVisibilitySetting() {
         engineer_withdraw_materials: true,
         engineer_finances: true,
         operation_reports: true,
-        engineer_projects: true,
         ir_mir: true,
         ms_sd: true,
         mos_itp: true,
@@ -2072,7 +2130,6 @@ async function ensureHomeIconsVisibilitySetting() {
         weekly_report: true,
         postpone_fines_reports: true,
         new_icon: true,
-        reports: true,
         contractor_report: true,
         admin_project_structure: true,
         admin_dashboard: true,
@@ -2140,6 +2197,8 @@ async function ensureHomeIconsVisibilitySetting() {
         delete roleMap.detailed_report;
         delete roleMap.projects_dashboard;
         delete roleMap.projects_dashboard_plus1;
+        delete roleMap.reports;
+        delete roleMap.engineer_projects;
         if (forceHideContIcons) {
           for (const iconId of contHiddenIds) {
             if (Object.prototype.hasOwnProperty.call(roleMap, iconId) ||
@@ -2238,8 +2297,8 @@ async function ensureDetailedReportsTables() {
         contractor_id INTEGER REFERENCES contractors(id),
         contractor_workers_count INTEGER NOT NULL DEFAULT 0 CHECK (contractor_workers_count >= 0),
         self_workers_count INTEGER NOT NULL DEFAULT 0 CHECK (self_workers_count >= 0 AND self_workers_count <= 10),
-        zone_id INTEGER REFERENCES zones(id),
-        building_id INTEGER REFERENCES buildings(id),
+        zone_id INTEGER,
+        building_id INTEGER,
         location_id INTEGER REFERENCES project_locations(id),
         phase_id INTEGER NOT NULL REFERENCES work_phases(id),
         workers_count INTEGER NOT NULL CHECK (workers_count >= 0)
@@ -2255,6 +2314,8 @@ async function ensureDetailedReportsTables() {
     } catch (_) {}
     await pool.query(`ALTER TABLE detailed_report_lines ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES project_locations(id)`).catch(() => {});
     await pool.query(`ALTER TABLE detailed_report_lines ADD COLUMN IF NOT EXISTS manual_work_location TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE detailed_report_lines DROP CONSTRAINT IF EXISTS detailed_report_lines_zone_id_fkey`).catch(() => {});
+    await pool.query(`ALTER TABLE detailed_report_lines DROP CONSTRAINT IF EXISTS detailed_report_lines_building_id_fkey`).catch(() => {});
     // قواعد قديمة: كان contractor_id إجبارياً — الواجهة تسمح بـ «لايوجد مقاول»
     try {
       await pool.query(`ALTER TABLE detailed_report_lines ALTER COLUMN contractor_id DROP NOT NULL`);
@@ -2303,6 +2364,7 @@ async function ensureLocationMaterialsTables() {
         unit TEXT NOT NULL DEFAULT ''
       )
     `);
+    // disbursement_permit_images_json: JSON array of R2 refs (new) or data URLs (legacy).
     await pool.query(`
       CREATE TABLE IF NOT EXISTS location_withdrawal (
         id SERIAL PRIMARY KEY,
@@ -2575,9 +2637,16 @@ async function deleteUserAndDependencies(client, userId) {
   );
   await client.query('DELETE FROM detailed_reports WHERE user_id = $1', [id]);
   await client.query('DELETE FROM attendance_records WHERE user_id = $1', [id]);
-  await client.query('DELETE FROM daily_reports WHERE user_id = $1', [id]);
+  await client.query('DELETE FROM daily_reports WHERE user_id = $1', [id]).catch(() => {});
   await client.query('DELETE FROM engineer_custody WHERE user_id = $1', [id]);
   await client.query('DELETE FROM engineer_balance WHERE user_id = $1', [id]);
+  const lw = await client.query(
+    'SELECT disbursement_permit_images_json, delivery_permit_images_json FROM location_withdrawal WHERE user_id = $1',
+    [id],
+  );
+  for (const row of lw.rows) {
+    await withdrawalDeletePermitBlobs(row);
+  }
   await client.query('DELETE FROM location_withdrawal WHERE user_id = $1', [id]);
   await client.query('DELETE FROM withdrawal_requests WHERE engineer_user_id = $1', [id]);
   await client.query('DELETE FROM ir_mir_uploads WHERE user_id = $1', [id]);
@@ -2837,7 +2906,7 @@ app.delete('/projects/:id', async (req, res) => {
       [fromId],
     ).catch(() => {});
     await client.query('DELETE FROM project_locations WHERE project_id = $1', [fromId]);
-    await client.query('DELETE FROM zones WHERE project_id = $1', [fromId]);
+    await client.query('DELETE FROM zones WHERE project_id = $1', [fromId]).catch(() => {});
     await client.query('DELETE FROM projects WHERE id = $1', [fromId]);
     await client.query('COMMIT');
     res.json({ ok: true, reassigned: summary });
@@ -2936,92 +3005,6 @@ app.delete('/project-locations/:id', async (req, res) => {
   try {
     // CASCADE in DB will delete children; optionally delete recursively in app for consistency
     await pool.query('DELETE FROM project_locations WHERE id = $1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-// ——— Zones ———
-app.get('/zones', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT id, project_id, name FROM zones WHERE project_id = $1 ORDER BY name', [req.query.projectId]);
-    res.json(r.rows.map(row => ({ id: parseInt(row.id), project_id: parseInt(row.project_id), name: row.name })));
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-app.post('/zones', async (req, res) => {
-  try {
-    const r = await pool.query('INSERT INTO zones (project_id, name) VALUES ($1, $2) RETURNING id', [req.body.projectId, req.body.name]);
-    res.json(parseInt(r.rows[0].id));
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-app.put('/zones/:id', async (req, res) => {
-  try {
-    await pool.query('UPDATE zones SET name = $1 WHERE id = $2', [req.body.name, req.params.id]);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-app.delete('/zones/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM buildings WHERE zone_id = $1', [req.params.id]);
-    await pool.query('DELETE FROM zones WHERE id = $1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-// ——— Buildings ———
-app.get('/buildings', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT id, zone_id, name, storage_info, model_details, cut_list FROM buildings WHERE zone_id = $1 ORDER BY name', [req.query.zoneId]);
-    res.json(r.rows.map(row => ({
-      id: parseInt(row.id), zone_id: parseInt(row.zone_id), name: row.name,
-      storage_info: row.storage_info, model_details: row.model_details, cut_list: row.cut_list
-    })));
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-app.post('/buildings', async (req, res) => {
-  try {
-    const { zoneId, name, storageInfo, modelDetails, cutList } = req.body;
-    const r = await pool.query(
-      'INSERT INTO buildings (zone_id, name, storage_info, model_details, cut_list) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      [zoneId, name, storageInfo || null, modelDetails || null, cutList || null]
-    );
-    res.json(parseInt(r.rows[0].id));
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-app.put('/buildings/:id', async (req, res) => {
-  try {
-    const { name, storageInfo, modelDetails, cutList } = req.body;
-    await pool.query('UPDATE buildings SET name = $1, storage_info = $2, model_details = $3, cut_list = $4 WHERE id = $5', [name, storageInfo || null, modelDetails || null, cutList || null, req.params.id]);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-app.delete('/buildings/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM units WHERE building_id = $1', [req.params.id]);
-    await pool.query('DELETE FROM building_materials WHERE building_id = $1', [req.params.id]);
-    await pool.query('DELETE FROM building_cutlist_images WHERE building_id = $1', [req.params.id]);
-    await pool.query('DELETE FROM buildings WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
@@ -4325,111 +4308,6 @@ app.delete('/materials/:id', async (req, res) => {
   }
 });
 
-// ——— Daily reports ———
-app.post('/daily-reports', async (req, res) => {
-  try {
-    const b = req.body;
-    const now = new Date().toISOString();
-    const contractorsJson = (b.contractors_json != null) ? (typeof b.contractors_json === 'string' ? b.contractors_json : JSON.stringify(b.contractors_json || [])) : null;
-    const r = await pool.query(
-      `INSERT INTO daily_reports (user_id, user_name, project_id, project_name, report_datetime, work_place, work_report, executed_today, supervisor_name, contractor_name, workers_count, contractors_json, tomorrow_plan, document_path, images_json, notes, materials_json, expenses_json, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
-      [b.userId, b.userName, b.projectId || null, b.projectName || null, b.reportDate, b.workPlace || '', b.workReport || '', b.executedToday || '', b.supervisorName || null, b.contractorName || null, b.workersCount || null, contractorsJson, b.tomorrowPlan || '', b.documentPath || null, typeof b.imagePaths === 'string' ? b.imagePaths : JSON.stringify(b.imagePaths || []), b.notes || null, typeof b.materials === 'string' ? b.materials : JSON.stringify(b.materials || []), typeof b.expenses === 'string' ? b.expenses : JSON.stringify(b.expenses || []), now]
-    );
-    const id = parseInt(r.rows[0].id);
-    const expenses = Array.isArray(b.expenses) ? b.expenses : (typeof b.expenses === 'string' ? JSON.parse(b.expenses || '[]') : []);
-    let totalExpense = 0;
-    for (const e of expenses) {
-      const amt = parseFloat(String((e.amount || '').replace(/[^\d.]/g, ''))) || 0;
-      totalExpense += amt;
-    }
-    if (totalExpense > 0) {
-      const bal = await pool.query('SELECT balance FROM engineer_balance WHERE user_id = $1', [b.userId]);
-      const current = bal.rows.length ? parseFloat(bal.rows[0].balance) : 0;
-      await pool.query('INSERT INTO engineer_balance (user_id, balance) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET balance = $2', [b.userId, current - totalExpense]);
-    }
-    // خصم المواد من مخزن المشروع: المطابقة بالمشروع + اسم الخامة فقط، والخصم يكون على رقم الكمية فقط
-    // التطبيق يرسل اسم الخامة في الحقل "material" (وقد يرسلها أيضاً materialName / material_name)
-    if (b.projectId) {
-      const materials = Array.isArray(b.materials) ? b.materials : (typeof b.materials === 'string' ? JSON.parse(b.materials || '[]') : []);
-      const reportDate = b.reportDate ? new Date(b.reportDate) : new Date();
-      for (const m of materials) {
-        const materialName = (m.materialName || m.material_name || m.material || '').trim();
-        const quantity = parseFloat(String((m.quantity || '').replace(/[^\d.]/g, ''))) || 0;
-        const unit = (m.unit || 'متر').trim() || 'متر';
-        if (!materialName || quantity <= 0) continue;
-        const stock = await pool.query('SELECT id, quantity, unit FROM project_stock WHERE project_id = $1 AND material_name = $2 LIMIT 1', [b.projectId, materialName]);
-        if (stock.rows.length === 0) continue;
-        const row = stock.rows[0];
-        const currentQty = parseFloat(String(row.quantity).replace(/[^\d.]/g, '')) || 0;
-        const newQty = Math.max(0, currentQty - quantity);
-        await pool.query('UPDATE project_stock SET quantity = $1 WHERE id = $2', [String(newQty), row.id]);
-        await pool.query(
-          'INSERT INTO project_stock_ledger (project_id, material_name, unit, quantity_delta, type, created_at, user_id, user_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-          [b.projectId, materialName, row.unit || unit, -quantity, 'deduct_report', reportDate.toISOString(), b.userId || null, b.userName || '']
-        );
-      }
-    }
-    // التقرير حُفظ بالفعل، فلا يجوز أن يُفشل حساب عدد المرفقات الطلب.
-    let dailyImages = [];
-    try {
-      dailyImages = Array.isArray(b.imagePaths)
-        ? b.imagePaths
-        : (typeof b.imagePaths === 'string' ? JSON.parse(b.imagePaths || '[]') : []);
-      if (!Array.isArray(dailyImages)) dailyImages = [];
-    } catch (_) {
-      dailyImages = [];
-    }
-    const dailyFileCount =
-      (b.documentPath ? 1 : 0) +
-      dailyImages.length +
-      expenses.filter((e) => e && e.image_path).length;
-    if (dailyFileCount > 0) {
-      await notifyFileUpload(pool, b.userId, b.userName, {
-        title: 'مرفقات التقرير اليومي',
-        body:
-          `قام "${b.userName}" بإرفاق ${dailyFileCount} ملف مع التقرير اليومي — مشروع "${b.projectName || 'غير محدد'}"\n` +
-          `رقم التقرير: ${id}`,
-        eventType: 'daily_report_attachment',
-        projectName: b.projectName || null,
-        attachmentSource: 'daily_report',
-        attachmentRecordId: id,
-        attachmentCount: dailyFileCount,
-      });
-    }
-    res.json(id);
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-app.get('/daily-reports', async (req, res) => {
-  try {
-    const { dateFrom, dateTo, userId, projectId } = req.query;
-    let q = 'SELECT * FROM daily_reports WHERE report_datetime >= $1 AND report_datetime <= $2';
-    const params = [dateFrom, dateTo];
-    let i = 3;
-    if (userId) { q += ` AND user_id = $${i}`; params.push(userId); i++; }
-    if (projectId) { q += ` AND project_id = $${i}`; params.push(projectId); i++; }
-    q += ' ORDER BY report_datetime DESC';
-    const r = await pool.query(q, params);
-    res.json(r.rows.map(row => ({
-      id: parseInt(row.id), user_id: parseInt(row.user_id), user_name: row.user_name, project_id: row.project_id ? parseInt(row.project_id) : null, project_name: row.project_name,
-      report_datetime: row.report_datetime, work_place: row.work_place, work_report: row.work_report, executed_today: row.executed_today, supervisor_name: row.supervisor_name, contractor_name: row.contractor_name, workers_count: row.workers_count, contractors_json: row.contractors_json, tomorrow_plan: row.tomorrow_plan, document_path: row.document_path, images_json: row.images_json, notes: row.notes, materials_json: row.materials_json, expenses_json: row.expenses_json, created_at: row.created_at
-    })));
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-app.delete('/daily-reports/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM daily_reports WHERE id = $1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
 
 // ——— Engineer balance & custody ———
 async function ensureEngineerCustodyActorColumns() {
@@ -5250,16 +5128,11 @@ app.get('/location-withdrawal', async (req, res) => {
          ORDER BY lw.location_id, lw.phase`,
         [parseInt(String(projectId), 10)]
       );
-      return res.json(r.rows.map(row => ({
-        id: parseInt(row.id),
-        location_id: parseInt(row.location_id),
-        phase: row.phase || 'first_fix',
-        user_id: parseInt(row.user_id),
-        user_name: row.user_name,
-        created_at: row.created_at,
-        disbursement_permit_images_json: row.disbursement_permit_images_json,
-        delivery_permit_images_json: row.delivery_permit_images_json
-      })));
+      const out = [];
+      for (const row of r.rows) {
+        out.push(await withdrawalRowToJson(row));
+      }
+      return res.json(out);
     }
     if (!locationId) return res.status(400).json({ error: 'locationId or projectId required' });
     const r = await pool.query(
@@ -5267,17 +5140,7 @@ app.get('/location-withdrawal', async (req, res) => {
       [locationId, phase]
     );
     if (r.rows.length === 0) return res.json(null);
-    const row = r.rows[0];
-    res.json({
-      id: parseInt(row.id),
-      location_id: parseInt(row.location_id),
-      phase: row.phase || 'first_fix',
-      user_id: parseInt(row.user_id),
-      user_name: row.user_name,
-      created_at: row.created_at,
-      disbursement_permit_images_json: row.disbursement_permit_images_json,
-      delivery_permit_images_json: row.delivery_permit_images_json
-    });
+    res.json(await withdrawalRowToJson(r.rows[0]));
   } catch (e) {
     res.status(500).json({ error: String(e.message) });
   }
@@ -5375,9 +5238,15 @@ app.post('/location-withdrawal', async (req, res) => {
         });
       }
     }
+    const storedImages = await storeInlineBlobList({
+      keyPrefix: 'location-withdrawal',
+      ownerId: userId,
+      items: disbursementImages,
+      fileNamePrefix: 'disbursement-permit',
+    });
     const withdrawalIns = await pool.query(
       'INSERT INTO location_withdrawal (location_id, phase, user_id, user_name, created_at, disbursement_permit_images_json, delivery_permit_images_json) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-      [locationId, phase, userId, userName, now, JSON.stringify(disbursementImages), '[]']
+      [locationId, phase, userId, userName, now, JSON.stringify(storedImages), '[]']
     );
     const withdrawalId = parseInt(withdrawalIns.rows[0].id, 10);
     for (const m of materials.rows) {
@@ -5436,7 +5305,9 @@ app.delete('/location-withdrawal', async (req, res) => {
     if (!locationId) return res.status(400).json({ error: 'locationId required' });
 
     const wR = await pool.query(
-      'SELECT id, location_id, phase, user_id, user_name, created_at FROM location_withdrawal WHERE location_id = $1 AND phase = $2',
+      `SELECT id, location_id, phase, user_id, user_name, created_at,
+              disbursement_permit_images_json, delivery_permit_images_json
+       FROM location_withdrawal WHERE location_id = $1 AND phase = $2`,
       [locationId, phase]
     );
     if (wR.rows.length === 0) {
@@ -5481,6 +5352,7 @@ app.delete('/location-withdrawal', async (req, res) => {
       );
     }
 
+    await withdrawalDeletePermitBlobs(w);
     await pool.query('DELETE FROM location_withdrawal WHERE location_id = $1 AND phase = $2', [locationId, phase]);
     res.json({ ok: true, restoredLedgerRows: ledgers.rows.length });
   } catch (e) {
@@ -6822,154 +6694,6 @@ app.post('/operation-reports', async (req, res) => {
   }
 });
 
-app.get('/units', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT id, building_id, name, model, image_path FROM units WHERE building_id = $1 ORDER BY name', [req.query.buildingId]);
-    res.json(r.rows.map(row => ({ id: parseInt(row.id), building_id: parseInt(row.building_id), name: row.name, model: row.model, image_path: row.image_path })));
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-app.post('/units', async (req, res) => {
-  try {
-    const b = req.body;
-    const r = await pool.query('INSERT INTO units (building_id, name, model, image_path) VALUES ($1, $2, $3, $4) RETURNING id', [b.buildingId, b.name, b.model || b.name, b.imagePath || null]);
-    const unitId = parseInt(r.rows[0].id);
-    if (b.imagePath) {
-      await notifyAssetImageUpload(pool, b, {
-        source: 'unit',
-        recordId: unitId,
-        label: 'صورة وحدة',
-        itemName: b.name,
-      });
-    }
-    res.json(unitId);
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-app.put('/units/:id', async (req, res) => {
-  try {
-    const b = req.body;
-    const unitId = parseInt(req.params.id, 10);
-    const before = await pool.query('SELECT image_path FROM units WHERE id = $1', [unitId]);
-    const previousImage = before.rows.length ? before.rows[0].image_path : null;
-    await pool.query('UPDATE units SET name = $1, model = $2, image_path = $3 WHERE id = $4', [b.name, b.model, b.imagePath || null, req.params.id]);
-    if (b.imagePath && b.imagePath !== previousImage) {
-      await notifyAssetImageUpload(pool, b, {
-        source: 'unit',
-        recordId: unitId,
-        label: 'صورة وحدة',
-        itemName: b.name,
-      });
-    }
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-app.delete('/units/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM units WHERE id = $1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-app.get('/building-materials', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT id, building_id, material_name, quantity, unit, length, pieces_count, total_length, total_area, image_path FROM building_materials WHERE building_id = $1 ORDER BY material_name', [req.query.buildingId]);
-    res.json(r.rows.map(row => ({
-      id: parseInt(row.id), building_id: parseInt(row.building_id), material_name: row.material_name, length: row.length || '', pieces_count: row.pieces_count || '', total_length: row.total_length || '', total_area: row.total_area || '', image_path: row.image_path
-    })));
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-app.post('/building-materials', async (req, res) => {
-  try {
-    const b = req.body;
-    const r = await pool.query(
-      'INSERT INTO building_materials (building_id, material_name, quantity, unit, length, pieces_count, total_length, total_area, image_path) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
-      [b.buildingId, b.materialName, b.quantity || '', b.unit || '', b.length || '', b.piecesCount || '', b.totalLength || '', b.totalArea || '', b.imagePath || null]
-    );
-    const materialId = parseInt(r.rows[0].id);
-    if (b.imagePath) {
-      await notifyAssetImageUpload(pool, b, {
-        source: 'building_material',
-        recordId: materialId,
-        label: 'صورة خامة مبنى',
-        itemName: b.materialName,
-      });
-    }
-    res.json(materialId);
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-app.put('/building-materials/:id', async (req, res) => {
-  try {
-    const b = req.body;
-    const materialId = parseInt(req.params.id, 10);
-    const before = await pool.query('SELECT image_path FROM building_materials WHERE id = $1', [materialId]);
-    const previousImage = before.rows.length ? before.rows[0].image_path : null;
-    await pool.query('UPDATE building_materials SET material_name = $1, length = $2, pieces_count = $3, total_length = $4, total_area = $5, image_path = $6 WHERE id = $7', [b.materialName, b.length || '', b.piecesCount || '', b.totalLength || '', b.totalArea || '', b.imagePath || null, req.params.id]);
-    if (b.imagePath && b.imagePath !== previousImage) {
-      await notifyAssetImageUpload(pool, b, {
-        source: 'building_material',
-        recordId: materialId,
-        label: 'صورة خامة مبنى',
-        itemName: b.materialName,
-      });
-    }
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-app.delete('/building-materials/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM building_materials WHERE id = $1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
-app.get('/building-cutlists', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT id, building_id, image_path FROM building_cutlist_images WHERE building_id = $1', [req.query.buildingId]);
-    res.json(r.rows.map(row => ({ id: parseInt(row.id), building_id: parseInt(row.building_id), image_path: row.image_path })));
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-app.post('/building-cutlists', async (req, res) => {
-  try {
-    const b = req.body;
-    const r = await pool.query('INSERT INTO building_cutlist_images (building_id, image_path) VALUES ($1, $2) RETURNING id', [b.buildingId, b.imagePath]);
-    const cutlistId = parseInt(r.rows[0].id);
-    if (b.imagePath) {
-      await notifyAssetImageUpload(pool, b, {
-        source: 'building_cutlist',
-        recordId: cutlistId,
-        label: 'صورة Cutlist',
-      });
-    }
-    res.json(cutlistId);
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-app.delete('/building-cutlists/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM building_cutlist_images WHERE id = $1', [req.params.id]);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
 
 app.get('/activity-logs', async (req, res) => {
   try {
@@ -8185,6 +7909,53 @@ async function dropProjectsDashboardTables() {
     console.warn('dropProjectsDashboardTables:', e && e.message ? e.message : e);
   }
 }
+
+async function dropLegacyCatalogAndDailyReports() {
+  try {
+    await pool.query(
+      `ALTER TABLE IF EXISTS detailed_report_lines
+       DROP CONSTRAINT IF EXISTS detailed_report_lines_zone_id_fkey`,
+    );
+    await pool.query(
+      `ALTER TABLE IF EXISTS detailed_report_lines
+       DROP CONSTRAINT IF EXISTS detailed_report_lines_building_id_fkey`,
+    );
+    await pool.query('DROP TABLE IF EXISTS units CASCADE');
+    await pool.query('DROP TABLE IF EXISTS building_materials CASCADE');
+    await pool.query('DROP TABLE IF EXISTS building_cutlist_images CASCADE');
+    await pool.query('DROP TABLE IF EXISTS daily_reports CASCADE');
+    await pool.query('DROP TABLE IF EXISTS buildings CASCADE');
+    await pool.query('DROP TABLE IF EXISTS zones CASCADE');
+    await pool.query(
+      `DELETE FROM notifications
+       WHERE attachment_source IN ('unit', 'building_material', 'building_cutlist', 'daily_report')
+          OR event_type ILIKE 'daily_report%'`,
+    );
+    const orders = await pool.query(
+      'SELECT user_id, icon_order_json FROM user_home_icon_orders',
+    );
+    for (const row of orders.rows) {
+      let arr = [];
+      try {
+        arr = JSON.parse(String(row.icon_order_json || '[]'));
+      } catch (_) {
+        continue;
+      }
+      if (!Array.isArray(arr)) continue;
+      const next = arr.filter(
+        (id) => id !== 'reports' && id !== 'engineer_projects',
+      );
+      if (next.length === arr.length) continue;
+      await pool.query(
+        'UPDATE user_home_icon_orders SET icon_order_json = $2 WHERE user_id = $1',
+        [row.user_id, JSON.stringify(next)],
+      );
+    }
+    console.log('dropLegacyCatalogAndDailyReports: ok');
+  } catch (e) {
+    console.warn('dropLegacyCatalogAndDailyReports:', e && e.message ? e.message : e);
+  }
+}
 registerAttachmentRoutes(app, pool);
 registerWithdrawalFilesReportRoutes(app, pool);
 registerMeetingsRoutes(app, pool, { runNotificationSafely });
@@ -8376,8 +8147,63 @@ async function ensureRemoveDuplicateUser683() {
   }
 }
 
+/** نقل صور أذن الصرف القديمة (data URL في Neon) إلى R2. الصفوف الجديدة تُكتب على R2 مباشرة. */
+async function ensureLocationWithdrawalPermitsOnR2() {
+  if (!isR2Configured()) return;
+  const r = await pool.query(
+    `SELECT id, user_id, disbursement_permit_images_json FROM location_withdrawal`,
+  );
+  let n = 0;
+  for (const row of r.rows) {
+    const ownerId = parseInt(row.user_id, 10) || parseInt(row.id, 10);
+    let changed = false;
+    const nextDis = [];
+    for (const item of withdrawalParseStoredPermitArray(row.disbursement_permit_images_json)) {
+      if (parseR2Ref(item) || !item.startsWith('data:')) {
+        nextDis.push(item);
+        continue;
+      }
+      try {
+        const stored = await storeInlineBlob({
+          keyPrefix: 'location-withdrawal',
+          ownerId,
+          raw: item,
+          fileName: 'disbursement-permit',
+        });
+        nextDis.push(stored || item);
+        if (stored && stored !== item) changed = true;
+      } catch (e) {
+        console.warn(
+          'ensureLocationWithdrawalPermitsOnR2:',
+          e && e.message ? e.message : e,
+        );
+        nextDis.push(item);
+      }
+    }
+    if (!changed) continue;
+    await pool.query(
+      `UPDATE location_withdrawal SET disbursement_permit_images_json = $2 WHERE id = $1`,
+      [row.id, JSON.stringify(nextDis)],
+    );
+    n++;
+  }
+  if (n) console.log(`ensureLocationWithdrawalPermitsOnR2: migrated ${n} rows`);
+}
+
 /** حذف مرفقات أذن التسليم فوراً — تم توحيد الأذن في أذن الصرف &التسليم فقط. */
 async function ensureClearDeliveryPermitImages() {
+  const r = await pool.query(`
+    SELECT id, delivery_permit_images_json FROM location_withdrawal
+    WHERE delivery_permit_images_json IS NOT NULL
+      AND TRIM(delivery_permit_images_json) <> ''
+      AND TRIM(delivery_permit_images_json) <> '[]'
+  `);
+  for (const row of r.rows) {
+    await withdrawalDeletePermitBlobs({
+      delivery_permit_images_json: row.delivery_permit_images_json,
+    });
+  }
+  if (r.rows.length === 0) return;
   await pool.query(`
     UPDATE location_withdrawal
     SET delivery_permit_images_json = '[]'
@@ -8406,6 +8232,7 @@ async function runStartupMigrations() {
     () => ensureShopDrawingTables(pool),
     () => ensureInvoicesOwnerTables(pool),
     dropProjectsDashboardTables,
+    dropLegacyCatalogAndDailyReports,
     () => ensureExpenseStatementsTable(pool),
     () => ensureContInvoicesTables(pool),
     () => ensureInvoiceStructureTables(pool),
@@ -8420,6 +8247,7 @@ async function runStartupMigrations() {
     ensureProjectsMainContractor,
     ensureProjectsManagerRole,
     ensureRemoveDuplicateUser683,
+    ensureLocationWithdrawalPermitsOnR2,
     ensureClearDeliveryPermitImages,
   ];
   for (const step of steps) {

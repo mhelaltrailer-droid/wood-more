@@ -15,7 +15,11 @@ import '../services/storage_service.dart';
 import '../utils/pdf_share.dart';
 import '../utils/work_plan_tracking_display.dart';
 import 'home_screen.dart';
-import 'reports_screen.dart' show canEditDeleteDailyReport;
+
+bool canEditDeleteDailyReport(UserModel? user) =>
+    user != null &&
+    user.role == 'app_admin' &&
+    user.email.trim().toLowerCase() == 'mouhammedhelal@gmail.com';
 
 /// عرض موقع العمل: المستوى الأب (المستوى الأول) ثم الفرع بين أقواس، مثل: Shed02 (Villa77)
 String _formatLocationHierarchy(ProjectLocationModel loc, Map<int, ProjectLocationModel> byId) {

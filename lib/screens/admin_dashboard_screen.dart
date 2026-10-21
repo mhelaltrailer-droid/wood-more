@@ -4,17 +4,12 @@ import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'admin_users_screen.dart';
 import 'admin_projects_screen.dart';
-import 'admin_zones_screen.dart';
-import 'admin_buildings_screen.dart';
 import 'admin_supervisors_screen.dart';
 import 'admin_contractors_screen.dart';
 import 'admin_materials_screen.dart';
 import 'admin_project_stores_screen.dart';
 import 'admin_warehouse_structure_screen.dart';
 import 'admin_warehouse_withdraw_screen.dart';
-import 'admin_units_screen.dart';
-import 'admin_building_materials_screen.dart';
-import 'admin_cutlists_screen.dart';
 import 'app_versions_screen.dart';
 import 'worker_hours_report_screen.dart';
 import 'home_screen.dart';
@@ -96,11 +91,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ),
       _Item('إدارة المستخدمين', 'إضافة وتعديل وحذف المستخدمين والأدوار', Icons.people, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminUsersScreen(admin: widget.currentUser)))),
       _Item('إدارة المشاريع', 'إضافة وتعديل وحذف المشاريع', Icons.business, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminProjectsScreen(admin: widget.currentUser)))),
-      _Item('إدارة المناطق (زون)', 'المناطق داخل كل مشروع', Icons.map, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminZonesScreen(admin: widget.currentUser)))),
-      _Item('إدارة المباني', 'المباني وتفاصيل النماذج', Icons.apartment, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminBuildingsScreen(admin: widget.currentUser)))),
-      _Item('إدارة الوحدات', 'وحدات كل مبنى (Th1-M01، Th2-M02) مع الصور', Icons.door_front_door, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminUnitsScreen(admin: widget.currentUser)))),
-      _Item('إدارة التشوينات', 'الخامات والكميات الخاصة بكل مبنى', Icons.inventory, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminBuildingMaterialsScreen(admin: widget.currentUser)))),
-      _Item('إدارة القطعيات', 'صور القطعيات لكل مبنى (للمهندس)', Icons.photo_library, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminCutlistsScreen(admin: widget.currentUser)))),
       _Item('إدارة المشرفين', 'أسماء المشرفين', Icons.badge, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminSupervisorsScreen(admin: widget.currentUser)))),
       _Item('إدارة المقاولين', 'أسماء المقاولين', Icons.engineering, () => Navigator.push(context, MaterialPageRoute(builder: (_) => AdminContractorsScreen(admin: widget.currentUser)))),
       _Item('ساعات العمال', 'تقرير ساعات العمل من الحضور والانصراف (مهندس موقع / مشرف عام)', Icons.access_time, () => Navigator.push(context, MaterialPageRoute(builder: (_) => WorkerHoursReportScreen(admin: widget.currentUser)))),

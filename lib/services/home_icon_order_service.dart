@@ -23,7 +23,7 @@ List<String> defaultHomeIconOrderForUser(UserModel user) {
   }
   if (user.canManageSiteEngineerExpensesReport &&
       !out.contains(homeIconIdSiteEngineerExpensesReport)) {
-    final anchorIndex = out.indexOf('reports');
+    final anchorIndex = out.indexOf('contractor_report');
     if (anchorIndex >= 0) {
       out.insert(anchorIndex + 1, homeIconIdSiteEngineerExpensesReport);
     } else {
@@ -146,7 +146,9 @@ List<String> sanitizeSavedHomeIconOrder(List<dynamic>? raw) {
             value.isNotEmpty &&
             value != 'detailed_report' &&
             value != 'projects_dashboard' &&
-            value != 'projects_dashboard_plus1',
+            value != 'projects_dashboard_plus1' &&
+            value != 'reports' &&
+            value != 'engineer_projects',
       )
       .toList();
 }

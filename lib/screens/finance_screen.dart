@@ -108,24 +108,9 @@ class _FinanceScreenState extends State<FinanceScreen> {
 
   Future<void> _showEngineerReport(UserModel engineer) async {
     setState(() => _loading = true);
-    final dateTo = DateTime.now();
-    final dateFrom = DateTime(dateTo.year - 1, dateTo.month, dateTo.day);
-    final reports = await _db.getDailyReports(dateFrom: dateFrom, dateTo: dateTo, userId: engineer.id);
     if (!mounted) return;
     setState(() => _loading = false);
     final lines = <_ExpenseLine>[];
-    for (final r in reports) {
-      for (final e in r.expenses) {
-        final amt = double.tryParse(e.amount.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
-        if (e.description.trim().isEmpty && amt == 0) continue;
-        lines.add(_ExpenseLine(
-          date: r.reportDate,
-          description: e.description.trim().isEmpty ? '—' : e.description,
-          amount: amt,
-        ));
-      }
-    }
-    lines.sort((a, b) => b.date.compareTo(a.date));
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(

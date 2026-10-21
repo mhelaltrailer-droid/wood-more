@@ -411,30 +411,6 @@ const ATTACHMENT_SOURCES = {
     ],
   }),
 
-  daily_report: attRowGroupsSource({
-    table: 'daily_reports',
-    columns: ['project_name', 'report_datetime', 'document_path', 'images_json', 'expenses_json'],
-    titleFor: (row) =>
-      `التقرير اليومي — ${row.project_name || 'غير محدد'} — ${String(row.report_datetime || '').slice(0, 10)}`,
-    groups: [
-      { key: 'document', column: 'document_path', label: 'مستند التقرير', single: true },
-      { key: 'image', column: 'images_json', label: 'صورة التقرير' },
-      {
-        key: 'expense',
-        column: 'expenses_json',
-        label: 'صورة بند صرف',
-        extract: (value) => {
-          if (!value || typeof value !== 'object') return null;
-          if (!value.image_path) return null;
-          return {
-            data: value.image_path,
-            label: `بند صرف: ${String(value.description || '').trim() || '—'}`,
-          };
-        },
-      },
-    ],
-  }),
-
   detailed_report: attRowGroupsSource({
     table: 'detailed_reports',
     columns: ['project_name', 'report_datetime', 'attachments_json', 'expenses_json'],
@@ -473,26 +449,6 @@ const ATTACHMENT_SOURCES = {
     table: 'engineer_custody',
     column: 'document_path',
     label: 'مستند العهدة',
-  }),
-
-  unit: attSingleColumnSource({
-    table: 'units',
-    column: 'image_path',
-    label: 'صورة الوحدة',
-    nameColumn: 'name',
-  }),
-
-  building_material: attSingleColumnSource({
-    table: 'building_materials',
-    column: 'image_path',
-    label: 'صورة الخامة',
-    nameColumn: 'material_name',
-  }),
-
-  building_cutlist: attSingleColumnSource({
-    table: 'building_cutlist_images',
-    column: 'image_path',
-    label: 'صورة Cutlist',
   }),
 
   operation_report: attRowGroupsSource({

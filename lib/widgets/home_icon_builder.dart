@@ -10,7 +10,6 @@ import '../core/invoice_structure_constants.dart';
 import '../screens/attendance_reports_screen.dart';
 import '../screens/attendance_screen.dart';
 import '../screens/contractor_report_screen.dart';
-import '../screens/engineer_projects_screen.dart';
 import '../screens/engineer_withdraw_materials_screen.dart';
 import '../screens/expense_statements_screen.dart';
 import '../screens/icons_control_screen.dart';
@@ -19,7 +18,6 @@ import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
 import '../screens/operation_manager_custody_balances_hub_screen.dart';
 import '../screens/postpone_fines_report_screen.dart';
-import '../screens/reports_screen.dart';
 import '../screens/reports_sys_hub_screen.dart';
 import '../core/shop_drawing_constants.dart';
 import '../screens/shop_drawing_type_gate_screen.dart';
@@ -149,20 +147,6 @@ class HomeIconBuilder {
       case 'detailed_report':
         // أُزيلت من الواجهة: العهد/المصروفات فقط عبر engineer_finances.
         return const SizedBox.shrink();
-      case 'engineer_projects':
-        return _lightCard(
-          icon: Icons.business,
-          iconSize: 56,
-          title: 'المشروعات',
-          subtitle: 'عرض التشوينات والنماذج والقطعيات حسب المبنى',
-          padding: 28,
-          onTap: () => _openAfterAttendanceCheck(
-            context: context,
-            user: user,
-            routeName: 'engineer-projects',
-            screen: EngineerProjectsScreen(user: user),
-          ),
-        );
       case 'accountant_custody':
         return _lightCard(
           icon: Icons.handshake,
@@ -323,17 +307,6 @@ class HomeIconBuilder {
             context,
             'icons-control',
             IconsControlScreen(currentUser: user),
-          ),
-        );
-      case 'reports':
-        return _lightCard(
-          icon: Icons.summarize,
-          title: 'التقارير',
-          subtitle: 'تقارير يومية حسب المهندس والتاريخ والمشروع',
-          onTap: () => pushAndSaveRoute(
-            context,
-            'reports',
-            ReportsScreen(currentUser: user),
           ),
         );
       case 'contractor_report':

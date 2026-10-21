@@ -479,8 +479,14 @@ function registerWithdrawalFilesReportRoutes(app, pool) {
           lw.user_id, lw.user_name,
           g.kind_code,
           (g.label || ' ' || t.idx) AS file_name,
-          COALESCE(NULLIF(split_part(split_part(substring(t.elem from 1 for 80), ';', 1), ':', 2), ''), 'image/jpeg') AS mime_type,
-          (length(t.elem) * 3 / 4) AS size_bytes,
+          CASE
+            WHEN t.elem LIKE '{%' THEN COALESCE((t.elem::json->>'mime_type'), 'image/jpeg')
+            ELSE COALESCE(NULLIF(split_part(split_part(substring(t.elem from 1 for 80), ';', 1), ':', 2), ''), 'image/jpeg')
+          END AS mime_type,
+          CASE
+            WHEN t.elem LIKE '{%' THEN COALESCE((t.elem::json->>'size_bytes')::bigint, 0)
+            ELSE (length(t.elem) * 3 / 4)
+          END AS size_bytes,
           COALESCE(lp.path, pl.name) AS context_label
         FROM location_withdrawal lw
         INNER JOIN project_locations pl ON pl.id = lw.location_id

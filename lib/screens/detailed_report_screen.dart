@@ -638,7 +638,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
     });
     try {
       var locs = await _db.getProjectLocations(projectId);
-      var zones = await _db.getZones(projectId);
+      var zones = <ZoneModel>[];
       var resolvedProjectId = projectId;
 
       // Fallback: في حال اختيار مشروع باسم مكرر وتمت هيكلته تحت id آخر.
@@ -655,7 +655,7 @@ class _DetailedReportScreenState extends State<DetailedReportScreen> {
           var bestScore = -1;
           for (final candidate in candidates) {
             final cLocs = await _db.getProjectLocations(candidate.id);
-            final cZones = await _db.getZones(candidate.id);
+            final cZones = <ZoneModel>[];
             if (cLocs.isEmpty && cZones.isEmpty) continue;
             final workSites = cLocs.where((l) => l.isWorkSite).length;
             final folders = cLocs.where((l) => l.isFolder).length;

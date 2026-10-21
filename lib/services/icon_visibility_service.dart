@@ -204,7 +204,6 @@ class IconVisibilityService {
       ),
       HomeIconItem(id: 'engineer_finances', label: 'العهدة/المصروفات'),
       HomeIconItem(id: 'operation_reports', label: 'تقارير التشغيل'),
-      HomeIconItem(id: 'engineer_projects', label: 'المشروعات'),
       documentControlIcon,
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       contProgressIcon,
@@ -279,7 +278,6 @@ class IconVisibilityService {
         label: 'تقارير التأجيل/الغرامات',
       ),
       HomeIconItem(id: 'new_icon', label: 'Control'),
-      HomeIconItem(id: 'reports', label: 'التقارير'),
       HomeIconItem(id: 'contractor_report', label: 'تقارير المقاول'),
       withdrawalFilesReportsIcon,
       documentControlIcon,
@@ -328,7 +326,9 @@ class IconVisibilityService {
           // أيقونة التقرير المفصل وProjects Dashboard أُزيلا من الواجهة.
           if (id == 'detailed_report' ||
               id == 'projects_dashboard' ||
-              id == 'projects_dashboard_plus1') {
+              id == 'projects_dashboard_plus1' ||
+              id == 'reports' ||
+              id == 'engineer_projects') {
             return;
           }
           roleMap[id] = value == true;
@@ -341,6 +341,8 @@ class IconVisibilityService {
       roleMap.remove('detailed_report');
       roleMap.remove('projects_dashboard');
       roleMap.remove('projects_dashboard_plus1');
+      roleMap.remove('reports');
+      roleMap.remove('engineer_projects');
       output[role] = roleMap;
     }
     return output;
