@@ -234,6 +234,9 @@ class UserModel {
   /// مستخلص مقاول-Progress — Hold: إدخال الموقع متوقف؛ البداية من QS.
   bool get canAccessContProgress => isAdmin;
 
+  /// تعديل/حذف إنجازات Progress — المسؤول الأساسي فقط.
+  bool get canManageContProgressReports => isPrimaryAppAdmin;
+
   /// أيقونة Invoices (Owner) — QS، Finance، المكتب الفني، العمليات، Projects Manager، Ah.Amin، والمسؤول الأساسي.
   bool get canAccessInvoicesOwner =>
       isQs ||

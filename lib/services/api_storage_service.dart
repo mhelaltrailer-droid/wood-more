@@ -3812,6 +3812,52 @@ class ApiStorageService {
     );
   }
 
+  Future<ContProgressReportModel> updateContProgressReport({
+    required int id,
+    required int userId,
+    required double progressValue,
+    String? notes,
+  }) async {
+    final uri = Uri.parse(_path('cont-progress/$id'));
+    final r = await http.put(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode({
+        'userId': userId,
+        'progressValue': progressValue,
+        if (notes != null) 'notes': notes,
+      }),
+    );
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'cont-progress/$id');
+    }
+    return ContProgressReportModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<ContProgressReportModel?> deleteContProgressReport({
+    required int id,
+    required int userId,
+  }) async {
+    final uri = Uri.parse(_path('cont-progress/$id')).replace(
+      queryParameters: {'userId': userId.toString()},
+    );
+    final r = await http.delete(uri, headers: _reqHeaders());
+    if (r.statusCode >= 400) {
+      throw _apiHttpException(r, path: 'cont-progress/$id');
+    }
+    if (r.body.isEmpty) return null;
+    final map = Map<String, dynamic>.from(jsonDecode(r.body) as Map);
+    final reverted = map['reverted_to'];
+    if (reverted is Map) {
+      return ContProgressReportModel.fromMap(
+        Map<String, dynamic>.from(reverted),
+      );
+    }
+    return null;
+  }
+
   /// خصومات معلّقة غير مربوطة بمقاول (Admin).
   Future<List<Map<String, dynamic>>> getContInvoicePendingUnlinked(
     int userId,

@@ -3,7 +3,10 @@
  * (مقاول + مشروع + موقع هيكلة المستخلصات + نسبة أو أمتار)
  */
 
-const { applyViewAsToUser } = require('./view_as');
+const {
+  applyViewAsToUser,
+  primaryAdminPowersActiveForUser,
+} = require('./view_as');
 
 function cpStr(raw) {
   return String(raw ?? '').trim();
@@ -26,6 +29,43 @@ function cpCanSubmit(user) {
   // Hold: إدخال مهندس الموقع متوقف؛ مسار المستخلص يبدأ من QS.
   if (!user) return false;
   return cpIsAppAdmin(user);
+}
+
+function cpIsPrimaryAdmin(user, req) {
+  return primaryAdminPowersActiveForUser(user, req);
+}
+
+function cpCanManage(user, req) {
+  return cpIsPrimaryAdmin(user, req);
+}
+
+async function cpLoadPreviousReport(pool, row, excludeId) {
+  const params = [
+    row.project_id,
+    row.structure_location_id,
+    excludeId,
+  ];
+  let contractorClause = '';
+  const contractorId =
+    row.contractor_id != null ? parseInt(row.contractor_id, 10) : NaN;
+  if (Number.isFinite(contractorId)) {
+    params.push(contractorId);
+    contractorClause = `AND contractor_id = $${params.length}`;
+  } else if (cpStr(row.contractor_name)) {
+    params.push(row.contractor_name);
+    contractorClause = `AND LOWER(TRIM(contractor_name)) = LOWER(TRIM($${params.length}))`;
+  }
+  const r = await pool.query(
+    `SELECT * FROM cont_progress_reports
+     WHERE project_id = $1
+       AND structure_location_id = $2
+       AND id <> $3
+       ${contractorClause}
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`,
+    params,
+  );
+  return r.rows[0] || null;
 }
 
 function cpCanList(user) {
@@ -311,6 +351,92 @@ function registerContProgressRoutes(app, pool) {
         ],
       );
       res.status(201).json(cpRowToJson(ins.rows[0]));
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.put('/cont-progress/:id', async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'id and userId required' });
+      }
+      const user = await cpGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!cpCanManage(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const existing = await pool.query(
+        'SELECT * FROM cont_progress_reports WHERE id = $1',
+        [id],
+      );
+      if (!existing.rows.length) {
+        return res.status(404).json({ error: 'not found' });
+      }
+      const row = existing.rows[0];
+      const progressKind = cpStr(row.progress_kind) || 'percent';
+      const progressValue = cpNum(b.progressValue ?? b.progress_value, NaN);
+      if (!Number.isFinite(progressValue) || !(progressValue > 0)) {
+        return res.status(400).json({ error: 'progressValue must be > 0' });
+      }
+      if (progressKind === 'percent' && progressValue > 100) {
+        return res.status(400).json({ error: 'percent cannot exceed 100' });
+      }
+      const notes =
+        b.notes == null ? cpStr(row.notes) : cpStr(b.notes);
+      const upd = await pool.query(
+        `UPDATE cont_progress_reports
+         SET progress_value = $1, notes = $2
+         WHERE id = $3
+         RETURNING *`,
+        [progressValue, notes, id],
+      );
+      res.json(cpRowToJson(upd.rows[0]));
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.delete('/cont-progress/:id', async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const userId = parseInt(
+        String(req.query.userId ?? req.body?.userId ?? req.body?.user_id ?? ''),
+        10,
+      );
+      if (Number.isNaN(id) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'id and userId required' });
+      }
+      const user = await cpGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!cpCanManage(user, req)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const existing = await pool.query(
+        'SELECT * FROM cont_progress_reports WHERE id = $1',
+        [id],
+      );
+      if (!existing.rows.length) {
+        return res.status(404).json({ error: 'not found' });
+      }
+      const row = existing.rows[0];
+      const previous = await cpLoadPreviousReport(pool, row, id);
+      const del = await pool.query(
+        'DELETE FROM cont_progress_reports WHERE id = $1 RETURNING id',
+        [id],
+      );
+      if (!del.rows.length) {
+        return res.status(404).json({ error: 'not found' });
+      }
+      res.json({
+        ok: true,
+        deleted_id: id,
+        reverted: true,
+        reverted_to: previous ? cpRowToJson(previous) : null,
+      });
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }

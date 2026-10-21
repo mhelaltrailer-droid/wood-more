@@ -48,6 +48,7 @@ class _ContProgressScreenState extends State<ContProgressScreen> {
   bool get _isFlooring =>
       (_measureType ?? '') == invoiceStructureMeasureFlooring;
   bool get _isWpc => (_measureType ?? '') == invoiceStructureMeasureWpc;
+  bool get _canManage => widget.currentUser.canManageContProgressReports;
 
   @override
   void initState() {
@@ -274,6 +275,191 @@ class _ContProgressScreenState extends State<ContProgressScreen> {
     }
   }
 
+  bool _sameProgressTarget(
+    ContProgressReportModel a,
+    ContProgressReportModel b,
+  ) {
+    if (a.projectId != b.projectId) return false;
+    if (a.structureLocationId != b.structureLocationId) return false;
+    if (a.contractorId != null &&
+        b.contractorId != null &&
+        a.contractorId == b.contractorId) {
+      return true;
+    }
+    return a.contractorName.trim().toLowerCase() ==
+        b.contractorName.trim().toLowerCase();
+  }
+
+  ContProgressReportModel? _previousFor(ContProgressReportModel report) {
+    for (final item in _recent) {
+      if (item.id == report.id) continue;
+      if (_sameProgressTarget(item, report)) return item;
+    }
+    return null;
+  }
+
+  Future<void> _editReport(ContProgressReportModel report) async {
+    if (!_canManage || report.id == null || _saving) return;
+    final valueC = TextEditingController(
+      text: report.progressValue == report.progressValue.roundToDouble()
+          ? report.progressValue.toInt().toString()
+          : report.progressValue.toString(),
+    );
+    final notesC = TextEditingController(text: report.notes);
+    final isPercent = report.isPercent;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('تعديل الإنجاز'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    '${report.contractorName}\n${report.locationLabel}',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: valueC,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: isPercent
+                        ? 'نسبة الإنجاز %'
+                        : 'عدد الأمتار المنجزة',
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: notesC,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'ملاحظات (اختياري)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('حفظ'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    final value = _parse(valueC.text);
+    if (value <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isPercent ? 'أدخل نسبة الإنجاز' : 'أدخل عدد الأمتار'),
+        ),
+      );
+      return;
+    }
+    if (isPercent && value > 100) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('النسبة لا تتعدى 100%')),
+      );
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await _api.updateContProgressReport(
+        id: report.id!,
+        userId: widget.currentUser.id,
+        progressValue: value,
+        notes: notesC.text.trim(),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم تعديل الإنجاز')),
+      );
+      await _loadRecent();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تعديل الإنجاز: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _confirmDelete(ContProgressReportModel report) async {
+    if (!_canManage || report.id == null || _saving) return;
+    final previous = _previousFor(report);
+    final afterLabel = previous == null
+        ? 'صفر — لا يوجد إنجاز سابق لهذا الموقع'
+        : previous.valueLabel;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          title: const Text('حذف الإنجاز'),
+          content: Text(
+            'سيتم حذف إنجاز ${report.valueLabel} على ${report.locationLabel} بالكامل.\n'
+            'بعد الحذف ترجع حالة الموقع إلى: $afterLabel.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('حذف وإرجاع'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _saving = true);
+    try {
+      final reverted = await _api.deleteContProgressReport(
+        id: report.id!,
+        userId: widget.currentUser.id,
+      );
+      if (!mounted) return;
+      final msg = reverted == null
+          ? 'تم حذف الإنجاز وإرجاع الموقع إلى صفر'
+          : 'تم حذف الإنجاز وإرجاع الموقع إلى ${reverted.valueLabel}';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      await _loadRecent();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر حذف الإنجاز: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -481,6 +667,30 @@ class _ContProgressScreenState extends State<ContProgressScreen> {
                                 '${r.createdByUserName.isNotEmpty ? ' · ${r.createdByUserName}' : ''}',
                               ),
                               isThreeLine: true,
+                              trailing: _canManage && r.id != null
+                                  ? Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          tooltip: 'تعديل الإنجاز',
+                                          onPressed: _saving
+                                              ? null
+                                              : () => _editReport(r),
+                                          icon: const Icon(Icons.edit_outlined),
+                                        ),
+                                        IconButton(
+                                          tooltip: 'حذف وإرجاع الإنجاز',
+                                          onPressed: _saving
+                                              ? null
+                                              : () => _confirmDelete(r),
+                                          icon: const Icon(
+                                            Icons.delete_outline,
+                                            color: Colors.red,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : null,
                             ),
                           );
                         }),
