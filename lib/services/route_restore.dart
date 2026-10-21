@@ -16,7 +16,6 @@ import '../screens/custody_expenses_view_screen.dart';
 import '../screens/expense_statements_screen.dart';
 import '../screens/operation_manager_balances_view_screen.dart';
 import '../screens/operation_manager_custody_balances_hub_screen.dart';
-import '../screens/activity_logs_screen.dart';
 import '../screens/new_icon_screen.dart';
 import '../screens/operation_reports_screen.dart';
 import '../screens/postpone_fines_report_screen.dart';
@@ -112,8 +111,6 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return ManagerCustodyScreen(currentUser: user);
     case 'admin-dashboard':
       return AdminDashboardScreen(currentUser: user);
-    case 'activity-logs':
-      return ActivityLogsScreen(currentUser: user);
     case 'new-icon':
       return NewIconScreen(currentUser: user);
     case 'operation-reports':

@@ -178,9 +178,6 @@ class UserModel {
   /// إدارة إلغاء سحب الخامات من المخزن (لوحة التحكم): مسؤول التطبيق بهذا البريد فقط.
   bool get canManageWarehouseWithdrawalReset => isPrimaryAppAdmin && isAdmin;
 
-  /// عرض سجل حركة النظام لمسؤول التطبيق المحدد فقط.
-  bool get canViewActivityLogs => isPrimaryAppAdmin && isAdmin;
-
   /// حذف/تعديل أي خطة عمل اليوم أو الغد (تقارير مفصّلة) — لهذا البريد فقط.
   bool get canManageAnySiteWorkPlan => isPrimaryAppAdmin;
 

@@ -285,7 +285,6 @@ class IconVisibilityService {
       HomeIconItem(id: 'admin_project_structure', label: 'هيكلة المشروعات'),
       invoiceStructureIcon,
       HomeIconItem(id: 'admin_dashboard', label: 'لوح التحكم'),
-      HomeIconItem(id: 'activity_logs', label: 'سجل الحركة'),
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       balancesExpensesIcon,
       meetingsIcon,
@@ -328,7 +327,8 @@ class IconVisibilityService {
               id == 'projects_dashboard' ||
               id == 'projects_dashboard_plus1' ||
               id == 'reports' ||
-              id == 'engineer_projects') {
+              id == 'engineer_projects' ||
+              id == 'activity_logs') {
             return;
           }
           roleMap[id] = value == true;
@@ -343,6 +343,7 @@ class IconVisibilityService {
       roleMap.remove('projects_dashboard_plus1');
       roleMap.remove('reports');
       roleMap.remove('engineer_projects');
+      roleMap.remove('activity_logs');
       output[role] = roleMap;
     }
     return output;

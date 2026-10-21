@@ -58,6 +58,14 @@ void main() {
     expect(eligible, isNot(contains('today_work_plan')));
   });
 
+  test('app_admin no longer has activity_logs home icon', () {
+    final eligible = eligibleHomeIconIds(
+      user: _user('app_admin'),
+      iconConfig: IconVisibilityService.defaultForRole('app_admin'),
+    );
+    expect(eligible, isNot(contains('activity_logs')));
+  });
+
   test('resolveHomeIconOrder drops hidden icons from saved order', () {
     final iconConfig = Map<String, bool>.from(
       IconVisibilityService.defaultForRole('app_admin'),
@@ -65,11 +73,16 @@ void main() {
     final resolved = resolveHomeIconOrder(
       user: _user('app_admin'),
       iconConfig: iconConfig,
-      savedOrder: const ['warehouses_view', 'reports', 'attendance_reports'],
+      savedOrder: const [
+        'warehouses_view',
+        'activity_logs',
+        'attendance_reports',
+      ],
     );
 
     expect(resolved, isNot(contains('warehouses_view')));
-    expect(resolved.first, 'reports');
-    expect(resolved, contains('reports'));
+    expect(resolved, isNot(contains('activity_logs')));
+    expect(resolved.first, 'attendance_reports');
+    expect(resolved, contains('attendance_reports'));
   });
 }

@@ -74,9 +74,6 @@ bool _isHomeIconAvailable({
     case 'postpone_fines_reports':
       return user.canAccessPostponeFinesReports &&
           IconVisibilityService.isVisible(iconConfig, iconId);
-    case 'activity_logs':
-      return user.canViewActivityLogs &&
-          IconVisibilityService.isVisible(iconConfig, iconId);
     case 'reports_sys':
       return user.canParticipateInReportsSys &&
           IconVisibilityService.isVisible(iconConfig, iconId);
@@ -148,7 +145,8 @@ List<String> sanitizeSavedHomeIconOrder(List<dynamic>? raw) {
             value != 'projects_dashboard' &&
             value != 'projects_dashboard_plus1' &&
             value != 'reports' &&
-            value != 'engineer_projects',
+            value != 'engineer_projects' &&
+            value != 'activity_logs',
       )
       .toList();
 }

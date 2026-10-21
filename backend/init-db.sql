@@ -225159,3 +225159,6 @@ DROP TABLE IF EXISTS public.building_cutlist_images CASCADE;
 DROP TABLE IF EXISTS public.daily_reports CASCADE;
 DROP TABLE IF EXISTS public.buildings CASCADE;
 DROP TABLE IF EXISTS public.zones CASCADE;
+
+-- Global activity log (??? ??????) removed from the product.
+DROP TABLE IF EXISTS public.activity_logs CASCADE;

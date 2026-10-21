@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../models/user_model.dart';
 import '../screens/accountant_finance_screen.dart';
-import '../screens/activity_logs_screen.dart';
 import '../screens/admin_dashboard_screen.dart';
 import '../screens/admin_project_structure_screen.dart';
 import '../screens/admin_invoice_structure_screen.dart';
@@ -392,17 +391,6 @@ class HomeIconBuilder {
             context,
             'admin-dashboard',
             AdminDashboardScreen(currentUser: user),
-          ),
-        );
-      case 'activity_logs':
-        return _lightCard(
-          icon: Icons.manage_search,
-          title: 'سجل الحركة',
-          subtitle: 'رصد كل الحركات على النظام خلال مدة محددة',
-          onTap: () => pushAndSaveRoute(
-            context,
-            'activity-logs',
-            ActivityLogsScreen(currentUser: user),
           ),
         );
       case 'shop_drawing':

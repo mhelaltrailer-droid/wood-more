@@ -71,71 +71,30 @@ function isSemLikeRole(role) {
   return SEM_LIKE_ROLES.includes(String(role || '').trim());
 }
 
-/// احتفاظ بسجل الحركة لآخر N يوم فقط؛ الأقدم يُحذف تلقائيًا.
-const ACTIVITY_LOGS_RETENTION_DAYS = 30;
-const ACTIVITY_LOGS_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
-let _activityLogsPurgeTimer = null;
-
-function activityLogsRetentionCutoffIso() {
-  const d = new Date(Date.now() - ACTIVITY_LOGS_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-  return d.toISOString();
-}
-
-async function purgeOldActivityLogs() {
-  const cutoff = activityLogsRetentionCutoffIso();
-  const r = await pool.query(
-    'DELETE FROM activity_logs WHERE created_at < $1',
-    [cutoff],
-  );
-  const deleted = r.rowCount || 0;
-  if (deleted > 0) {
-    console.log(
-      `purgeOldActivityLogs: deleted ${deleted} row(s) older than ${ACTIVITY_LOGS_RETENTION_DAYS}d (before ${cutoff})`,
-    );
-  }
-  return deleted;
-}
-
-function startActivityLogsRetentionPurge() {
-  if (_activityLogsPurgeTimer) return;
-  const run = () => {
-    purgeOldActivityLogs().catch((e) => {
-      console.warn('purgeOldActivityLogs:', e && e.message ? e.message : e);
-    });
-  };
-  // تأجيل أول تشغيل قليلاً حتى لا يتزاحم مع باقي ensures عند الإقلاع.
-  setTimeout(run, 15 * 1000);
-  _activityLogsPurgeTimer = setInterval(run, ACTIVITY_LOGS_PURGE_INTERVAL_MS);
-  if (typeof _activityLogsPurgeTimer.unref === 'function') {
-    _activityLogsPurgeTimer.unref();
-  }
-}
-
-async function ensureActivityLogsTable() {
+async function dropActivityLogsTable() {
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS activity_logs (
-        id SERIAL PRIMARY KEY,
-        created_at TEXT NOT NULL,
-        action_type TEXT NOT NULL,
-        action_label TEXT NOT NULL DEFAULT '',
-        endpoint TEXT NOT NULL,
-        method TEXT NOT NULL,
-        user_id INTEGER,
-        user_name TEXT,
-        user_email TEXT,
-        status_code INTEGER NOT NULL DEFAULT 200,
-        details TEXT
-      )
-    `);
-    await pool.query(`ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS action_label TEXT NOT NULL DEFAULT ''`).catch(() => {});
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_activity_logs_created_at ON activity_logs(created_at)').catch(() => {});
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_activity_logs_user_id ON activity_logs(user_id)').catch(() => {});
-    await pool.query('CREATE INDEX IF NOT EXISTS idx_activity_logs_action_type ON activity_logs(action_type)').catch(() => {});
-    console.log('ensureActivityLogsTable: ok');
-    startActivityLogsRetentionPurge();
+    await pool.query('DROP TABLE IF EXISTS activity_logs CASCADE');
+    const orders = await pool.query(
+      'SELECT user_id, icon_order_json FROM user_home_icon_orders',
+    );
+    for (const row of orders.rows) {
+      let arr = [];
+      try {
+        arr = JSON.parse(String(row.icon_order_json || '[]'));
+      } catch (_) {
+        continue;
+      }
+      if (!Array.isArray(arr)) continue;
+      const next = arr.filter((id) => id !== 'activity_logs');
+      if (next.length === arr.length) continue;
+      await pool.query(
+        'UPDATE user_home_icon_orders SET icon_order_json = $2 WHERE user_id = $1',
+        [row.user_id, JSON.stringify(next)],
+      );
+    }
+    console.log('dropActivityLogsTable: ok');
   } catch (e) {
-    console.warn('ensureActivityLogsTable:', e.message);
+    console.warn('dropActivityLogsTable:', e && e.message ? e.message : e);
   }
 }
 
@@ -1662,29 +1621,7 @@ function _shouldSkipActivityLog(req) {
   return ACTIVITY_LOG_SKIPPED_GET_PATHS.has(req.path);
 }
 
-async function _insertActivityLog({ req, statusCode, details }) {
-  try {
-    if (_shouldSkipActivityLog(req)) return;
-    const ctx = await _resolveActivityUserContext(req);
-    const action = _resolveActivityAction(req.method, req.path, req.body || {});
-    await pool.query(
-      `INSERT INTO activity_logs (created_at, action_type, action_label, endpoint, method, user_id, user_name, user_email, status_code, details)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [
-        new Date().toISOString(),
-        action.type,
-        action.label,
-        req.path,
-        req.method,
-        ctx.userId,
-        ctx.userName,
-        ctx.userEmail,
-        statusCode,
-        details,
-      ]
-    );
-  } catch (_) {}
-}
+async function _insertActivityLog() {}
 
 function _resolveActivityAction(method, path, body) {
   const m = String(method || '').toUpperCase();
@@ -1731,17 +1668,6 @@ function _resolveActivityAction(method, path, body) {
   }
   return { type: 'other', label: 'حركة أخرى' };
 }
-
-app.use((req, res, next) => {
-  const startedAt = Date.now();
-  res.on('finish', () => {
-    const elapsed = Date.now() - startedAt;
-    const queryJson = Object.keys(req.query || {}).length > 0 ? `query=${JSON.stringify(req.query)}` : '';
-    const details = `${queryJson} elapsed_ms=${elapsed}`.trim();
-    _insertActivityLog({ req, statusCode: res.statusCode, details });
-  });
-  next();
-});
 
 app.get('/', (req, res) => {
   res.json({ ok: true, message: 'Wood & More API', docs: 'Use POST /auth/login for login, /users, /projects, etc.' });
@@ -2133,7 +2059,6 @@ async function ensureHomeIconsVisibilitySetting() {
         contractor_report: true,
         admin_project_structure: true,
         admin_dashboard: true,
-        activity_logs: true,
         ir_mir: true,
         warehouses_view: true,
         ms_sd: true,
@@ -2199,6 +2124,7 @@ async function ensureHomeIconsVisibilitySetting() {
         delete roleMap.projects_dashboard_plus1;
         delete roleMap.reports;
         delete roleMap.engineer_projects;
+        delete roleMap.activity_logs;
         if (forceHideContIcons) {
           for (const iconId of contHiddenIds) {
             if (Object.prototype.hasOwnProperty.call(roleMap, iconId) ||
@@ -2653,7 +2579,6 @@ async function deleteUserAndDependencies(client, userId) {
   await client.query('DELETE FROM notifications WHERE recipient_user_id = $1', [id]);
   await client.query('DELETE FROM user_home_icon_orders WHERE user_id = $1', [id]);
   await client.query('UPDATE project_stock_ledger SET user_id = NULL WHERE user_id = $1', [id]);
-  await client.query('UPDATE activity_logs SET user_id = NULL WHERE user_id = $1', [id]);
 }
 
 app.delete('/users/:id', async (req, res) => {
@@ -2771,7 +2696,6 @@ app.post('/disbursement-notes/next-number', async (req, res) => {
 const PROJECT_SOFT_REF_TABLES = [
   'attendance_records',
   'notifications',
-  'activity_logs',
 ];
 
 async function reassignProjectSoftRefs(client, fromId, toId, toName, summary = {}) {
@@ -6695,65 +6619,6 @@ app.post('/operation-reports', async (req, res) => {
 });
 
 
-app.get('/activity-logs', async (req, res) => {
-  try {
-    const requesterEmail = String(req.query.requesterEmail || '').trim().toLowerCase();
-    if (requesterEmail !== 'mouhammedhelal@gmail.com') {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-    const params = [];
-    let i = 1;
-    let sql = `
-      SELECT id, created_at, action_type, action_label, endpoint, method, user_id, user_name, user_email, status_code, details
-      FROM activity_logs
-      WHERE 1=1
-    `;
-    if (req.query.dateFrom) {
-      sql += ` AND created_at >= $${i}`;
-      params.push(String(req.query.dateFrom));
-      i++;
-    }
-    if (req.query.dateTo) {
-      sql += ` AND created_at <= $${i}`;
-      params.push(String(req.query.dateTo));
-      i++;
-    }
-    if (req.query.userId && String(req.query.userId).trim() !== '') {
-      sql += ` AND user_id = $${i}`;
-      params.push(parseInt(String(req.query.userId), 10));
-      i++;
-    }
-    if (req.query.actionType && String(req.query.actionType).trim() !== '') {
-      sql += ` AND action_type = $${i}`;
-      params.push(String(req.query.actionType).trim());
-      i++;
-    }
-    sql += ' ORDER BY created_at DESC, id DESC LIMIT 5000';
-    const r = await pool.query(sql, params);
-    const enriched = [];
-    for (const row of r.rows) {
-      enriched.push(await _enrichActivityLogRow(row));
-    }
-    res.json(
-      enriched.map((row) => ({
-        id: parseInt(row.id),
-        created_at: row.created_at,
-        action_type: row.action_type,
-        action_label: row.action_label,
-        endpoint: row.endpoint,
-        method: row.method,
-        user_id: row.user_id != null ? parseInt(row.user_id) : null,
-        user_name: row.user_name,
-        user_email: row.user_email,
-        status_code: parseInt(row.status_code),
-        details: row.details ?? '',
-      }))
-    );
-  } catch (e) {
-    res.status(500).json({ error: String(e.message) });
-  }
-});
-
 app.post('/executed-plans', async (req, res) => {
   try {
     const b = req.body || {};
@@ -7896,7 +7761,10 @@ async function dropProjectsDashboardTables() {
       }
       if (!Array.isArray(arr)) continue;
       const next = arr.filter(
-        (id) => id !== 'projects_dashboard' && id !== 'projects_dashboard_plus1',
+        (id) =>
+          id !== 'projects_dashboard' &&
+          id !== 'projects_dashboard_plus1' &&
+          id !== 'activity_logs',
       );
       if (next.length === arr.length) continue;
       await pool.query(
@@ -7943,7 +7811,10 @@ async function dropLegacyCatalogAndDailyReports() {
       }
       if (!Array.isArray(arr)) continue;
       const next = arr.filter(
-        (id) => id !== 'reports' && id !== 'engineer_projects',
+        (id) =>
+          id !== 'reports' &&
+          id !== 'engineer_projects' &&
+          id !== 'activity_logs',
       );
       if (next.length === arr.length) continue;
       await pool.query(
@@ -8222,7 +8093,7 @@ async function runStartupMigrations() {
     ensureAttendanceCalendarDateColumn,
     ensureDetailedReportsTables,
     ensureLocationMaterialsTables,
-    ensureActivityLogsTable,
+    dropActivityLogsTable,
     ensureExecutedPlansTable,
     ensurePostponeReasonsTable,
     ensureNotificationsTable,
