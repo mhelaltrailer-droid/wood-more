@@ -26,10 +26,6 @@ const {
   registerInvoicesOwnerRoutes,
 } = require('./invoices_owner');
 const {
-  ensureProjectsDashboardTables,
-  registerProjectsDashboardRoutes,
-} = require('./projects_dashboard');
-const {
   ensureExpenseStatementsTable,
   registerExpenseStatementsRoutes,
 } = require('./expense_statements');
@@ -2064,8 +2060,6 @@ async function ensureHomeIconsVisibilitySetting() {
         ms_sd: true,
         qs_invs: true,
         mos_itp: true,
-        projects_dashboard: true,
-        projects_dashboard_plus1: true,
         custody_expenses_view: true,
         meetings: true,
         invoices_owner: true,
@@ -2088,8 +2082,6 @@ async function ensureHomeIconsVisibilitySetting() {
         ms_sd: true,
         qs_invs: true,
         mos_itp: true,
-        projects_dashboard: true,
-        projects_dashboard_plus1: true,
         meetings: true,
         invoices_owner: true,
         cont_invoices: false,
@@ -2107,8 +2099,6 @@ async function ensureHomeIconsVisibilitySetting() {
       },
       technical_office: {
         shop_drawing: true,
-        projects_dashboard: true,
-        projects_dashboard_plus1: true,
         meetings: true,
         invoices_owner: true,
       },
@@ -2146,8 +2136,10 @@ async function ensureHomeIconsVisibilitySetting() {
         for (const [iconId, visible] of Object.entries(icons)) {
           if (roleMap[iconId] === undefined) roleMap[iconId] = visible;
         }
-        // أُزيلت أيقونة التقرير المفصل من الواجهة — أخفِها إن بقيت في الإعدادات القديمة.
+        // أُزيلت أيقونة التقرير المفصل وProjects Dashboard من الواجهة.
         delete roleMap.detailed_report;
+        delete roleMap.projects_dashboard;
+        delete roleMap.projects_dashboard_plus1;
         if (forceHideContIcons) {
           for (const iconId of contHiddenIds) {
             if (Object.prototype.hasOwnProperty.call(roleMap, iconId) ||
@@ -8157,8 +8149,42 @@ app.post('/app-release/upload-finalize', async (req, res) => {
 const PORT = parseInt(process.env.PORT || '3000', 10);
 registerShopDrawingRoutes(app, pool, { runNotificationSafely });
 registerInvoicesOwnerRoutes(app, pool, { runNotificationSafely });
-registerProjectsDashboardRoutes(app, pool, { notifyFileUpload });
 registerExpenseStatementsRoutes(app, pool, { runNotificationSafely, notifyFileUpload });
+
+async function dropProjectsDashboardTables() {
+  try {
+    await pool.query('DROP TABLE IF EXISTS projects_dashboard_notes CASCADE');
+    await pool.query('DROP TABLE IF EXISTS projects_dashboard_sheet CASCADE');
+    await pool.query(
+      `DELETE FROM notifications
+       WHERE event_type ILIKE 'projects_dashboard%'
+          OR attachment_source = 'projects_dashboard'`,
+    );
+    const orders = await pool.query(
+      'SELECT user_id, icon_order_json FROM user_home_icon_orders',
+    );
+    for (const row of orders.rows) {
+      let arr = [];
+      try {
+        arr = JSON.parse(String(row.icon_order_json || '[]'));
+      } catch (_) {
+        continue;
+      }
+      if (!Array.isArray(arr)) continue;
+      const next = arr.filter(
+        (id) => id !== 'projects_dashboard' && id !== 'projects_dashboard_plus1',
+      );
+      if (next.length === arr.length) continue;
+      await pool.query(
+        'UPDATE user_home_icon_orders SET icon_order_json = $2 WHERE user_id = $1',
+        [row.user_id, JSON.stringify(next)],
+      );
+    }
+    console.log('dropProjectsDashboardTables: ok');
+  } catch (e) {
+    console.warn('dropProjectsDashboardTables:', e && e.message ? e.message : e);
+  }
+}
 registerAttachmentRoutes(app, pool);
 registerWithdrawalFilesReportRoutes(app, pool);
 registerMeetingsRoutes(app, pool, { runNotificationSafely });
@@ -8379,7 +8405,7 @@ async function runStartupMigrations() {
     ensureAppReleaseTables,
     () => ensureShopDrawingTables(pool),
     () => ensureInvoicesOwnerTables(pool),
-    () => ensureProjectsDashboardTables(pool),
+    dropProjectsDashboardTables,
     () => ensureExpenseStatementsTable(pool),
     () => ensureContInvoicesTables(pool),
     () => ensureInvoiceStructureTables(pool),

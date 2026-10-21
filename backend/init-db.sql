@@ -225145,3 +225145,7 @@ END $$;
 --
 
 
+
+-- Projects Dashboard removed from the product: drop leftover dump tables/data.
+DROP TABLE IF EXISTS public.projects_dashboard_notes CASCADE;
+DROP TABLE IF EXISTS public.projects_dashboard_sheet CASCADE;

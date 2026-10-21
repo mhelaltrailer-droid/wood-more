@@ -83,12 +83,6 @@ bool _isHomeIconAvailable({
     case homeIconIdShopDrawing:
       return user.canAccessShopDrawingHomeIcon &&
           IconVisibilityService.isVisible(iconConfig, iconId);
-    case 'projects_dashboard':
-      return user.canAccessProjectsDashboard &&
-          IconVisibilityService.isVisible(iconConfig, iconId);
-    case 'projects_dashboard_plus1':
-      return user.canAccessProjectsDashboard &&
-          IconVisibilityService.isVisible(iconConfig, iconId);
     case 'meetings':
       return user.canAccessMeetings &&
           IconVisibilityService.isVisible(iconConfig, iconId);
@@ -147,6 +141,12 @@ List<String> sanitizeSavedHomeIconOrder(List<dynamic>? raw) {
   if (raw == null || raw.isEmpty) return const [];
   return raw
       .map((value) => value.toString().trim())
-      .where((value) => value.isNotEmpty && value != 'detailed_report')
+      .where(
+        (value) =>
+            value.isNotEmpty &&
+            value != 'detailed_report' &&
+            value != 'projects_dashboard' &&
+            value != 'projects_dashboard_plus1',
+      )
       .toList();
 }

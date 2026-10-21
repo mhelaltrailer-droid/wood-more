@@ -32,8 +32,6 @@ import '../screens/warehouses_view_screen.dart';
 import '../screens/withdrawal_files_reports_hub_screen.dart';
 import '../screens/work_plan_tracking_report_screen.dart';
 import '../screens/weekly_report_screen.dart';
-import '../screens/projects_dashboard_screen.dart';
-import '../screens/projects_dashboard_plus1_screen.dart';
 import '../screens/meetings_screen.dart';
 import '../screens/invoices_owner_hub_screen.dart';
 import '../screens/cont_invoices_hub_screen.dart';
@@ -432,40 +430,6 @@ class HomeIconBuilder {
             context,
             'activity-logs',
             ActivityLogsScreen(currentUser: user),
-          ),
-        );
-      case 'projects_dashboard':
-        if (!user.canAccessProjectsDashboard) {
-          return const SizedBox.shrink();
-        }
-        return _lightCard(
-          icon: Icons.dashboard_customize_outlined,
-          iconSize: 56,
-          title: 'Projects Dashboard',
-          subtitle:
-              'WebDAV — فتح Excel على ويندوز والحفظ مباشرة على السيرفر',
-          padding: 28,
-          onTap: () => pushAndSaveRoute(
-            context,
-            'projects-dashboard',
-            ProjectsDashboardScreen(currentUser: user),
-          ),
-        );
-      case 'projects_dashboard_plus1':
-        if (!user.canAccessProjectsDashboard) {
-          return const SizedBox.shrink();
-        }
-        return _lightCard(
-          icon: Icons.add_chart_outlined,
-          iconSize: 56,
-          title: 'Projects Dashboard +1',
-          subtitle:
-              'تحميل → Excel → رفع — تجربة مؤقتة (ملف وملاحظات منفصلة)',
-          padding: 28,
-          onTap: () => pushAndSaveRoute(
-            context,
-            'projects-dashboard-plus1',
-            ProjectsDashboardPlus1Screen(currentUser: user),
           ),
         );
       case 'shop_drawing':

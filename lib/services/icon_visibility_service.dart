@@ -190,8 +190,6 @@ class IconVisibilityService {
     ],
     roleTechnicalOffice: [
       ..._shopDrawingOnlyHomeIcons,
-      HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
-      HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
       meetingsIcon,
       invoicesOwnerIcon,
     ],
@@ -263,8 +261,6 @@ class IconVisibilityService {
       HomeIconItem(id: 'warehouses_view', label: 'المخازن'),
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
       HomeIconItem(id: 'shop_drawing', label: shopDrawingHomeIconLabel),
-      HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
-      HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
       operationManagerCustodyBalancesExpensesIcon,
       meetingsIcon,
       invoicesOwnerIcon,
@@ -293,8 +289,6 @@ class IconVisibilityService {
       HomeIconItem(id: 'admin_dashboard', label: 'لوح التحكم'),
       HomeIconItem(id: 'activity_logs', label: 'سجل الحركة'),
       HomeIconItem(id: 'reports_sys', label: 'Reports -SYS'),
-      HomeIconItem(id: 'projects_dashboard', label: 'Projects Dashboard'),
-      HomeIconItem(id: 'projects_dashboard_plus1', label: 'Projects Dashboard +1'),
       balancesExpensesIcon,
       meetingsIcon,
       invoicesOwnerIcon,
@@ -331,8 +325,12 @@ class IconVisibilityService {
       if (dynamicRole is Map) {
         dynamicRole.forEach((key, value) {
           final id = key.toString();
-          // أيقونة التقرير المفصل أُزيلت من الواجهة.
-          if (id == 'detailed_report') return;
+          // أيقونة التقرير المفصل وProjects Dashboard أُزيلا من الواجهة.
+          if (id == 'detailed_report' ||
+              id == 'projects_dashboard' ||
+              id == 'projects_dashboard_plus1') {
+            return;
+          }
           roleMap[id] = value == true;
         });
       }
@@ -341,6 +339,8 @@ class IconVisibilityService {
         roleMap.putIfAbsent(entry.key, () => entry.value);
       }
       roleMap.remove('detailed_report');
+      roleMap.remove('projects_dashboard');
+      roleMap.remove('projects_dashboard_plus1');
       output[role] = roleMap;
     }
     return output;

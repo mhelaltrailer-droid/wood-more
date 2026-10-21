@@ -37,8 +37,6 @@ import '../screens/withdrawal_files_reports_hub_screen.dart';
 import '../screens/material_withdrawals_report_screen.dart';
 import '../screens/uploaded_files_report_screen.dart';
 import '../screens/reports_sys_hub_screen.dart';
-import '../screens/projects_dashboard_screen.dart';
-import '../screens/projects_dashboard_plus1_screen.dart';
 import '../screens/meetings_screen.dart';
 import '../screens/invoices_owner_hub_screen.dart';
 import '../screens/cont_invoices_hub_screen.dart';
@@ -167,10 +165,6 @@ Widget? getScreenForRoute(String name, UserModel user) {
       return MosItpScreen(currentUser: user);
     case 'reports-sys':
       return ReportsSysHubScreen(currentUser: user);
-    case 'projects-dashboard':
-      return ProjectsDashboardScreen(currentUser: user);
-    case 'projects-dashboard-plus1':
-      return ProjectsDashboardPlus1Screen(currentUser: user);
     case 'meetings':
       return MeetingsScreen(currentUser: user);
     case 'invoices-owner':

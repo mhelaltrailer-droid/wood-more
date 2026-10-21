@@ -551,44 +551,6 @@ const ATTACHMENT_SOURCES = {
     },
   },
 
-  projects_dashboard: {
-    async list(pool, recordId) {
-      const r = await pool.query(
-        `SELECT variant, file_name, file_mime, length(file_data) AS data_len
-         FROM projects_dashboard_sheet WHERE id = $1`,
-        [recordId],
-      );
-      if (r.rows.length === 0) throw attErr(404, 'record_not_found');
-      const row = r.rows[0];
-      return {
-        title: `Projects Dashboard (${row.variant || 'webdav'})`,
-        items: [
-          {
-            id: 'file',
-            file_name: row.file_name,
-            mime_type: row.file_mime,
-            size_bytes: Math.floor(((parseInt(row.data_len, 10) || 0) * 3) / 4),
-            kind: 'file',
-            label: 'شيت المشاريع',
-            can_open: true,
-          },
-        ],
-      };
-    },
-    async fetch(pool, recordId) {
-      const r = await pool.query(
-        'SELECT file_name, file_mime, file_data FROM projects_dashboard_sheet WHERE id = $1',
-        [recordId],
-      );
-      if (r.rows.length === 0) throw attErr(404, 'record_not_found');
-      const row = r.rows[0];
-      return attFileFromDataUrl(row.file_data, {
-        fileName: row.file_name,
-        fallbackMime: row.file_mime,
-      });
-    },
-  },
-
   // نسخ APK تصل إلى 100MB، فلا تُنقل عبر JSON — يُعرض بيانها فقط ويُنزّل من شاشة الإصدارات.
   app_release: {
     async list(pool, recordId) {

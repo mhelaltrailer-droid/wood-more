@@ -46,8 +46,7 @@ bool isNotificationVisibleForViewAsRole({
           t.contains('file_upload') ||
           t.contains('work_plan') ||
           t.contains('attendance') ||
-          t.startsWith('operation_report') ||
-          t.startsWith('projects_dashboard');
+          t.startsWith('operation_report');
     case 'general_supervisor':
       return t.contains('work_plan') ||
           t.contains('attendance') ||
@@ -76,7 +75,6 @@ bool isNotificationVisibleForViewAsRole({
     case 'technical_office':
       return t.startsWith('invoices_owner') ||
           t.contains('shop') ||
-          t.startsWith('projects_dashboard') ||
           t.contains('attachment');
     case 'top_management':
       return t.contains('shop');
