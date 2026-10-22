@@ -148,6 +148,17 @@ const IO_OM_CHECKLIST_KEYS = [
   'finance_review',
   'final_approval',
 ];
+const IO_OM_CHECKLIST_NOTE_MAX = 200;
+
+function ioParseOmChecklistChecked(v) {
+  return v === true || v === 1 || v === '1' || v === 'true';
+}
+
+function ioNormalizeOmChecklistNote(raw) {
+  const note = String(raw ?? '').trim();
+  if (note.length <= IO_OM_CHECKLIST_NOTE_MAX) return note;
+  return note.slice(0, IO_OM_CHECKLIST_NOTE_MAX);
+}
 
 function ioNormalizeOmChecklist(raw) {
   const src =
@@ -157,7 +168,15 @@ function ioNormalizeOmChecklist(raw) {
   const out = {};
   for (const key of IO_OM_CHECKLIST_KEYS) {
     const v = src[key];
-    out[key] = v === true || v === 1 || v === '1' || v === 'true';
+    let checked = false;
+    let note = '';
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      checked = ioParseOmChecklistChecked(v.checked ?? v.value);
+      note = ioNormalizeOmChecklistNote(v.note ?? v.notes);
+    } else {
+      checked = ioParseOmChecklistChecked(v);
+    }
+    out[key] = { checked, note };
   }
   return out;
 }

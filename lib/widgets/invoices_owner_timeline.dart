@@ -21,7 +21,7 @@ class InvoicesOwnerTimeline extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'مسار الطلب',
+              'مسار المستخلص',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             const SizedBox(height: 12),

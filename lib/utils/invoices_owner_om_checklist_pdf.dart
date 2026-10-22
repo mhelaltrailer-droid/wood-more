@@ -1,11 +1,13 @@
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../core/invoices_owner_constants.dart';
+import '../models/invoices_owner_model.dart';
 import 'pdf_share.dart';
 
 /// ألوان هوية Wood & More (متناسقة مع شعار/التطبيق).
@@ -16,7 +18,8 @@ const PdfColor _brandGreenMid = PdfColor.fromInt(0xFF2E7D32);
 /// بناء ومشاركة PDF قائمة مراجعة OM بعد اعتماد المستخلص.
 Future<void> shareInvoicesOwnerOmChecklistPdf({
   required String projectName,
-  required Map<String, bool> checklist,
+  required Map<String, InvoicesOwnerOmChecklistEntry> checklist,
+  List<InvoicesOwnerActionModel> actions = const [],
   int? invoiceId,
 }) async {
   final fontBase = await PdfGoogleFonts.tajawalRegular();
@@ -38,13 +41,15 @@ Future<void> shareInvoicesOwnerOmChecklistPdf({
 
   final projectLabel =
       projectName.trim().isEmpty ? '—' : projectName.trim();
+  const pageMargin = 28.0;
+  final contentWidth = PdfPageFormat.a4.width - (pageMargin * 2);
 
   final doc = pw.Document();
   doc.addPage(
     pw.Page(
       theme: theme,
       pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(28),
+      margin: const pw.EdgeInsets.all(pageMargin),
       textDirection: pw.TextDirection.rtl,
       build: (ctx) {
         return pw.Column(
@@ -82,39 +87,23 @@ Future<void> shareInvoicesOwnerOmChecklistPdf({
               ),
             ),
             pw.SizedBox(height: 14),
-            pw.Table(
-              border: pw.TableBorder.all(width: 0.9, color: _brandGreen),
-              columnWidths: {
-                0: const pw.FlexColumnWidth(1.0),
-                1: const pw.FlexColumnWidth(2.0),
-                2: const pw.FlexColumnWidth(3.2),
-                3: const pw.FlexColumnWidth(0.7),
-              },
-              children: [
-                pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: _brandGreenLight),
-                  children: [
-                    _headerCell('الحالة'),
-                    _headerCell('المسئول'),
-                    _headerCell('البند'),
-                    _headerCell('م'),
-                  ],
-                ),
-                ...List.generate(invoicesOwnerOmChecklistItems.length, (i) {
-                  final row = invoicesOwnerOmChecklistItems[i];
-                  final checked = checklist[row.key] == true;
-                  final zebra = i.isOdd ? _brandGreenLight : PdfColors.white;
-                  return pw.TableRow(
-                    decoration: pw.BoxDecoration(color: zebra),
+            pw.Expanded(
+              child: pw.FittedBox(
+                fit: pw.BoxFit.scaleDown,
+                alignment: pw.Alignment.topCenter,
+                child: pw.SizedBox(
+                  width: contentWidth,
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                    mainAxisSize: pw.MainAxisSize.min,
                     children: [
-                      _statusCell(checked),
-                      _bodyCell(row.responsible),
-                      _bodyCell(row.label),
-                      _bodyCell('${i + 1}', center: true),
+                      _checklistTable(checklist),
+                      pw.SizedBox(height: 16),
+                      _pathSection(actions),
                     ],
-                  );
-                }),
-              ],
+                  ),
+                ),
+              ),
             ),
           ],
         );
@@ -131,6 +120,150 @@ Future<void> shareInvoicesOwnerOmChecklistPdf({
       ? 'invoices_owner_${invoiceId}_${safeProject.isEmpty ? 'project' : safeProject}.pdf'
       : 'invoices_owner_${safeProject.isEmpty ? 'project' : safeProject}.pdf';
   await sharePdfBytes(Uint8List.fromList(bytes), name);
+}
+
+pw.Widget _checklistTable(Map<String, InvoicesOwnerOmChecklistEntry> checklist) {
+  return pw.Table(
+    border: pw.TableBorder.all(width: 0.9, color: _brandGreen),
+    columnWidths: {
+      0: const pw.FlexColumnWidth(2.4),
+      1: const pw.FlexColumnWidth(0.9),
+      2: const pw.FlexColumnWidth(1.6),
+      3: const pw.FlexColumnWidth(2.4),
+      4: const pw.FlexColumnWidth(0.55),
+    },
+    children: [
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(color: _brandGreenLight),
+        children: [
+          _headerCell('الملاحظات'),
+          _headerCell('الحالة'),
+          _headerCell('المسئول'),
+          _headerCell('البند'),
+          _headerCell('م'),
+        ],
+      ),
+      ...List.generate(invoicesOwnerOmChecklistItems.length, (i) {
+        final row = invoicesOwnerOmChecklistItems[i];
+        final entry = checklist[row.key];
+        final checked = entry?.checked == true;
+        final note = entry?.note.trim() ?? '';
+        final zebra = i.isOdd ? _brandGreenLight : PdfColors.white;
+        return pw.TableRow(
+          decoration: pw.BoxDecoration(color: zebra),
+          children: [
+            _noteCell(note),
+            _statusCell(checked),
+            _bodyCell(row.responsible),
+            _bodyCell(row.label),
+            _bodyCell('${i + 1}', center: true),
+          ],
+        );
+      }),
+    ],
+  );
+}
+
+/// مسار المستخلص — نفس عناصر الشاشة، مع ضغط المحتوى داخل الصفحة.
+pw.Widget _pathSection(List<InvoicesOwnerActionModel> actions) {
+  final fmt = DateFormat('dd/MM/yyyy HH:mm', 'ar');
+  return pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+    mainAxisSize: pw.MainAxisSize.min,
+    children: [
+      pw.Text(
+        'مسار المستخلص',
+        textAlign: pw.TextAlign.right,
+        style: pw.TextStyle(
+          fontSize: 13,
+          fontWeight: pw.FontWeight.bold,
+          color: _brandGreen,
+        ),
+      ),
+      pw.SizedBox(height: 10),
+      if (actions.isEmpty)
+        pw.Text(
+          'لا يوجد مسار بعد',
+          textAlign: pw.TextAlign.right,
+          style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+        )
+      else
+        ...actions.map((a) {
+          final comment = a.comment?.trim() ?? '';
+          return pw.Padding(
+            padding: const pw.EdgeInsets.only(bottom: 8),
+            child: pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Container(
+                  width: 8,
+                  height: 8,
+                  margin: const pw.EdgeInsets.only(top: 3),
+                  decoration: const pw.BoxDecoration(
+                    color: _brandGreen,
+                    shape: pw.BoxShape.circle,
+                  ),
+                ),
+                pw.SizedBox(width: 8),
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                    children: [
+                      pw.Text(
+                        '${a.actorUserName}: ${a.actionLabelAr}',
+                        textAlign: pw.TextAlign.right,
+                        style: pw.TextStyle(
+                          fontSize: 10,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.black,
+                        ),
+                      ),
+                      if (comment.isNotEmpty)
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.only(top: 2),
+                          child: pw.Text(
+                            comment,
+                            textAlign: pw.TextAlign.right,
+                            style: const pw.TextStyle(
+                              fontSize: 9,
+                              color: PdfColors.grey700,
+                            ),
+                          ),
+                        ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.only(top: 1),
+                        child: pw.Text(
+                          fmt.format(a.createdAt),
+                          textAlign: pw.TextAlign.right,
+                          style: const pw.TextStyle(
+                            fontSize: 8,
+                            color: PdfColors.grey600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+    ],
+  );
+}
+
+pw.Widget _noteCell(String text) {
+  return pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+    child: pw.Text(
+      text,
+      textAlign: pw.TextAlign.right,
+      style: const pw.TextStyle(
+        fontSize: 8,
+        color: PdfColors.black,
+      ),
+    ),
+  );
 }
 
 pw.Widget _headerCell(String text) {

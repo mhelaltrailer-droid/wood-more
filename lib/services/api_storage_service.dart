@@ -3358,7 +3358,7 @@ class ApiStorageService {
     required int invoiceId,
     required int userId,
     String? notes,
-    Map<String, bool>? omChecklist,
+    Map<String, InvoicesOwnerOmChecklistEntry>? omChecklist,
   }) async {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId/approve'));
     final body = <String, dynamic>{'userId': userId};
@@ -3367,7 +3367,9 @@ class ApiStorageService {
       body['notes'] = trimmed;
     }
     if (omChecklist != null) {
-      body['omChecklist'] = omChecklist;
+      body['omChecklist'] = {
+        for (final e in omChecklist.entries) e.key: e.value.toMap(),
+      };
     }
     final r = await http.post(
       uri,

@@ -45,10 +45,15 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
   final Map<String, bool> _omChecklistDraft = {
     for (final item in invoicesOwnerOmChecklistItems) item.key: false,
   };
+  late final Map<String, TextEditingController> _omNoteControllers;
 
   @override
   void initState() {
     super.initState();
+    _omNoteControllers = {
+      for (final item in invoicesOwnerOmChecklistItems)
+        item.key: TextEditingController(),
+    };
     _load();
   }
 
@@ -56,6 +61,9 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
   void dispose() {
     _returnReasonController.dispose();
     _approveNotesController.dispose();
+    for (final c in _omNoteControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -76,7 +84,9 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
       setState(() {
         _invoice = invoice;
         for (final item in invoicesOwnerOmChecklistItems) {
-          _omChecklistDraft[item.key] = invoice.omChecklist[item.key] == true;
+          final entry = invoice.omChecklist[item.key];
+          _omChecklistDraft[item.key] = entry?.checked == true;
+          _omNoteControllers[item.key]!.text = entry?.note ?? '';
         }
         _loading = false;
       });
@@ -117,7 +127,17 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
         invoiceId: widget.invoiceId,
         userId: widget.currentUser.id,
         notes: notes.isEmpty ? null : notes,
-        omChecklist: isOmFinal ? Map<String, bool>.from(_omChecklistDraft) : null,
+        omChecklist: isOmFinal
+            ? {
+                for (final item in invoicesOwnerOmChecklistItems)
+                  item.key: InvoicesOwnerOmChecklistEntry(
+                    checked: _omChecklistDraft[item.key] == true,
+                    note: invoicesOwnerClampOmChecklistNote(
+                      _omNoteControllers[item.key]!.text,
+                    ),
+                  ),
+              }
+            : null,
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -141,6 +161,7 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
       await shareInvoicesOwnerOmChecklistPdf(
         projectName: invoice.projectName,
         checklist: invoice.omChecklist,
+        actions: invoice.actions,
         invoiceId: invoice.id,
       );
     } catch (e) {
@@ -168,33 +189,75 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
             ),
             const SizedBox(height: 8),
             ...invoicesOwnerOmChecklistItems.map((item) {
+              final entry = _invoice?.omChecklist[item.key];
               final checked = editable
                   ? (_omChecklistDraft[item.key] == true)
-                  : (_invoice?.omChecklist[item.key] == true);
-              if (editable) {
-                return CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  title: Text(item.label),
-                  value: checked,
-                  onChanged: _acting
-                      ? null
-                      : (v) {
-                          setState(() {
-                            _omChecklistDraft[item.key] = v == true;
-                          });
-                        },
-                );
-              }
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                leading: Icon(
-                  checked ? Icons.check_box : Icons.check_box_outline_blank,
-                  color: checked ? const Color(0xFF1B5E20) : Colors.grey,
+                  : (entry?.checked == true);
+              final note = editable
+                  ? _omNoteControllers[item.key]!.text
+                  : (entry?.note ?? '');
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (editable)
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Text(item.label),
+                        value: checked,
+                        onChanged: _acting
+                            ? null
+                            : (v) {
+                                setState(() {
+                                  _omChecklistDraft[item.key] = v == true;
+                                });
+                              },
+                      )
+                    else
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        leading: Icon(
+                          checked
+                              ? Icons.check_box
+                              : Icons.check_box_outline_blank,
+                          color: checked
+                              ? const Color(0xFF1B5E20)
+                              : Colors.grey,
+                        ),
+                        title: Text(item.label),
+                      ),
+                    if (editable)
+                      TextField(
+                        controller: _omNoteControllers[item.key],
+                        enabled: !_acting,
+                        maxLines: 3,
+                        maxLength: invoicesOwnerOmChecklistNoteMaxChars,
+                        decoration: const InputDecoration(
+                          labelText: 'الملاحظات',
+                          border: OutlineInputBorder(),
+                          alignLabelWithHint: true,
+                        ),
+                      )
+                    else
+                      InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: 'الملاحظات',
+                          border: OutlineInputBorder(),
+                        ),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 48),
+                          child: Align(
+                            alignment: Alignment.topRight,
+                            child: Text(note),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-                title: Text(item.label),
               );
             }),
           ],

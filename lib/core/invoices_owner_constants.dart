@@ -30,6 +30,15 @@ const String invoicesOwnerStatusPendingOm = 'pending_operation_manager';
 const String invoicesOwnerStatusReturnedCreator = 'returned_to_creator';
 const String invoicesOwnerStatusApproved = 'approved';
 
+/// حد ملاحظة كل بند في قائمة مراجعة OM (اختياري).
+const int invoicesOwnerOmChecklistNoteMaxChars = 200;
+
+String invoicesOwnerClampOmChecklistNote(String raw) {
+  final t = raw.trim();
+  if (t.length <= invoicesOwnerOmChecklistNoteMaxChars) return t;
+  return t.substring(0, invoicesOwnerOmChecklistNoteMaxChars);
+}
+
 /// بنود قائمة مراجعة OM — نفس النصوص في checkboxes وPDF Export.
 const List<({String key, String label, String responsible})>
     invoicesOwnerOmChecklistItems = [

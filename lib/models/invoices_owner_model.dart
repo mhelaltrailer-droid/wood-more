@@ -179,6 +179,37 @@ class InvoicesOwnerActivityLogItem {
   }
 }
 
+class InvoicesOwnerOmChecklistEntry {
+  final bool checked;
+  final String note;
+
+  const InvoicesOwnerOmChecklistEntry({
+    this.checked = false,
+    this.note = '',
+  });
+
+  factory InvoicesOwnerOmChecklistEntry.fromRaw(dynamic raw) {
+    if (raw is Map) {
+      final checkedRaw = raw['checked'] ?? raw['value'];
+      final noteRaw = raw['note'] ?? raw['notes'] ?? '';
+      return InvoicesOwnerOmChecklistEntry(
+        checked: checkedRaw == true ||
+            checkedRaw == 1 ||
+            '$checkedRaw' == 'true',
+        note: invoicesOwnerClampOmChecklistNote(noteRaw.toString()),
+      );
+    }
+    return InvoicesOwnerOmChecklistEntry(
+      checked: raw == true || raw == 1 || '$raw' == 'true',
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'checked': checked,
+        'note': note,
+      };
+}
+
 class InvoicesOwnerModel {
   final int id;
   final int? projectId;
@@ -193,8 +224,8 @@ class InvoicesOwnerModel {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? approvedAt;
-  /// قائمة مراجعة OM المحفوظة مع الاعتماد النهائي (مفاتيح → نعم/لا).
-  final Map<String, bool> omChecklist;
+  /// قائمة مراجعة OM المحفوظة مع الاعتماد النهائي (✓ + ملاحظة البند).
+  final Map<String, InvoicesOwnerOmChecklistEntry> omChecklist;
   final List<InvoicesOwnerAttachmentModel> attachments;
   final List<InvoicesOwnerActionModel> actions;
 
@@ -253,12 +284,12 @@ class InvoicesOwnerModel {
 
     final attachmentsRaw = map['attachments'];
     final actionsRaw = map['actions'];
-    final omChecklistParsed = <String, bool>{};
+    final omChecklistParsed = <String, InvoicesOwnerOmChecklistEntry>{};
     final rawCl = map['om_checklist'] ?? map['omChecklist'];
     if (rawCl is Map) {
       for (final e in rawCl.entries) {
         omChecklistParsed[e.key.toString()] =
-            e.value == true || e.value == 1 || '${e.value}' == 'true';
+            InvoicesOwnerOmChecklistEntry.fromRaw(e.value);
       }
     }
 
