@@ -1371,6 +1371,50 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
     }
   });
 
+  app.put('/invoices-owner/:id/om-checklist', async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'invalid' });
+      }
+
+      const actor = await ioGetUser(pool, userId, req);
+      if (!ioIsPrimaryAdmin(actor)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [id]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      if (String(rq.rows[0].status) !== IO_STATUS.APPROVED) {
+        return res.status(400).json({ error: 'not_approved' });
+      }
+
+      await ioEnsureOmChecklistColumn(pool);
+      const omChecklistJson = JSON.stringify(
+        ioNormalizeOmChecklist(b.omChecklist ?? b.om_checklist ?? {}),
+      );
+      const now = new Date().toISOString();
+      await pool.query(
+        `UPDATE invoices_owner SET om_checklist_json=$1, updated_at=$2 WHERE id=$3`,
+        [omChecklistJson, now, id],
+      );
+      await ioInsertAction(pool, {
+        invoiceId: id,
+        actorUserId: userId,
+        actorUserName: actor.name,
+        action: 'update_om_checklist',
+        comment: null,
+        createdAt: now,
+      });
+
+      res.json(await ioLoadDetail(pool, id));
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
   app.delete('/invoices-owner/:id/attachments/:attachmentId', async (req, res) => {
     try {
       const invoiceId = parseInt(String(req.params.id || ''), 10);

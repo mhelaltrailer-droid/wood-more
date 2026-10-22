@@ -127,20 +127,55 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
         invoiceId: widget.invoiceId,
         userId: widget.currentUser.id,
         notes: notes.isEmpty ? null : notes,
-        omChecklist: isOmFinal
-            ? {
-                for (final item in invoicesOwnerOmChecklistItems)
-                  item.key: InvoicesOwnerOmChecklistEntry(
-                    checked: _omChecklistDraft[item.key] == true,
-                    note: invoicesOwnerClampOmChecklistNote(
-                      _omNoteControllers[item.key]!.text,
-                    ),
-                  ),
-              }
-            : null,
+        omChecklist: isOmFinal ? _omChecklistDraftEntries() : null,
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  Map<String, InvoicesOwnerOmChecklistEntry> _omChecklistDraftEntries() {
+    return {
+      for (final item in invoicesOwnerOmChecklistItems)
+        item.key: InvoicesOwnerOmChecklistEntry(
+          checked: _omChecklistDraft[item.key] == true,
+          note: invoicesOwnerClampOmChecklistNote(
+            _omNoteControllers[item.key]!.text,
+          ),
+        ),
+    };
+  }
+
+  Future<void> _saveOmChecklistAfterApproval() async {
+    if (_storage is! ApiStorageService) return;
+    if (!widget.currentUser.isPrimaryAppAdmin) return;
+    if (_invoice?.status != invoicesOwnerStatusApproved) return;
+    setState(() => _acting = true);
+    try {
+      final updated = await _storage.updateInvoicesOwnerOmChecklist(
+        invoiceId: widget.invoiceId,
+        userId: widget.currentUser.id,
+        omChecklist: _omChecklistDraftEntries(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _invoice = updated;
+        for (final item in invoicesOwnerOmChecklistItems) {
+          final entry = updated.omChecklist[item.key];
+          _omChecklistDraft[item.key] = entry?.checked == true;
+          _omNoteControllers[item.key]!.text = entry?.note ?? '';
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم حفظ قائمة المراجعة')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -242,18 +277,13 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
                           alignLabelWithHint: true,
                         ),
                       )
-                    else
-                      InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'الملاحظات',
-                          border: OutlineInputBorder(),
-                        ),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(minHeight: 48),
-                          child: Align(
-                            alignment: Alignment.topRight,
-                            child: Text(note),
-                          ),
+                    else if (note.trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 40, bottom: 4),
+                        child: Text(
+                          note,
+                          textAlign: TextAlign.right,
+                          style: TextStyle(color: Colors.grey.shade800),
                         ),
                       ),
                   ],
@@ -613,8 +643,12 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     final showOmChecklistEditable = canAct &&
         d.status == invoicesOwnerStatusPendingOm &&
         user.isOperationManager;
+    final adminEditOmChecklist =
+        user.isPrimaryAppAdmin && d.status == invoicesOwnerStatusApproved;
     final showOmChecklistReadonly =
-        d.status == invoicesOwnerStatusApproved && d.hasOmChecklistSaved;
+        d.status == invoicesOwnerStatusApproved &&
+        !adminEditOmChecklist &&
+        d.hasOmChecklistSaved;
     final canEdit = user.canCreateInvoicesOwner &&
         d.status == invoicesOwnerStatusReturnedCreator &&
         d.createdByUserId == user.id;
@@ -833,6 +867,19 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
               minimumSize: const Size.fromHeight(48),
             ),
             child: const Text('إعادة للخطوة السابقة'),
+          ),
+        ],
+        if (adminEditOmChecklist) ...[
+          const SizedBox(height: 16),
+          _buildOmChecklistCard(editable: true),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: _acting ? null : _saveOmChecklistAfterApproval,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF1B5E20),
+              minimumSize: const Size.fromHeight(48),
+            ),
+            child: const Text('حفظ قائمة المراجعة'),
           ),
         ],
         if (showOmChecklistReadonly) ...[

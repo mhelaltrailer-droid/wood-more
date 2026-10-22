@@ -89,6 +89,8 @@ class InvoicesOwnerActionModel {
         return 'إضافة مرفق';
       case 'replace_attachment':
         return 'استبدال مرفق';
+      case 'update_om_checklist':
+        return 'تعديل قائمة المراجعة';
       default:
         return action;
     }
@@ -152,6 +154,8 @@ class InvoicesOwnerActivityLogItem {
         return 'إضافة مرفق';
       case 'replace_attachment':
         return 'استبدال مرفق';
+      case 'update_om_checklist':
+        return 'تعديل قائمة المراجعة';
       default:
         return action;
     }

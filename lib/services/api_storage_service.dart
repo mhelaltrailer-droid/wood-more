@@ -3382,6 +3382,28 @@ class ApiStorageService {
     );
   }
 
+  Future<InvoicesOwnerModel> updateInvoicesOwnerOmChecklist({
+    required int invoiceId,
+    required int userId,
+    required Map<String, InvoicesOwnerOmChecklistEntry> omChecklist,
+  }) async {
+    final uri = Uri.parse(_path('invoices-owner/$invoiceId/om-checklist'));
+    final r = await http.put(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode({
+        'userId': userId,
+        'omChecklist': {
+          for (final e in omChecklist.entries) e.key: e.value.toMap(),
+        },
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
   Future<List<InvoicesOwnerActivityLogItem>> getInvoicesOwnerActivityLog(
     int userId,
   ) async {
