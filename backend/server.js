@@ -2994,6 +2994,16 @@ app.delete('/project-locations/:id', async (req, res) => {
   }
 });
 
+// Compatibility stubs: older mobile builds still load today's work plan via
+// GET /zones then GET /buildings. The catalog tables/UI were removed; returning
+// [] lets those clients continue and use project_locations instead of 404.
+app.get('/zones', (_req, res) => {
+  res.json([]);
+});
+app.get('/buildings', (_req, res) => {
+  res.json([]);
+});
+
 // ——— Attendance ———
 
 function attendanceSameProjectRecord(rec, projectId, projectName) {

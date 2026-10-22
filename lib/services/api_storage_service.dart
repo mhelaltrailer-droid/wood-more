@@ -132,6 +132,12 @@ class ApiStorageService {
     return Exception(body.isNotEmpty ? body : 'HTTP ${r.statusCode}');
   }
 
+  bool _isMissingApiPath(Object e) {
+    final s = e.toString();
+    return s.contains('المسار غير موجود على الخادم (404)') ||
+        s.contains('Cannot GET');
+  }
+
   Future<http.Response> _httpGet(Uri uri, {int attempts = 3}) async {
     Object? lastError;
     final headers = _reqHeaders();
@@ -503,10 +509,15 @@ class ApiStorageService {
   }
 
   Future<List<ZoneModel>> getZones(int projectId) async {
-    final list = await _getList('zones?projectId=$projectId');
-    return list
-        .map((e) => ZoneModel.fromMap(Map<String, dynamic>.from(e as Map)))
-        .toList();
+    try {
+      final list = await _getList('zones?projectId=$projectId');
+      return list
+          .map((e) => ZoneModel.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (e) {
+      if (_isMissingApiPath(e)) return [];
+      rethrow;
+    }
   }
 
   Future<int> addZone(int projectId, String name) async {
@@ -716,11 +727,16 @@ class ApiStorageService {
   }
 
   Future<List<BuildingModel>> getBuildings(int zoneId) async {
-    final list = await _getList('buildings?zoneId=$zoneId');
-    return list.map((e) {
-      final m = Map<String, dynamic>.from(e as Map);
-      return BuildingModel.fromMap(m);
-    }).toList();
+    try {
+      final list = await _getList('buildings?zoneId=$zoneId');
+      return list.map((e) {
+        final m = Map<String, dynamic>.from(e as Map);
+        return BuildingModel.fromMap(m);
+      }).toList();
+    } catch (e) {
+      if (_isMissingApiPath(e)) return [];
+      rethrow;
+    }
   }
 
   Future<int> addBuilding(BuildingModel b) async {
