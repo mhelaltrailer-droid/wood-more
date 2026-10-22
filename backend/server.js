@@ -902,7 +902,7 @@ async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
   const attachmentCount = fields.attachmentCount ?? fields.attachment_count ?? null;
   const now = new Date().toISOString();
   const muteAttendanceWorkPlan = isAttendanceOrWorkPlanEventType(eventType);
-  const mutedEmails = mutedAttendanceWorkPlanEmailsLower();
+  const muteAttendanceTodayTomorrow = isAttendanceOrTodayTomorrowPlanEventType(eventType);
   await pool.query(
     `INSERT INTO notifications (
       recipient_user_id, recipient_role, title, body, event_type,
@@ -916,6 +916,10 @@ async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
       AND NOT (
         $14::boolean
         AND LOWER(TRIM(email)) = ANY($15::text[])
+      )
+      AND NOT (
+        $16::boolean
+        AND LOWER(TRIM(email)) = ANY($17::text[])
       )`,
     [
       title, body, eventType, actorUserId, actorUserName, projectName, now,
@@ -923,7 +927,9 @@ async function withdrawalInsertNotificationsForRoles(pool, roles, fields) {
       attachmentSource, attachmentRecordId, attachmentCount,
       roles,
       muteAttendanceWorkPlan,
-      mutedEmails,
+      mutedAttendanceWorkPlanEmailsLower(),
+      muteAttendanceTodayTomorrow,
+      mutedAttendanceTodayTomorrowPlanEmailsLower(),
     ]
   );
 }
@@ -1037,23 +1043,45 @@ async function runNotificationSafely(label, fn) {
 /// مستقبلو إشعارات رفع الملفات: مسؤول التطبيق ومدير العمليات ومدير المشروعات.
 const FILE_UPLOAD_NOTIFY_ROLES = ['app_admin', 'operation_manager', 'site_engineer_manager', 'projects_manager'];
 
-/// لا يستقبلون إشعارات الحضور/الانصراف وخطط العمل (بريد محدد).
+/// لا يستقبلون إشعارات الحضور/الانصراف وكل إشعارات خطط العمل (بريد محدد).
 /// على الإنتاج الحساب مخزَّن كـ email=abdelrhman؛ محليًا قد يكون العنوان الكامل.
 const MUTE_ATTENDANCE_WORK_PLAN_EMAILS = [
   'abdelrhmanellaithy828@gmail.com',
   'abdelrhman',
 ];
 
+/// لا يستقبلون إشعارات الحضور/الانصراف وخطط اليوم/الغد فقط (Shams / Operation Manager).
+/// قرار الغرامة بعد التأجيل يبقى واصلًا.
+/// على الإنتاج الحساب مخزَّن كـ email=shams؛ محليًا قد يكون العنوان الكامل.
+const MUTE_ATTENDANCE_TODAY_TOMORROW_PLAN_EMAILS = [
+  'islam.shams2050@gmail.com',
+  'shams',
+];
+
+function isAttendanceEventType(eventType) {
+  const t = String(eventType || '').trim().toLowerCase();
+  if (!t) return false;
+  return t.startsWith('attendance') || t.includes('attendance');
+}
+
+function isTodayOrTomorrowWorkPlanEventType(eventType) {
+  const t = String(eventType || '').trim().toLowerCase();
+  if (!t) return false;
+  return t.includes('today_work_plan') || t.includes('tomorrow_work_plan');
+}
+
+function isAttendanceOrTodayTomorrowPlanEventType(eventType) {
+  return isAttendanceEventType(eventType) || isTodayOrTomorrowWorkPlanEventType(eventType);
+}
+
 function isAttendanceOrWorkPlanEventType(eventType) {
   const t = String(eventType || '').trim().toLowerCase();
   if (!t) return false;
   return (
-    t.startsWith('attendance') ||
-    t.includes('attendance') ||
+    isAttendanceEventType(eventType) ||
     t.startsWith('work_plan') ||
     t.includes('work_plan') ||
-    t.includes('today_work_plan') ||
-    t.includes('tomorrow_work_plan')
+    isTodayOrTomorrowWorkPlanEventType(eventType)
   );
 }
 
@@ -1061,6 +1089,37 @@ function mutedAttendanceWorkPlanEmailsLower() {
   return MUTE_ATTENDANCE_WORK_PLAN_EMAILS.map((e) =>
     String(e || '').trim().toLowerCase(),
   ).filter(Boolean);
+}
+
+function mutedAttendanceTodayTomorrowPlanEmailsLower() {
+  return MUTE_ATTENDANCE_TODAY_TOMORROW_PLAN_EMAILS.map((e) =>
+    String(e || '').trim().toLowerCase(),
+  ).filter(Boolean);
+}
+
+function mutedAttendanceInsertEmailsLower() {
+  return [
+    ...mutedAttendanceWorkPlanEmailsLower(),
+    ...mutedAttendanceTodayTomorrowPlanEmailsLower(),
+  ];
+}
+
+async function shouldHideAttendanceTodayTomorrowForUserId(pool, userId) {
+  const r = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+  const email = String(r.rows[0]?.email || '').trim().toLowerCase();
+  return mutedAttendanceTodayTomorrowPlanEmailsLower().includes(email);
+}
+
+function sqlHideAttendanceTodayTomorrow({ paramOffset = 1 } = {}) {
+  return {
+    sql:
+      ` AND NOT (` +
+      `$${paramOffset}::boolean AND (` +
+      `event_type ILIKE '%attendance%' OR event_type ILIKE '%today_work_plan%' OR event_type ILIKE '%tomorrow_work_plan%'` +
+      `)` +
+      `)`,
+    paramsFromFlag: (hide) => [!!hide],
+  };
 }
 
 /// إشعار موحّد لأي رفع ملف في التطبيق. `attachmentSource` + `attachmentRecordId`
@@ -3088,7 +3147,7 @@ app.post('/attendance', async (req, res) => {
         b.userName || null,
         b.projectName || null,
         new Date().toISOString(),
-        mutedAttendanceWorkPlanEmailsLower(),
+        mutedAttendanceInsertEmailsLower(),
       ]
     );
     res.json(parseInt(r.rows[0].id));
@@ -3107,12 +3166,15 @@ app.get('/notifications', async (req, res) => {
     const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : 50;
     const rawOffset = parseInt(String(req.query.offset || ''), 10);
     const offset = Number.isInteger(rawOffset) && rawOffset > 0 ? rawOffset : 0;
+    const mute = sqlHideAttendanceTodayTomorrow({ paramOffset: 4 });
+    const hideAttendanceTodayTomorrow = await shouldHideAttendanceTodayTomorrowForUserId(pool, userId);
     const r = await pool.query(
       `SELECT * FROM notifications
        WHERE recipient_user_id = $1
+       ${mute.sql}
        ORDER BY created_at DESC, id DESC
        LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
+      [userId, limit, offset, ...mute.paramsFromFlag(hideAttendanceTodayTomorrow)]
     );
     res.json(
       r.rows.map((row) => ({
@@ -3149,9 +3211,13 @@ app.get('/notifications/unread-count', async (req, res) => {
     if (!Number.isInteger(userId)) {
       return res.status(400).json({ error: 'userId is required' });
     }
+    const mute = sqlHideAttendanceTodayTomorrow({ paramOffset: 2 });
+    const hideAttendanceTodayTomorrow = await shouldHideAttendanceTodayTomorrowForUserId(pool, userId);
     const r = await pool.query(
-      'SELECT COUNT(*)::int AS count FROM notifications WHERE recipient_user_id = $1 AND is_read = FALSE',
-      [userId]
+      `SELECT COUNT(*)::int AS count FROM notifications
+       WHERE recipient_user_id = $1 AND is_read = FALSE
+       ${mute.sql}`,
+      [userId, ...mute.paramsFromFlag(hideAttendanceTodayTomorrow)]
     );
     res.json({ count: parseInt(r.rows[0]?.count || '0') });
   } catch (e) {
