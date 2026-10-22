@@ -196,7 +196,7 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
       await shareInvoicesOwnerOmChecklistPdf(
         projectName: invoice.projectName,
         checklist: invoice.omChecklist,
-        actions: invoice.actions,
+        actions: invoice.pathActions,
         invoiceId: invoice.id,
       );
     } catch (e) {
@@ -810,7 +810,7 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
           ],
         ],
         const SizedBox(height: 16),
-        InvoicesOwnerTimeline(actions: d.actions),
+        InvoicesOwnerTimeline(actions: d.pathActions),
         if (canEdit) ...[
           const SizedBox(height: 16),
           FilledButton.icon(

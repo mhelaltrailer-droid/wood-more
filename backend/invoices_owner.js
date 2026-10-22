@@ -263,6 +263,25 @@ function ioIsPrimaryAdmin(user) {
   return String(user.email || '').trim().toLowerCase() === IO_PRIMARY_ADMIN_EMAIL;
 }
 
+async function ioPrimaryAdminUserId(pool) {
+  const r = await pool.query(
+    `SELECT id FROM users WHERE lower(trim(email)) = $1 ORDER BY id ASC LIMIT 1`,
+    [IO_PRIMARY_ADMIN_EMAIL],
+  );
+  return r.rows[0] ? parseInt(r.rows[0].id, 10) : null;
+}
+
+function ioActionVisibleOnInvoicePath(row, primaryAdminUserId) {
+  if (String(row.action || '') === 'update_om_checklist') return false;
+  if (
+    primaryAdminUserId != null &&
+    parseInt(row.actor_user_id, 10) === primaryAdminUserId
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function ioIsOperationManager(user) {
   if (!user) return false;
   return String(user.role || '').trim() === 'operation_manager';
@@ -454,6 +473,10 @@ async function ioLoadDetail(pool, invoiceId) {
     `SELECT * FROM invoices_owner_actions WHERE invoice_id = $1 ORDER BY created_at ASC, id ASC`,
     [invoiceId],
   );
+  const primaryAdminUserId = await ioPrimaryAdminUserId(pool);
+  const pathActions = act.rows.filter((a) =>
+    ioActionVisibleOnInvoicePath(a, primaryAdminUserId),
+  );
   return ioMapRow(
     row,
     att.rows.map((a) => ({
@@ -463,7 +486,7 @@ async function ioLoadDetail(pool, invoiceId) {
       size_bytes: parseInt(a.size_bytes, 10),
       created_at: a.created_at,
     })),
-    act.rows.map((a) => ({
+    pathActions.map((a) => ({
       id: parseInt(a.id, 10),
       actor_user_id: parseInt(a.actor_user_id, 10),
       actor_user_name: a.actor_user_name,
@@ -1400,14 +1423,6 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         `UPDATE invoices_owner SET om_checklist_json=$1, updated_at=$2 WHERE id=$3`,
         [omChecklistJson, now, id],
       );
-      await ioInsertAction(pool, {
-        invoiceId: id,
-        actorUserId: userId,
-        actorUserName: actor.name,
-        action: 'update_om_checklist',
-        comment: null,
-        createdAt: now,
-      });
 
       res.json(await ioLoadDetail(pool, id));
     } catch (e) {

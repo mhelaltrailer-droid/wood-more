@@ -95,6 +95,9 @@ class InvoicesOwnerActionModel {
         return action;
     }
   }
+
+  /// تعديلات المسؤول الأساسي لا تظهر في مسار المستخلص (شاشة / PDF).
+  bool get showOnInvoicePath => action != 'update_om_checklist';
 }
 
 /// عنصر في سجل التداول العام لوحدة Invoices (Owner).
@@ -253,6 +256,9 @@ class InvoicesOwnerModel {
   });
 
   bool get hasOmChecklistSaved => omChecklist.isNotEmpty;
+
+  List<InvoicesOwnerActionModel> get pathActions =>
+      actions.where((a) => a.showOnInvoicePath).toList();
   /// ملاحظات المراحل للعرض التراكمي (منشئ + معتمدون).
   List<({String title, String body, DateTime at})> get stageNotesForDisplay {
     final out = <({String title, String body, DateTime at})>[];
