@@ -1,5 +1,19 @@
 import '../core/invoices_owner_constants.dart';
 
+String? _optionalText(dynamic value) {
+  final text = value?.toString().trim() ?? '';
+  return text.isEmpty ? null : text;
+}
+
+bool _asBool(dynamic value) =>
+    value == true || value == 1 || value == '1' || value == 'true';
+
+String invoicesOwnerProjectHeading(String projectName, String? extractNumber) {
+  final number = extractNumber?.trim() ?? '';
+  if (number.isEmpty) return projectName;
+  return '$projectName    رقم المستخلص: $number';
+}
+
 class InvoicesOwnerAttachmentModel {
   final int id;
   final String fileName;
@@ -91,6 +105,8 @@ class InvoicesOwnerActionModel {
         return 'استبدال مرفق';
       case 'update_om_checklist':
         return 'تعديل قائمة المراجعة';
+      case 'extract_number':
+        return 'تعديل رقم المستخلص';
       default:
         return action;
     }
@@ -110,6 +126,7 @@ class InvoicesOwnerActivityLogItem {
   final String? comment;
   final DateTime createdAt;
   final String projectName;
+  final String? extractNumber;
   final String invoiceStatus;
 
   const InvoicesOwnerActivityLogItem({
@@ -121,6 +138,7 @@ class InvoicesOwnerActivityLogItem {
     this.comment,
     required this.createdAt,
     required this.projectName,
+    this.extractNumber,
     required this.invoiceStatus,
   });
 
@@ -137,6 +155,9 @@ class InvoicesOwnerActivityLogItem {
       createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ??
           DateTime.now(),
       projectName: (map['project_name'] ?? '').toString(),
+      extractNumber: (map['extract_number'] ?? '').toString().trim().isEmpty
+          ? null
+          : (map['extract_number'] ?? '').toString().trim(),
       invoiceStatus: (map['invoice_status'] ?? '').toString(),
     );
   }
@@ -159,6 +180,8 @@ class InvoicesOwnerActivityLogItem {
         return 'استبدال مرفق';
       case 'update_om_checklist':
         return 'تعديل قائمة المراجعة';
+      case 'extract_number':
+        return 'تعديل رقم المستخلص';
       default:
         return action;
     }
@@ -221,6 +244,8 @@ class InvoicesOwnerModel {
   final int id;
   final int? projectId;
   final String projectName;
+  final String? extractNumber;
+  final bool extractNumberLocked;
   final String? notes;
   final String status;
   final int createdByUserId;
@@ -240,6 +265,8 @@ class InvoicesOwnerModel {
     required this.id,
     this.projectId,
     required this.projectName,
+    this.extractNumber,
+    this.extractNumberLocked = false,
     this.notes,
     required this.status,
     required this.createdByUserId,
@@ -307,6 +334,10 @@ class InvoicesOwnerModel {
       id: map['id'] as int,
       projectId: map['project_id'] as int?,
       projectName: (map['project_name'] ?? map['projectName'] ?? '').toString(),
+      extractNumber: _optionalText(map['extract_number'] ?? map['extractNumber']),
+      extractNumberLocked: _asBool(
+        map['extract_number_locked'] ?? map['extractNumberLocked'],
+      ),
       notes: map['notes']?.toString(),
       status: (map['status'] ?? '').toString(),
       createdByUserId: map['created_by_user_id'] as int,
@@ -359,5 +390,60 @@ class InvoicesOwnerModel {
       default:
         return status;
     }
+  }
+}
+
+class InvoicesOwnerChainMember {
+  final int userId;
+  final String name;
+  final String role;
+  final String status;
+  final String label;
+
+  const InvoicesOwnerChainMember({
+    required this.userId,
+    required this.name,
+    required this.role,
+    required this.status,
+    required this.label,
+  });
+
+  factory InvoicesOwnerChainMember.fromMap(Map<String, dynamic> map) {
+    return InvoicesOwnerChainMember(
+      userId: (map['user_id'] as num?)?.toInt() ?? 0,
+      name: (map['name'] ?? '').toString(),
+      role: (map['role'] ?? '').toString(),
+      status: (map['status'] ?? '').toString(),
+      label: (map['label'] ?? map['name'] ?? '').toString(),
+    );
+  }
+}
+
+class InvoicesOwnerChainRoute {
+  final List<InvoicesOwnerChainMember> members;
+  final int? defaultApproveUserId;
+  final int? defaultReturnUserId;
+
+  const InvoicesOwnerChainRoute({
+    required this.members,
+    this.defaultApproveUserId,
+    this.defaultReturnUserId,
+  });
+
+  factory InvoicesOwnerChainRoute.fromMap(Map<String, dynamic> map) {
+    final raw = map['members'];
+    return InvoicesOwnerChainRoute(
+      members: raw is List
+          ? raw
+              .map(
+                (e) => InvoicesOwnerChainMember.fromMap(
+                  Map<String, dynamic>.from(e as Map),
+                ),
+              )
+              .toList()
+          : const [],
+      defaultApproveUserId: (map['default_approve_user_id'] as num?)?.toInt(),
+      defaultReturnUserId: (map['default_return_user_id'] as num?)?.toInt(),
+    );
   }
 }

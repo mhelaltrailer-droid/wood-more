@@ -52,6 +52,8 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
   bool _loadingProjects = true;
   bool _saving = false;
   String? _projectsError;
+  List<InvoicesOwnerChainMember> _chain = const [];
+  int? _toUserId;
   final List<_PendingAttachment> _attachments = [];
   List<ProjectModel> _projects = const [];
 
@@ -74,6 +76,7 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
       }
     }
     _loadProjects();
+    _loadChain();
   }
 
   @override
@@ -105,6 +108,21 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
         _projectsError = '$e';
       });
     }
+  }
+
+  Future<void> _loadChain() async {
+    if (_storage is! ApiStorageService) return;
+    try {
+      final chain = await _storage.getInvoicesOwnerChain(
+        userId: widget.currentUser.id,
+        mode: 'submit',
+      );
+      if (!mounted) return;
+      setState(() {
+        _chain = chain.members;
+        _toUserId = chain.defaultApproveUserId;
+      });
+    } catch (_) {}
   }
 
   bool _isAllowedFile(String name, String? mime) {
@@ -297,6 +315,12 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
       );
       return;
     }
+    if (_toUserId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('اختر الشخص المرسل إليه')),
+      );
+      return;
+    }
 
     setState(() => _saving = true);
     try {
@@ -310,6 +334,7 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
           projectId: projectId,
           projectName: projectName,
           notes: notes,
+          toUserId: _toUserId,
           attachments: _attachmentsPayload(),
         );
       } else {
@@ -318,6 +343,7 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
           projectId: projectId,
           projectName: projectName,
           notes: notes.isEmpty ? null : notes,
+          toUserId: _toUserId,
           attachments: _attachmentsPayload(),
         );
       }
@@ -468,6 +494,30 @@ class _InvoicesOwnerFormScreenState extends State<InvoicesOwnerFormScreen> {
                   ),
                 );
               }),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<int>(
+              value: _chain
+                      .where(
+                        (m) =>
+                            m.userId != widget.currentUser.id && m.userId > 0,
+                      )
+                      .any((m) => m.userId == _toUserId)
+                  ? _toUserId
+                  : null,
+              decoration: const InputDecoration(
+                labelText: 'المرسل إليه',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                for (final member in _chain)
+                  if (member.userId != widget.currentUser.id && member.userId > 0)
+                    DropdownMenuItem(
+                      value: member.userId,
+                      child: Text(member.label),
+                    ),
+              ],
+              onChanged: (v) => setState(() => _toUserId = v),
+            ),
             const SizedBox(height: 24),
             FilledButton(
               onPressed: _saving ? null : _save,

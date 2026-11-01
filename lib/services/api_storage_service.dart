@@ -3206,6 +3206,23 @@ class ApiStorageService {
     });
   }
 
+  Future<InvoicesOwnerChainRoute> getInvoicesOwnerChain({
+    required int userId,
+    String? status,
+    String? mode,
+  }) async {
+    final qp = <String, String>{'userId': userId.toString()};
+    if (status != null && status.isNotEmpty) qp['status'] = status;
+    if (mode != null && mode.isNotEmpty) qp['mode'] = mode;
+    final path = 'invoices-owner/chain';
+    final uri = Uri.parse(_path(path)).replace(queryParameters: qp);
+    final r = await _httpGet(uri);
+    if (r.statusCode >= 400) throw _apiHttpException(r, path: path);
+    return InvoicesOwnerChainRoute.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
   Future<int> getInvoicesOwnerPendingCount(int userId) async {
     final data = await _get('invoices-owner/pending-count?userId=$userId');
     return (data['count'] as num?)?.toInt() ?? 0;
@@ -3322,6 +3339,7 @@ class ApiStorageService {
     int? projectId,
     String? projectName,
     String? notes,
+    int? toUserId,
     required List<Map<String, dynamic>> attachments,
   }) async {
     final uri = Uri.parse(_path('invoices-owner'));
@@ -3334,6 +3352,7 @@ class ApiStorageService {
         if (projectName != null && projectName.isNotEmpty)
           'projectName': projectName,
         if (notes != null && notes.isNotEmpty) 'notes': notes,
+        if (toUserId != null) 'toUserId': toUserId,
         'attachments': attachments,
       }),
     );
@@ -3349,6 +3368,7 @@ class ApiStorageService {
     int? projectId,
     String? projectName,
     String? notes,
+    int? toUserId,
     required List<Map<String, dynamic>> attachments,
   }) async {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId'));
@@ -3361,7 +3381,28 @@ class ApiStorageService {
         if (projectName != null && projectName.isNotEmpty)
           'projectName': projectName,
         if (notes != null) 'notes': notes,
+        if (toUserId != null) 'toUserId': toUserId,
         'attachments': attachments,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  Future<InvoicesOwnerModel> updateInvoicesOwnerExtractNumber({
+    required int invoiceId,
+    required int userId,
+    required String extractNumber,
+  }) async {
+    final uri = Uri.parse(_path('invoices-owner/$invoiceId/extract-number'));
+    final r = await http.put(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode({
+        'userId': userId,
+        'extractNumber': extractNumber.trim(),
       }),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
@@ -3374,6 +3415,8 @@ class ApiStorageService {
     required int invoiceId,
     required int userId,
     String? notes,
+    int? toUserId,
+    String? extractNumber,
     Map<String, InvoicesOwnerOmChecklistEntry>? omChecklist,
   }) async {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId/approve'));
@@ -3381,6 +3424,10 @@ class ApiStorageService {
     final trimmed = notes?.trim();
     if (trimmed != null && trimmed.isNotEmpty) {
       body['notes'] = trimmed;
+    }
+    if (toUserId != null) body['toUserId'] = toUserId;
+    if (extractNumber != null && extractNumber.trim().isNotEmpty) {
+      body['extractNumber'] = extractNumber.trim();
     }
     if (omChecklist != null) {
       body['omChecklist'] = {
@@ -3438,12 +3485,20 @@ class ApiStorageService {
     required int invoiceId,
     required int userId,
     required String reason,
+    int? toUserId,
+    String? extractNumber,
   }) async {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId/return'));
     final r = await http.post(
       uri,
       headers: _reqHeaders({'Content-Type': 'application/json'}),
-      body: jsonEncode({'userId': userId, 'reason': reason}),
+      body: jsonEncode({
+        'userId': userId,
+        'reason': reason,
+        if (toUserId != null) 'toUserId': toUserId,
+        if (extractNumber != null && extractNumber.trim().isNotEmpty)
+          'extractNumber': extractNumber.trim(),
+      }),
     );
     if (r.statusCode >= 400) throw Exception(r.body);
     return InvoicesOwnerModel.fromMap(

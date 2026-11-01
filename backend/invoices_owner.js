@@ -31,12 +31,12 @@ const IO_STATUS = {
   APPROVED: 'approved',
 };
 
-/** ترتيب الاعتماد: بعد الإنشاء يبدأ من QS. */
+/** ترتيب الاعتماد بعد Ah-amin: QS → المكتب الفني → Finance → Projects Manager → Operation Manager. */
 const IO_FLOW = [
   { status: IO_STATUS.PENDING_QS, role: 'qs' },
   { status: IO_STATUS.PENDING_TO, role: 'technical_office' },
-  { status: IO_STATUS.PENDING_PM, role: 'projects_manager' },
   { status: IO_STATUS.PENDING_FINANCE, role: 'finance' },
+  { status: IO_STATUS.PENDING_PM, role: 'projects_manager' },
   { status: IO_STATUS.PENDING_OM, role: 'operation_manager' },
 ];
 
@@ -107,6 +107,19 @@ async function ensureInvoicesOwnerTables(pool) {
       await pool.query(
         `ALTER TABLE invoices_owner
          ADD COLUMN IF NOT EXISTS om_checklist_json TEXT`,
+      );
+      await pool.query(
+        `ALTER TABLE invoices_owner
+         ADD COLUMN IF NOT EXISTS extract_number TEXT`,
+      );
+      await pool.query(
+        `ALTER TABLE invoices_owner
+         ADD COLUMN IF NOT EXISTS extract_number_locked BOOLEAN NOT NULL DEFAULT FALSE`,
+      );
+      await pool.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_owner_extract_number
+         ON invoices_owner (extract_number)
+         WHERE extract_number IS NOT NULL AND extract_number <> ''`,
       );
     } catch (e) {
       console.warn('ensureInvoicesOwnerTables om_checklist_json:', e.message);
@@ -348,6 +361,113 @@ async function ioResolveAssigneeForStatus(pool, status, row) {
   return { id: parseInt(user.id, 10), name: user.name };
 }
 
+function ioChainRoleLabel(role) {
+  switch (role) {
+    case 'ah-amin':
+      return 'Ah-amin';
+    case 'qs':
+      return 'QS';
+    case 'technical_office':
+      return 'المكتب الفني';
+    case 'finance':
+      return 'Finance';
+    case 'projects_manager':
+      return 'Projects Manager';
+    case 'operation_manager':
+      return 'Operation Manager';
+    default:
+      return role;
+  }
+}
+
+function ioChainStep(role, status, user) {
+  const name = user.name || '';
+  return {
+    role,
+    status,
+    userId: parseInt(user.id, 10),
+    name,
+    label: `${name} — ${ioChainRoleLabel(role)}`.trim(),
+  };
+}
+
+async function ioLoadCirculationChain(pool) {
+  const steps = [];
+  const amin = await pool.query(
+    `SELECT id, name FROM users WHERE LOWER(TRIM(email)) = 'ah-amin' LIMIT 1`,
+  );
+  if (amin.rows[0]) {
+    steps.push(ioChainStep('ah-amin', IO_STATUS.RETURNED_CREATOR, amin.rows[0]));
+  }
+  for (const step of IO_FLOW) {
+    const user = await ioGetUserByRole(pool, step.role);
+    if (!user) continue;
+    steps.push(ioChainStep(step.role, step.status, user));
+  }
+  return steps;
+}
+
+function ioParseToUserId(raw) {
+  if (raw == null || raw === '') return null;
+  const n = parseInt(String(raw), 10);
+  return Number.isNaN(n) ? Number.NaN : n;
+}
+
+function ioStepFromUserId(chain, userId) {
+  return chain.find((s) => s.userId === userId) || null;
+}
+
+function ioDefaultStepForApprove(chain, status) {
+  const idx = ioFlowIndexForStatus(status);
+  if (idx < 0 || idx >= IO_FLOW.length - 1) return null;
+  const nextStatus = IO_FLOW[idx + 1].status;
+  return chain.find((s) => s.status === nextStatus) || null;
+}
+
+function ioDefaultStepForReturn(chain, status) {
+  const idx = ioFlowIndexForStatus(status);
+  if (idx < 0) return null;
+  if (idx === 0) return chain.find((s) => s.role === 'ah-amin') || null;
+  const prevStatus = IO_FLOW[idx - 1].status;
+  return chain.find((s) => s.status === prevStatus) || null;
+}
+
+function ioDefaultStepForCreator(chain, actor) {
+  const email = ioNormEmail(actor && actor.email);
+  if (email === 'ah-amin') return chain.find((s) => s.role === 'qs') || null;
+  if (email === 'qs-user' || email === 'ali') {
+    return chain.find((s) => s.role === 'technical_office') || null;
+  }
+  return null;
+}
+
+function ioRejectChainTarget(step, actorId, currentStatus) {
+  if (!step) return 'recipient_not_in_chain';
+  if (step.userId === actorId) return 'cannot_send_to_self';
+  if (currentStatus && step.status === currentStatus) return 'same_step';
+  return null;
+}
+
+async function ioResolveSubmitTarget(pool, actor, toUserIdRaw) {
+  const chain = await ioLoadCirculationChain(pool);
+  const requested = ioParseToUserId(toUserIdRaw);
+  if (Number.isNaN(requested)) return { error: 'invalid_recipient' };
+  let step;
+  if (requested != null) {
+    step = ioStepFromUserId(chain, requested);
+    const err = ioRejectChainTarget(step, parseInt(actor.id, 10), null);
+    if (err) return { error: err };
+  } else {
+    step = ioDefaultStepForCreator(chain, actor);
+    if (!step) return { error: 'assignee_not_configured' };
+  }
+  return {
+    status: step.status,
+    assigneeId: step.userId,
+    assigneeName: step.name,
+  };
+}
+
 function ioCanActOnStatus(user, status, row) {
   if (!user || !row) return false;
   const userId = parseInt(user.id, 10);
@@ -437,6 +557,51 @@ async function ioNotifyUser(pool, runNotificationSafely, userId, fields) {
   });
 }
 
+function ioIsExtractLocked(row) {
+  const v = row && row.extract_number_locked;
+  return v === true || v === 't' || v === 'true' || v === 1 || v === '1';
+}
+
+function ioNormalizeExtractNumber(raw) {
+  return String(raw ?? '').trim();
+}
+
+async function ioAssertExtractNumberAvailable(pool, value, invoiceId) {
+  if (!value) return null;
+  const r = await pool.query(
+    `SELECT id FROM invoices_owner
+     WHERE extract_number = $1 AND id <> $2
+     LIMIT 1`,
+    [value, invoiceId],
+  );
+  return r.rows.length > 0 ? 'extract_number_taken' : null;
+}
+
+/** عند مغادرة المكتب الفني: الاعتماد يطلب الرقم، والإرجاع يقبله اختيارياً ثم يُقفل. */
+async function ioExtractNumberForLeave(pool, row, body, required) {
+  if (String(row.status) !== IO_STATUS.PENDING_TO) {
+    return {
+      extractNumber: row.extract_number ? String(row.extract_number) : null,
+      locked: ioIsExtractLocked(row),
+      changed: false,
+    };
+  }
+  const locked = ioIsExtractLocked(row);
+  const existing = ioNormalizeExtractNumber(row.extract_number);
+  if (locked) {
+    if (required && !existing) return { error: 'extract_number_required' };
+    return { extractNumber: existing || null, locked: true, changed: false };
+  }
+  const incoming = body.extractNumber ?? body.extract_number;
+  const typed = incoming == null ? '' : ioNormalizeExtractNumber(incoming);
+  const value = typed || existing;
+  if (required && !value) return { error: 'extract_number_required' };
+  if (!value) return { extractNumber: null, locked: false, changed: false };
+  const taken = await ioAssertExtractNumberAvailable(pool, value, parseInt(row.id, 10));
+  if (taken) return { error: taken };
+  return { extractNumber: value, locked: true, changed: true };
+}
+
 function ioMapRow(row, attachments = [], actions = []) {
   return {
     id: parseInt(row.id, 10),
@@ -451,6 +616,8 @@ function ioMapRow(row, attachments = [], actions = []) {
       : null,
     current_assignee_user_name: row.current_assignee_user_name || null,
     return_reason: row.return_reason || null,
+    extract_number: row.extract_number ? String(row.extract_number) : null,
+    extract_number_locked: ioIsExtractLocked(row),
     created_at: row.created_at,
     updated_at: row.updated_at,
     approved_at: row.approved_at || null,
@@ -660,6 +827,40 @@ function ioPendingStatusForRole(role) {
 function registerInvoicesOwnerRoutes(app, pool, deps) {
   const { runNotificationSafely } = deps;
 
+  app.get('/invoices-owner/chain', async (req, res) => {
+    try {
+      const userId = parseInt(String(req.query.userId || ''), 10);
+      if (Number.isNaN(userId)) return res.status(400).json({ error: 'userId required' });
+      const user = await ioGetUser(pool, userId, req);
+      if (!user) return res.status(404).json({ error: 'user not found' });
+      if (!ioCanAccessModule(user)) return res.status(403).json({ error: 'forbidden' });
+      const chain = await ioLoadCirculationChain(pool);
+      const status = String(req.query.status || '').trim();
+      const mode = String(req.query.mode || '').trim();
+      let defaultApprove = null;
+      let defaultReturn = null;
+      if (mode === 'submit') {
+        defaultApprove = ioDefaultStepForCreator(chain, user);
+      } else if (status) {
+        defaultApprove = ioDefaultStepForApprove(chain, status);
+        defaultReturn = ioDefaultStepForReturn(chain, status);
+      }
+      res.json({
+        members: chain.map((s) => ({
+          user_id: s.userId,
+          name: s.name,
+          role: s.role,
+          status: s.status,
+          label: s.label,
+        })),
+        default_approve_user_id: defaultApprove ? defaultApprove.userId : null,
+        default_return_user_id: defaultReturn ? defaultReturn.userId : null,
+      });
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
   app.get('/invoices-owner/pending-count', async (req, res) => {
     try {
       const userId = parseInt(String(req.query.userId || ''), 10);
@@ -671,10 +872,11 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       let count = 0;
       if (ioIsCreatorUser(user)) {
         const returned = await pool.query(
-          `SELECT COUNT(*)::int AS count FROM invoices_owner
-           WHERE created_by_user_id = $1 AND status = $2`,
-          [userId, IO_STATUS.RETURNED_CREATOR],
-        );
+            `SELECT COUNT(*)::int AS count FROM invoices_owner
+             WHERE status = $2
+               AND (created_by_user_id = $1 OR current_assignee_user_id = $1)`,
+            [userId, IO_STATUS.RETURNED_CREATOR],
+          );
         count += returned.rows[0]?.count ?? 0;
       }
       if (ioIsPrimaryAdmin(user)) {
@@ -725,7 +927,8 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       } else if (tab === 'returned') {
         if (!ioIsCreatorUser(user)) return res.status(403).json({ error: 'forbidden' });
         sql = `SELECT * FROM invoices_owner
-               WHERE created_by_user_id = $1 AND status = $2`;
+               WHERE status = $2
+                 AND (created_by_user_id = $1 OR current_assignee_user_id = $1)`;
         params = [userId, IO_STATUS.RETURNED_CREATOR];
       } else if (tab === 'sent') {
         if (!ioIsCreatorUser(user)) return res.status(403).json({ error: 'forbidden' });
@@ -853,7 +1056,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const r = await pool.query(
         `SELECT a.id, a.invoice_id, a.actor_user_id, a.actor_user_name,
                 a.action, a.comment, a.created_at,
-                i.project_name, i.status AS invoice_status
+                i.project_name, i.status AS invoice_status, i.extract_number
          FROM invoices_owner_actions a
          INNER JOIN invoices_owner i ON i.id = a.invoice_id
          ORDER BY a.created_at DESC, a.id DESC
@@ -870,6 +1073,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
           created_at: row.created_at,
           project_name: row.project_name || '',
           invoice_status: row.invoice_status || '',
+          extract_number: row.extract_number ? String(row.extract_number) : null,
         })),
       );
     } catch (e) {
@@ -1076,7 +1280,11 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
-      const initialStep = await ioResolveInitialStepAfterCreatorSubmit(pool, actor);
+      const initialStep = await ioResolveSubmitTarget(
+        pool,
+        actor,
+        b.toUserId ?? b.to_user_id,
+      );
       if (initialStep.error) {
         const code = initialStep.error === 'forbidden' ? 403 : 400;
         return res.status(code).json({ error: initialStep.error });
@@ -1144,7 +1352,11 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [id]);
       if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
       const row = rq.rows[0];
-      if (parseInt(row.created_by_user_id, 10) !== userId) {
+      const isCreator = parseInt(row.created_by_user_id, 10) === userId;
+      const assigneeId = row.current_assignee_user_id != null
+        ? parseInt(row.current_assignee_user_id, 10)
+        : null;
+      if (!isCreator && assigneeId !== userId) {
         return res.status(403).json({ error: 'forbidden' });
       }
       if (String(row.status) !== IO_STATUS.RETURNED_CREATOR) {
@@ -1155,7 +1367,11 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       if (!actor || !ioIsCreatorUser(actor)) {
         return res.status(403).json({ error: 'forbidden' });
       }
-      const initialStep = await ioResolveInitialStepAfterCreatorSubmit(pool, actor);
+      const initialStep = await ioResolveSubmitTarget(
+        pool,
+        actor,
+        b.toUserId ?? b.to_user_id,
+      );
       if (initialStep.error) {
         const code = initialStep.error === 'forbidden' ? 403 : 400;
         return res.status(code).json({ error: initialStep.error });
@@ -1210,6 +1426,42 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
     }
   });
 
+  app.put('/invoices-owner/:id/extract-number', async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      const value = ioNormalizeExtractNumber(b.extractNumber ?? b.extract_number);
+      if (Number.isNaN(id) || Number.isNaN(userId) || !value) {
+        return res.status(400).json({ error: 'invalid' });
+      }
+      const actor = await ioGetUser(pool, userId, req);
+      if (!ioIsPrimaryAdmin(actor)) return res.status(403).json({ error: 'forbidden' });
+      const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [id]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      const taken = await ioAssertExtractNumberAvailable(pool, value, id);
+      if (taken) return res.status(400).json({ error: taken });
+      const now = new Date().toISOString();
+      await pool.query(
+        `UPDATE invoices_owner
+         SET extract_number=$1, extract_number_locked=TRUE, updated_at=$2
+         WHERE id=$3`,
+        [value, now, id],
+      );
+      await ioInsertAction(pool, {
+        invoiceId: id,
+        actorUserId: userId,
+        actorUserName: actor.name,
+        action: 'extract_number',
+        comment: value,
+        createdAt: now,
+      });
+      res.json(await ioLoadDetail(pool, id));
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
   app.post('/invoices-owner/:id/approve', async (req, res) => {
     try {
       const id = parseInt(String(req.params.id || ''), 10);
@@ -1241,6 +1493,21 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       let assigneeName = null;
       let approvedAt = null;
       let omChecklistJson = null;
+      const chain = await ioLoadCirculationChain(pool);
+      const requestedTo = ioParseToUserId(b.toUserId ?? b.to_user_id);
+      if (Number.isNaN(requestedTo)) {
+        return res.status(400).json({ error: 'invalid_recipient' });
+      }
+
+      const extractLeave = await ioExtractNumberForLeave(
+        pool,
+        row,
+        b,
+        String(row.status) === IO_STATUS.PENDING_TO,
+      );
+      if (extractLeave.error) {
+        return res.status(400).json({ error: extractLeave.error });
+      }
 
       if (idx === IO_FLOW.length - 1) {
         nextStatus = IO_STATUS.APPROVED;
@@ -1250,13 +1517,18 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
           ioNormalizeOmChecklist(b.omChecklist ?? b.om_checklist ?? {}),
         );
       } else {
-        nextStatus = IO_FLOW[idx + 1].status;
-        const assignee = await ioResolveAssigneeForStatus(pool, nextStatus, row);
-        if (!assignee || assignee.id == null) {
-          return res.status(400).json({ error: 'next_assignee_not_configured' });
+        let step;
+        if (requestedTo != null) {
+          step = ioStepFromUserId(chain, requestedTo);
+          const err = ioRejectChainTarget(step, userId, String(row.status));
+          if (err) return res.status(400).json({ error: err });
+        } else {
+          step = ioDefaultStepForApprove(chain, row.status);
+          if (!step) return res.status(400).json({ error: 'next_assignee_not_configured' });
         }
-        assigneeId = assignee.id;
-        assigneeName = assignee.name;
+        nextStatus = step.status;
+        assigneeId = step.userId;
+        assigneeName = step.name;
       }
 
       if (omChecklistJson != null) {
@@ -1266,8 +1538,8 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
            status=$1, return_reason=NULL,
            current_assignee_user_id=$2, current_assignee_user_name=$3,
            approved_at=COALESCE($4, approved_at), updated_at=$5,
-           om_checklist_json=$6
-           WHERE id=$7`,
+           om_checklist_json=$6, extract_number=$7, extract_number_locked=$8
+           WHERE id=$9`,
           [
             nextStatus,
             assigneeId,
@@ -1275,6 +1547,8 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
             approvedAt,
             now,
             omChecklistJson,
+            extractLeave.extractNumber,
+            extractLeave.locked,
             id,
           ],
         );
@@ -1283,9 +1557,19 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
           `UPDATE invoices_owner SET
            status=$1, return_reason=NULL,
            current_assignee_user_id=$2, current_assignee_user_name=$3,
-           approved_at=COALESCE($4, approved_at), updated_at=$5
-           WHERE id=$6`,
-          [nextStatus, assigneeId, assigneeName, approvedAt, now, id],
+           approved_at=COALESCE($4, approved_at), updated_at=$5,
+           extract_number=$6, extract_number_locked=$7
+           WHERE id=$8`,
+          [
+            nextStatus,
+            assigneeId,
+            assigneeName,
+            approvedAt,
+            now,
+            extractLeave.extractNumber,
+            extractLeave.locked,
+            id,
+          ],
         );
       }
       await ioInsertAction(pool, {
@@ -1350,16 +1634,25 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const idx = ioFlowIndexForStatus(row.status);
       if (idx < 0) return res.status(400).json({ error: 'invalid_status' });
 
-      let prevStatus;
-      if (idx === 0) {
-        prevStatus = IO_STATUS.RETURNED_CREATOR;
-      } else {
-        prevStatus = IO_FLOW[idx - 1].status;
+      const chain = await ioLoadCirculationChain(pool);
+      const requestedTo = ioParseToUserId(b.toUserId ?? b.to_user_id);
+      if (Number.isNaN(requestedTo)) {
+        return res.status(400).json({ error: 'invalid_recipient' });
       }
-
-      const assignee = await ioResolveAssigneeForStatus(pool, prevStatus, row);
-      if (!assignee || assignee.id == null) {
-        return res.status(400).json({ error: 'prev_assignee_not_configured' });
+      let step;
+      if (requestedTo != null) {
+        step = ioStepFromUserId(chain, requestedTo);
+        const err = ioRejectChainTarget(step, userId, String(row.status));
+        if (err) return res.status(400).json({ error: err });
+      } else {
+        step = ioDefaultStepForReturn(chain, row.status);
+        if (!step) return res.status(400).json({ error: 'prev_assignee_not_configured' });
+      }
+      const prevStatus = step.status;
+      const assignee = { id: step.userId, name: step.name };
+      const extractLeave = await ioExtractNumberForLeave(pool, row, b, false);
+      if (extractLeave.error) {
+        return res.status(400).json({ error: extractLeave.error });
       }
 
       const now = new Date().toISOString();
@@ -1367,9 +1660,18 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         `UPDATE invoices_owner SET
          status=$1, return_reason=$2,
          current_assignee_user_id=$3, current_assignee_user_name=$4,
-         updated_at=$5
-         WHERE id=$6`,
-        [prevStatus, reason, assignee.id, assignee.name, now, id],
+         updated_at=$5, extract_number=$6, extract_number_locked=$7
+         WHERE id=$8`,
+        [
+          prevStatus,
+          reason,
+          assignee.id,
+          assignee.name,
+          now,
+          extractLeave.extractNumber,
+          extractLeave.locked,
+          id,
+        ],
       );
       await ioInsertAction(pool, {
         invoiceId: id,

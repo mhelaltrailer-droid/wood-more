@@ -17,6 +17,17 @@ import '../utils/invoices_owner_om_checklist_pdf.dart';
 import 'invoices_owner_form_screen.dart';
 import 'invoices_owner_prepare_attachment_screen.dart';
 
+String _invoicesOwnerErrorText(Object error) {
+  final text = '$error';
+  if (text.contains('extract_number_required')) {
+    return 'رقم المستخلص مطلوب عند الاعتماد والإرسال';
+  }
+  if (text.contains('extract_number_taken')) {
+    return 'رقم المستخلص مستخدم لمستخلص آخر';
+  }
+  return text;
+}
+
 class InvoicesOwnerDetailScreen extends StatefulWidget {
   final UserModel currentUser;
   final int invoiceId;
@@ -36,8 +47,12 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
   final _storage = getStorage();
   final _returnReasonController = TextEditingController();
   final _approveNotesController = TextEditingController();
+  final _extractNumberController = TextEditingController();
 
   InvoicesOwnerModel? _invoice;
+  List<InvoicesOwnerChainMember> _chain = const [];
+  int? _approveToUserId;
+  int? _returnToUserId;
   bool _loading = true;
   bool _acting = false;
   bool _exportingPdf = false;
@@ -61,6 +76,7 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
   void dispose() {
     _returnReasonController.dispose();
     _approveNotesController.dispose();
+    _extractNumberController.dispose();
     for (final c in _omNoteControllers.values) {
       c.dispose();
     }
@@ -80,9 +96,17 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
         widget.invoiceId,
         userId: widget.currentUser.id,
       );
+      final chain = await _storage.getInvoicesOwnerChain(
+        userId: widget.currentUser.id,
+        status: invoice.status,
+      );
       if (!mounted) return;
       setState(() {
         _invoice = invoice;
+        _extractNumberController.text = invoice.extractNumber ?? '';
+        _chain = chain.members;
+        _approveToUserId = chain.defaultApproveUserId;
+        _returnToUserId = chain.defaultReturnUserId;
         for (final item in invoicesOwnerOmChecklistItems) {
           final entry = invoice.omChecklist[item.key];
           _omChecklistDraft[item.key] = entry?.checked == true;
@@ -123,10 +147,30 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
       final isOmFinal =
           _invoice?.status == invoicesOwnerStatusPendingOm &&
           widget.currentUser.isOperationManager;
+      final needsExtract = _invoice?.status == invoicesOwnerStatusPendingTo &&
+          _invoice?.extractNumberLocked != true;
+      if (needsExtract && _extractNumberController.text.trim().isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('رقم المستخلص مطلوب عند الاعتماد والإرسال')),
+        );
+        setState(() => _acting = false);
+        return;
+      }
+      if (!isOmFinal && _approveToUserId == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('اختر الشخص المرسل إليه')),
+        );
+        setState(() => _acting = false);
+        return;
+      }
       await _storage.approveInvoicesOwner(
         invoiceId: widget.invoiceId,
         userId: widget.currentUser.id,
         notes: notes.isEmpty ? null : notes,
+        toUserId: isOmFinal ? null : _approveToUserId,
+        extractNumber: needsExtract ? _extractNumberController.text.trim() : null,
         omChecklist: isOmFinal ? _omChecklistDraftEntries() : null,
       );
       if (!mounted) return;
@@ -134,7 +178,54 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+        SnackBar(content: Text(_invoicesOwnerErrorText(e)), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  Future<void> _editExtractNumber() async {
+    if (_storage is! ApiStorageService) return;
+    final controller = TextEditingController(text: _invoice?.extractNumber ?? '');
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تعديل رقم المستخلص'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'رقم المستخلص',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (saved == null || saved.isEmpty || !mounted) return;
+    setState(() => _acting = true);
+    try {
+      await _storage.updateInvoicesOwnerExtractNumber(
+        invoiceId: widget.invoiceId,
+        userId: widget.currentUser.id,
+        extractNumber: saved,
+      );
+      if (!mounted) return;
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_invoicesOwnerErrorText(e)), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -304,19 +395,33 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
       );
       return;
     }
+    if (_returnToUserId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('اختر الشخص المعاد إليه')),
+      );
+      return;
+    }
     setState(() => _acting = true);
     try {
       await _storage.returnInvoicesOwner(
         invoiceId: widget.invoiceId,
         userId: widget.currentUser.id,
         reason: reason,
+        toUserId: _returnToUserId,
+        extractNumber: _invoice?.status == invoicesOwnerStatusPendingTo &&
+                _invoice?.extractNumberLocked != true
+            ? _extractNumberController.text.trim()
+            : null,
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text(_invoicesOwnerErrorText(e)),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
       if (mounted) setState(() => _acting = false);
@@ -634,6 +739,29 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
     );
   }
 
+  Widget _chainDropdown({
+    required String label,
+    required int? value,
+    required ValueChanged<int?> onChanged,
+  }) {
+    final members = _chain
+        .where((m) => m.userId != widget.currentUser.id && m.userId > 0)
+        .toList();
+    final ids = members.map((m) => m.userId).toSet();
+    return DropdownButtonFormField<int>(
+      value: value != null && ids.contains(value) ? value : null,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+      ),
+      items: [
+        for (final member in members)
+          DropdownMenuItem(value: member.userId, child: Text(member.label)),
+      ],
+      onChanged: onChanged,
+    );
+  }
+
   Widget _buildBody(DateFormat fmt) {
     final d = _invoice!;
     final user = widget.currentUser;
@@ -651,7 +779,7 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
         d.hasOmChecklistSaved;
     final canEdit = user.canCreateInvoicesOwner &&
         d.status == invoicesOwnerStatusReturnedCreator &&
-        d.createdByUserId == user.id;
+        (d.createdByUserId == user.id || d.currentAssigneeUserId == user.id);
     final canManage = user.canManageInvoicesOwner;
     final canAssigneeAttachments = user.canManageInvoicesOwnerAttachmentsAsAssignee(
       status: d.status,
@@ -670,12 +798,36 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
         Card(
           child: ListTile(
             title: Text(
-              d.projectName,
+              invoicesOwnerProjectHeading(d.projectName, d.extractNumber),
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
             ),
             subtitle: Text('${d.statusLabelAr} — ${fmt.format(d.updatedAt)}'),
           ),
         ),
+        if (canAct &&
+            d.status == invoicesOwnerStatusPendingTo &&
+            !d.extractNumberLocked) ...[
+          const SizedBox(height: 12),
+          TextField(
+            controller: _extractNumberController,
+            decoration: const InputDecoration(
+              labelText: 'رقم المستخلص',
+              helperText: 'إلزامي عند الاعتماد والإرسال، واختياري عند الإرجاع',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+        if (user.isPrimaryAppAdmin &&
+            (d.extractNumber ?? '').trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _acting ? null : _editExtractNumber,
+              child: const Text('تعديل رقم المستخلص'),
+            ),
+          ),
+        ],
         if (d.stageNotesForDisplay.isNotEmpty) ...[
           const SizedBox(height: 12),
           Card(
@@ -838,6 +990,13 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
             maxLines: 3,
           ),
           const SizedBox(height: 12),
+          if (d.status != invoicesOwnerStatusPendingOm)
+            _chainDropdown(
+              label: 'المرسل إليه',
+              value: _approveToUserId,
+              onChanged: (v) => setState(() => _approveToUserId = v),
+            ),
+          if (d.status != invoicesOwnerStatusPendingOm) const SizedBox(height: 12),
           FilledButton(
             onPressed: _acting ? null : _approve,
             style: FilledButton.styleFrom(
@@ -858,6 +1017,12 @@ class _InvoicesOwnerDetailScreenState extends State<InvoicesOwnerDetailScreen> {
               border: OutlineInputBorder(),
             ),
             maxLines: 3,
+          ),
+          const SizedBox(height: 8),
+          _chainDropdown(
+            label: 'المعاد إليه',
+            value: _returnToUserId,
+            onChanged: (v) => setState(() => _returnToUserId = v),
           ),
           const SizedBox(height: 8),
           OutlinedButton(

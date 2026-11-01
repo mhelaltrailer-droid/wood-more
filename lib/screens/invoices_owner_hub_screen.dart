@@ -352,7 +352,7 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
             child: ListTile(
               onTap: () => _openInvoice(d),
               title: Text(
-                d.projectName,
+                invoicesOwnerProjectHeading(d.projectName, d.extractNumber),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               subtitle: Column(
@@ -410,7 +410,7 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
                 await _loadActivityLog();
               },
               title: Text(
-                a.projectName,
+                invoicesOwnerProjectHeading(a.projectName, a.extractNumber),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               subtitle: Column(
