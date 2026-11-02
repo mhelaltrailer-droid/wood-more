@@ -178,6 +178,7 @@ class IconVisibilityService {
     roleQs: [
       invoicesOwnerIcon,
       contInvoicesIcon,
+      contProgressIcon,
       contractorAccountsIcon,
     ],
     roleFinance: [
@@ -295,13 +296,16 @@ class IconVisibilityService {
     ],
   };
 
+  static bool _defaultVisible(String role, String iconId) {
+    if (iconId == 'contractor_accounts') return role == roleAppAdmin;
+    if (iconId == 'cont_progress') return role == roleQs;
+    return !hiddenByDefaultIconIds.contains(iconId);
+  }
+
   static Map<String, bool> defaultForRole(String role) {
     final items = roleIcons[role] ?? const <HomeIconItem>[];
     return {
-      for (final item in items)
-        item.id: item.id == 'contractor_accounts'
-            ? role == roleAppAdmin
-            : !hiddenByDefaultIconIds.contains(item.id),
+      for (final item in items) item.id: _defaultVisible(role, item.id),
     };
   }
 

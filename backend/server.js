@@ -2152,6 +2152,7 @@ async function ensureHomeIconsVisibilitySetting() {
       qs: {
         invoices_owner: true,
         cont_invoices: false,
+        cont_progress: true,
         contractor_accounts: false,
       },
       finance: {
@@ -2186,6 +2187,7 @@ async function ensureHomeIconsVisibilitySetting() {
         delete roleMap.activity_logs;
         if (forceHideContIcons) {
           for (const iconId of contHiddenIds) {
+            if (role === 'qs' && iconId === 'cont_progress') continue;
             if (Object.prototype.hasOwnProperty.call(roleMap, iconId) ||
                 Object.prototype.hasOwnProperty.call(icons, iconId)) {
               roleMap[iconId] = false;

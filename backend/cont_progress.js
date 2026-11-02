@@ -26,9 +26,12 @@ function cpIsAppAdmin(user) {
 }
 
 function cpCanSubmit(user) {
-  // Hold: إدخال مهندس الموقع متوقف؛ مسار المستخلص يبدأ من QS.
+  // إدخال مهندس الموقع ما زال موقوفاً. الأدمن و QS-User يسجّلان الإنجاز.
   if (!user) return false;
-  return cpIsAppAdmin(user);
+  if (cpIsAppAdmin(user)) return true;
+  const role = cpStr(user.role);
+  const email = cpNormEmail(user.email);
+  return role === 'qs' || email === 'qs-user' || email === 'qs@app.com';
 }
 
 function cpIsPrimaryAdmin(user, req) {

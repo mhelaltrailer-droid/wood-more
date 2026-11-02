@@ -1,3 +1,4 @@
+import '../core/cont_invoices_constants.dart';
 import '../core/invoices_owner_constants.dart';
 import '../core/shop_drawing_constants.dart';
 import 'expense_statement_model.dart';
@@ -228,8 +229,9 @@ class UserModel {
       isOperationManager ||
       isProjectsManager;
 
-  /// مستخلص مقاول-Progress — Hold: إدخال الموقع متوقف؛ البداية من QS.
-  bool get canAccessContProgress => isAdmin;
+  /// مستخلص مقاول-Progress — الأدمن و QS-User يدخلان نسب الإنجاز.
+  bool get canAccessContProgress =>
+      isAdmin || isQs || isContInvoicesQsEmail(email);
 
   /// تعديل/حذف إنجازات Progress — المسؤول الأساسي فقط.
   bool get canManageContProgressReports => isPrimaryAppAdmin;

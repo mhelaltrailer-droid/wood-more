@@ -10,6 +10,7 @@ import 'package:printing/printing.dart';
 import '../core/cont_invoices_constants.dart';
 import '../core/invoice_structure_constants.dart';
 import '../models/cont_invoice_model.dart';
+import '../models/cont_progress_report_model.dart';
 import '../models/contractor_model.dart';
 import '../models/invoice_structure_location_model.dart';
 import '../models/project_model.dart';
@@ -282,6 +283,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
       _structureLocs = structure.locations;
       _contractors = contractors;
 
+      var importedProgress = 0;
       if (widget.existing?.id != null) {
         final detail = await _api.getContInvoiceDetail(
           widget.existing!.id!,
@@ -290,12 +292,116 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         _applyExisting(detail);
       } else {
         await _autofillPreviouslyPaid();
+        importedProgress = await _importProgressSections();
       }
       await _loadOpenRemainders();
+      if (importedProgress > 0 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'تم جلب $importedProgress موقع من سجل الإنجاز. يمكن تعديل النسبة أو حذف البند من المستخلص.',
+            ),
+          ),
+        );
+      }
     } catch (e) {
       _error = e.toString();
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// مستخلص جديد فقط: آخر إنجاز لكل موقع لنفس المقاول والمشروع.
+  /// الحذف من المستخلص لا يمس سجل Progress.
+  Future<int> _importProgressSections() async {
+    List<ContProgressReportModel> reports;
+    try {
+      reports = await _api.getContProgressSummary(
+        userId: widget.currentUser.id,
+        projectId: widget.project.id,
+        contractorId: widget.contractor.id,
+        contractorName: widget.contractor.name,
+      );
+    } catch (_) {
+      return 0;
+    }
+    if (reports.isEmpty) return 0;
+
+    final byId = {for (final l in _structureLocs) l.id: l};
+    final sorted = [...reports]
+      ..sort((a, b) {
+        final ap = a.locationLabel;
+        final bp = b.locationLabel;
+        return ap.compareTo(bp);
+      });
+    var added = 0;
+    for (final report in sorted) {
+      final locId = report.structureLocationId;
+      if (locId == null) continue;
+      if (_sections.any((s) => s.structureLocationId == locId)) continue;
+      final loc = byId[locId];
+      final path = loc != null
+          ? _pathOf(loc)
+          : (report.locationLabel.trim().isNotEmpty
+              ? report.locationLabel.trim()
+              : 'موقع $locId');
+
+      double prevPercent = 0;
+      double unitPrice = _isFlooring
+          ? (loc?.meterPrice ?? 0)
+          : (loc?.unitValue ?? 0);
+      try {
+        final prev = await _api.getContInvoiceLocationProgress(
+          userId: widget.currentUser.id,
+          projectId: widget.project.id,
+          structureLocationId: locId,
+          contractorId: widget.contractor.id,
+          contractorName: widget.contractor.name,
+        );
+        if (prev['has_previous'] == true) {
+          prevPercent = (prev['prev_percent'] is num)
+              ? (prev['prev_percent'] as num).toDouble()
+              : 0;
+          if (unitPrice <= 0 &&
+              prev['unit_price'] is num &&
+              (prev['unit_price'] as num) > 0) {
+            unitPrice = (prev['unit_price'] as num).toDouble();
+          }
+        }
+      } catch (_) {}
+
+      final executed = report.progressValue;
+      final String percentText;
+      final String qtyText;
+      if (_isFlooring) {
+        qtyText = executed > 0 ? _trim(executed) : '';
+        final total = loc?.totalMeters;
+        if (total != null && total > 0 && executed > 0) {
+          final pct = (executed / total * 100).clamp(0, 100).toDouble();
+          percentText = _trim(pct);
+        } else {
+          percentText = '';
+        }
+      } else {
+        qtyText = '1';
+        final pct = executed.clamp(0, 100).toDouble();
+        percentText = executed > 0 ? _trim(pct) : '';
+      }
+
+      _sections.add(
+        _SectionState(
+          structureLocationId: locId,
+          pathLabel: path,
+          baseQty: TextEditingController(text: qtyText),
+          unitPrice: TextEditingController(
+            text: unitPrice > 0 ? _trim(unitPrice) : '',
+          ),
+          currentPercent: TextEditingController(text: percentText),
+          prevPercent: prevPercent.clamp(0, 100).toDouble(),
+        ),
+      );
+      added++;
+    }
+    return added;
   }
 
   Future<void> _autofillPreviouslyPaid() async {
