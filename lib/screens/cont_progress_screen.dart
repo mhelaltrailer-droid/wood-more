@@ -237,6 +237,18 @@ class _ContProgressScreenState extends State<ContProgressScreen> {
       );
       return;
     }
+    final latest = _latestForSelection();
+    if (latest != null && !(value > latest.progressValue)) {
+      final label = _isFlooring ? 'الأمتار' : 'النسبة';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$label الجديدة يجب أن تكون أكبر من آخر إنجاز مسجّل (${latest.valueLabel})',
+          ),
+        ),
+      );
+      return;
+    }
 
     setState(() => _saving = true);
     try {
@@ -273,6 +285,26 @@ class _ContProgressScreenState extends State<ContProgressScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  ContProgressReportModel? _latestForSelection() {
+    if (_project == null || _contractor == null || _location == null) {
+      return null;
+    }
+    for (final item in _recent) {
+      if (item.projectId != _project!.id) continue;
+      if (item.structureLocationId != _location!.id) continue;
+      if (item.contractorId != null &&
+          _contractor!.id != 0 &&
+          item.contractorId == _contractor!.id) {
+        return item;
+      }
+      if (item.contractorName.trim().toLowerCase() ==
+          _contractor!.name.trim().toLowerCase()) {
+        return item;
+      }
+    }
+    return null;
   }
 
   bool _sameProgressTarget(
@@ -381,6 +413,23 @@ class _ContProgressScreenState extends State<ContProgressScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('النسبة لا تتعدى 100%')),
+      );
+      return;
+    }
+    final older = _previousFor(report);
+    if (older != null &&
+        (older.createdAt == null ||
+            report.createdAt == null ||
+            !older.createdAt!.isAfter(report.createdAt!)) &&
+        !(value > older.progressValue)) {
+      if (!mounted) return;
+      final label = isPercent ? 'النسبة' : 'الأمتار';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$label يجب أن تبقى أكبر من الإنجاز السابق (${older.valueLabel})',
+          ),
+        ),
       );
       return;
     }
@@ -604,6 +653,16 @@ class _ContProgressScreenState extends State<ContProgressScreen> {
                         ],
                         enabled: !_saving && _measureType != null,
                       ),
+                      if (_latestForSelection() != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'آخر إنجاز لهذا الموقع: ${_latestForSelection()!.valueLabel}. أدخل قيمة أكبر.',
+                          style: TextStyle(
+                            color: Colors.teal.shade800,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 14),
                       TextField(
                         controller: _notesCtrl,

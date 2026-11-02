@@ -71,6 +71,49 @@ async function cpLoadPreviousReport(pool, row, excludeId) {
   return r.rows[0] || null;
 }
 
+function cpFormatProgressValue(kind, value) {
+  const n = cpNum(value);
+  const text = n === Math.trunc(n) ? String(Math.trunc(n)) : String(n);
+  return kind === 'meters' ? `${text} م` : `${text}%`;
+}
+
+/** آخر إنجاز قبل هذا السطر، أو بعده، لنفس المقاول والمشروع والموقع. */
+async function cpLoadAdjacentReport(pool, row, direction) {
+  const before = direction === 'before';
+  const params = [
+    row.project_id,
+    row.structure_location_id,
+    row.created_at,
+    row.id,
+  ];
+  let contractorClause = '';
+  const contractorId =
+    row.contractor_id != null ? parseInt(row.contractor_id, 10) : NaN;
+  if (Number.isFinite(contractorId)) {
+    params.push(contractorId);
+    contractorClause = `AND contractor_id = $${params.length}`;
+  } else if (cpStr(row.contractor_name)) {
+    params.push(row.contractor_name);
+    contractorClause = `AND LOWER(TRIM(contractor_name)) = LOWER(TRIM($${params.length}))`;
+  }
+  const cmp = before ? '<' : '>';
+  const order = before ? 'DESC' : 'ASC';
+  const r = await pool.query(
+    `SELECT * FROM cont_progress_reports
+     WHERE project_id = $1
+       AND structure_location_id = $2
+       AND (
+         created_at ${cmp} $3
+         OR (created_at = $3 AND id ${cmp} $4)
+       )
+       ${contractorClause}
+     ORDER BY created_at ${order}, id ${order}
+     LIMIT 1`,
+    params,
+  );
+  return r.rows[0] || null;
+}
+
 function cpCanList(user) {
   if (!user) return false;
   if (cpCanSubmit(user)) return true;
@@ -330,6 +373,27 @@ function registerContProgressRoutes(app, pool) {
         return res.status(400).json({ error: 'percent cannot exceed 100' });
       }
 
+      const latest = await cpLoadPreviousReport(
+        pool,
+        {
+          project_id: projectId,
+          structure_location_id: structureLocationId,
+          contractor_id: Number.isFinite(contractorId) ? contractorId : null,
+          contractor_name: contractorName,
+        },
+        0,
+      );
+      if (latest && !(progressValue > cpNum(latest.progress_value))) {
+        const shown = cpFormatProgressValue(
+          progressKind,
+          latest.progress_value,
+        );
+        const label = progressKind === 'meters' ? 'الأمتار' : 'النسبة';
+        return res.status(400).json({
+          error: `${label} الجديدة يجب أن تكون أكبر من آخر إنجاز مسجّل (${shown})`,
+        });
+      }
+
       const ins = await pool.query(
         `INSERT INTO cont_progress_reports (
           project_id, project_name, contractor_id, contractor_name,
@@ -387,6 +451,22 @@ function registerContProgressRoutes(app, pool) {
       }
       if (progressKind === 'percent' && progressValue > 100) {
         return res.status(400).json({ error: 'percent cannot exceed 100' });
+      }
+      const before = await cpLoadAdjacentReport(pool, row, 'before');
+      const after = await cpLoadAdjacentReport(pool, row, 'after');
+      if (before && !(progressValue > cpNum(before.progress_value))) {
+        const shown = cpFormatProgressValue(progressKind, before.progress_value);
+        const label = progressKind === 'meters' ? 'الأمتار' : 'النسبة';
+        return res.status(400).json({
+          error: `${label} يجب أن تبقى أكبر من الإنجاز السابق (${shown})`,
+        });
+      }
+      if (after && !(progressValue < cpNum(after.progress_value))) {
+        const shown = cpFormatProgressValue(progressKind, after.progress_value);
+        const label = progressKind === 'meters' ? 'الأمتار' : 'النسبة';
+        return res.status(400).json({
+          error: `${label} يجب أن تبقى أقل من الإنجاز التالي (${shown})`,
+        });
       }
       const notes =
         b.notes == null ? cpStr(row.notes) : cpStr(b.notes);
