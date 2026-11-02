@@ -3555,8 +3555,15 @@ class ApiStorageService {
     );
   }
 
-  Future<List<ContInvoiceModel>> getContInvoices(int userId) async {
-    final list = await _getList('cont-invoices?userId=$userId');
+  Future<List<ContInvoiceModel>> getContInvoices(
+    int userId, {
+    String? scope,
+  }) async {
+    final scopeQuery =
+        scope != null && scope.trim().isNotEmpty
+            ? '&scope=${Uri.encodeQueryComponent(scope.trim())}'
+            : '';
+    final list = await _getList('cont-invoices?userId=$userId$scopeQuery');
     return list
         .map(
           (e) => ContInvoiceModel.fromMap(Map<String, dynamic>.from(e as Map)),

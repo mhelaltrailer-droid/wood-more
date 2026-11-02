@@ -430,7 +430,10 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
 
   Future<void> _loadOpenRemainders() async {
     try {
-      final list = await _api.getContInvoices(widget.currentUser.id);
+      final list = await _api.getContInvoices(
+        widget.currentUser.id,
+        scope: 'ledger',
+      );
       final currentId = _effectiveInvoiceId;
       final open = list.where((inv) {
         if (currentId != null && inv.id == currentId) return false;
@@ -1726,7 +1729,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                 ),
               ],
             ),
-            if (!readOnly && !priceOnly) ...[
+            if (!readOnly) ...[
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -1769,15 +1772,11 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                 return ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  onTap: (!readOnly && !priceOnly)
-                      ? () => _addManual(s, m.kind, m)
-                      : null,
+                  onTap: !readOnly ? () => _addManual(s, m.kind, m) : null,
                   title: Text(m.description.text),
                   subtitle: sub != null
                       ? Text(sub)
-                      : (!readOnly && !priceOnly
-                          ? const Text('اضغط للتعديل')
-                          : null),
+                      : (!readOnly ? const Text('اضغط للتعديل') : null),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -1790,7 +1789,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                               : Colors.green.shade800,
                         ),
                       ),
-                      if (!readOnly && !priceOnly) ...[
+                      if (!readOnly) ...[
                         IconButton(
                           tooltip: 'تعديل',
                           icon: const Icon(Icons.edit_outlined, size: 18),

@@ -31,37 +31,12 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
   bool _exportingPdf = false;
   String? _error;
   List<ContInvoiceModel> _items = const [];
-  bool _mineOnly = false;
 
   bool get _canCreate =>
       isContInvoicesQsEmail(widget.currentUser.email) ||
       widget.currentUser.isPrimaryAppAdmin;
 
   bool get _canDelete => widget.currentUser.isPrimaryAppAdmin;
-
-  List<ContInvoiceModel> get _visibleItems {
-    if (!_mineOnly) return _items;
-    final uid = widget.currentUser.id;
-    return _items.where((item) {
-      if (item.currentAssigneeUserId == uid) return true;
-      final email = widget.currentUser.email;
-      switch (item.status) {
-        case contStatusDraft:
-          return isContInvoicesQsEmail(email);
-        case contStatusPendingPrice:
-          return isContInvoicesAhAminEmail(email);
-        case contStatusPendingPm:
-          return isContInvoicesPmEmail(email);
-        case contStatusPendingOm:
-          return isContInvoicesOmEmail(email);
-        case contStatusApproved:
-        case contStatusPartiallyPaid:
-          return isContInvoicesAhAminEmail(email);
-        default:
-          return false;
-      }
-    }).toList();
-  }
 
   @override
   void initState() {
@@ -243,16 +218,6 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
                   ],
                 ),
               ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: FilterChip(
-                label: const Text('المطلوب مني فقط'),
-                selected: _mineOnly,
-                onSelected: _loading
-                    ? null
-                    : (v) => setState(() => _mineOnly = v),
-              ),
-            ),
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
@@ -273,12 +238,10 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
                             ),
                           ),
                         )
-                      : _visibleItems.isEmpty
-                          ? Center(
+                      : _items.isEmpty
+                          ? const Center(
                               child: Text(
-                                _items.isEmpty
-                                    ? 'لا توجد مستخلصات بعد.'
-                                    : 'لا توجد مستخلصات في هذا الفلتر.',
+                                'لا توجد مستخلصات بعد.',
                                 textAlign: TextAlign.center,
                               ),
                             )
@@ -291,11 +254,11 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
                                   16,
                                   _canCreate ? 88 : 16,
                                 ),
-                                itemCount: _visibleItems.length,
+                                itemCount: _items.length,
                                 separatorBuilder: (_, __) =>
                                     const SizedBox(height: 8),
                                 itemBuilder: (context, i) {
-                                  final item = _visibleItems[i];
+                                  final item = _items[i];
                                   final dateLabel = item.statementDate == null
                                       ? '—'
                                       : _dateFmt.format(item.statementDate!);

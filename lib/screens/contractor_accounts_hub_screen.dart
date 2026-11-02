@@ -132,7 +132,10 @@ class _ContractorAccountsHubScreenState
     });
     try {
       if (!_isApi) throw Exception('يتطلب الاتصال بالخادم');
-      final list = await _api.getContInvoices(widget.currentUser.id);
+      final list = await _api.getContInvoices(
+        widget.currentUser.id,
+        scope: 'ledger',
+      );
       final posted = await _hydratePayments(list.where(_isPosted).toList());
       if (!mounted) return;
       setState(() {

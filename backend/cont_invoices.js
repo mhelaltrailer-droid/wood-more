@@ -94,6 +94,51 @@ function ciCanCreate(user, req) {
   return ciIsQs(user) || ciIsPrimaryAdmin(user, req);
 }
 
+function ciIsWorkflowQs(user) {
+  return ciIsQs(user) || ciStr(user?.role) === 'qs';
+}
+
+function ciIsWorkflowPm(user) {
+  return ciIsPm(user) || ciStr(user?.role) === 'projects_manager';
+}
+
+function ciIsWorkflowOm(user) {
+  return ciIsOm(user) || ciStr(user?.role) === 'operation_manager';
+}
+
+/** قائمة Cont-Invoices: كل دور يرى مستخلصات خطوته. المسودة لـ QS والمسؤول الأساسي فقط. */
+function ciCanViewWorkflowInvoice(user, row, req) {
+  if (ciIsPrimaryAdmin(user, req)) return true;
+  const status = ciStr(row?.status) || 'draft';
+  const createdBy =
+    row?.created_by_user_id != null
+      ? parseInt(row.created_by_user_id, 10)
+      : NaN;
+  const isCreator =
+    Number.isFinite(createdBy) && createdBy === parseInt(user.id, 10);
+  if (ciIsWorkflowQs(user) && (status === 'draft' || isCreator)) return true;
+  if (status === 'draft') return false;
+  if (status === 'pending_price') return ciIsAhAmin(user);
+  if (status === 'pending_pm') return ciIsWorkflowPm(user);
+  if (status === 'pending_om') return ciIsWorkflowOm(user);
+  if (
+    status === 'approved' ||
+    status === 'partially_paid' ||
+    status === 'paid'
+  ) {
+    return ciIsAhAmin(user);
+  }
+  return false;
+}
+
+function ciIsPostedInvoiceStatus(status) {
+  return (
+    status === 'approved' ||
+    status === 'partially_paid' ||
+    status === 'paid'
+  );
+}
+
 function ciCanDelete(user, req) {
   return ciIsPrimaryAdmin(user, req);
 }
@@ -128,69 +173,85 @@ function ciLineEditMode(user, req, status) {
   return 'none';
 }
 
+const CI_MANUAL_LINE_KINDS = new Set([
+  'holiday',
+  'transport',
+  'deduction',
+  'note_on_other',
+]);
+
+function ciCopyExecutionLine(row, incoming) {
+  const newPrice = incoming ? incoming.unit_price ?? incoming.unitPrice : null;
+  return {
+    id: row.id,
+    sort_order: row.sort_order,
+    item_no: row.item_no,
+    line_kind: row.line_kind,
+    structure_location_id: row.structure_location_id,
+    location_label: row.location_label,
+    description: row.description,
+    unit: row.unit,
+    prev_qty: row.prev_qty,
+    current_qty: row.current_qty,
+    total_qty: row.total_qty,
+    base_qty: row.base_qty,
+    unit_price:
+      newPrice != null && newPrice !== '' ? newPrice : row.unit_price,
+    prev_percent: row.prev_percent,
+    percent: row.percent,
+    deduction_kind: row.deduction_kind,
+    counterparty_contractor_id: row.counterparty_contractor_id,
+    counterparty_contractor_name: row.counterparty_contractor_name,
+  };
+}
+
+/** مراجعة السعر: سعر بنود التنفيذ فقط، مع إضافة/تعديل/حذف البنود اليدوية. */
 function ciMergePriceOnlyLines(existingRows, incomingRaw) {
   const incoming = Array.isArray(incomingRaw) ? incomingRaw : [];
-  const byId = new Map();
-  const bySort = new Map();
+  const incomingExecByLoc = new Map();
+  const manuals = [];
   for (const raw of incoming) {
-    const idRaw = raw.id;
-    const id =
-      idRaw == null || idRaw === ''
-        ? null
-        : parseInt(String(idRaw), 10);
-    if (Number.isFinite(id)) byId.set(id, raw);
-    const sort = parseInt(String(raw.sort_order ?? raw.sortOrder ?? ''), 10);
-    if (Number.isFinite(sort)) bySort.set(sort, raw);
-  }
-  return existingRows.map((row, index) => {
-    const id = parseInt(row.id, 10);
-    const inc =
-      (Number.isFinite(id) && byId.get(id)) ||
-      bySort.get(parseInt(row.sort_order, 10) || index);
-    if (!inc) {
-      return {
-        id: row.id,
-        sort_order: row.sort_order,
-        item_no: row.item_no,
-        line_kind: row.line_kind,
-        structure_location_id: row.structure_location_id,
-        location_label: row.location_label,
-        description: row.description,
-        unit: row.unit,
-        prev_qty: row.prev_qty,
-        current_qty: row.current_qty,
-        total_qty: row.total_qty,
-        base_qty: row.base_qty,
-        unit_price: row.unit_price,
-        prev_percent: row.prev_percent,
-        percent: row.percent,
-        deduction_kind: row.deduction_kind,
-        counterparty_contractor_id: row.counterparty_contractor_id,
-        counterparty_contractor_name: row.counterparty_contractor_name,
-      };
+    const kind = ciNormalizeKind(raw);
+    if (kind === 'execution') {
+      const locRaw = raw.structure_location_id ?? raw.structureLocationId;
+      const loc =
+        locRaw == null || locRaw === '' ? NaN : parseInt(String(locRaw), 10);
+      if (Number.isFinite(loc)) incomingExecByLoc.set(loc, raw);
+    } else if (CI_MANUAL_LINE_KINDS.has(kind)) {
+      manuals.push(raw);
     }
-    const newPrice = inc.unit_price ?? inc.unitPrice;
-    return {
-      id: row.id,
-      sort_order: row.sort_order,
-      item_no: row.item_no,
-      line_kind: row.line_kind,
-      structure_location_id: row.structure_location_id,
-      location_label: row.location_label,
-      description: row.description,
-      unit: row.unit,
-      prev_qty: row.prev_qty,
-      current_qty: row.current_qty,
-      total_qty: row.total_qty,
-      base_qty: row.base_qty,
-      unit_price: newPrice != null && newPrice !== '' ? newPrice : row.unit_price,
-      prev_percent: row.prev_percent,
-      percent: row.percent,
-      deduction_kind: row.deduction_kind,
-      counterparty_contractor_id: row.counterparty_contractor_id,
-      counterparty_contractor_name: row.counterparty_contractor_name,
-    };
+  }
+  const usedManual = new Set();
+  const out = [];
+  for (const row of existingRows) {
+    if (ciNormalizeKind(row) !== 'execution') continue;
+    const loc =
+      row.structure_location_id != null
+        ? parseInt(row.structure_location_id, 10)
+        : NaN;
+    out.push(
+      ciCopyExecutionLine(
+        row,
+        Number.isFinite(loc) ? incomingExecByLoc.get(loc) : null,
+      ),
+    );
+    manuals.forEach((manual, index) => {
+      if (usedManual.has(index) || !Number.isFinite(loc)) return;
+      const manualLocRaw =
+        manual.structure_location_id ?? manual.structureLocationId;
+      const manualLoc =
+        manualLocRaw == null || manualLocRaw === ''
+          ? NaN
+          : parseInt(String(manualLocRaw), 10);
+      if (manualLoc !== loc) return;
+      usedManual.add(index);
+      out.push(manual);
+    });
+  }
+  manuals.forEach((manual, index) => {
+    if (!usedManual.has(index)) out.push(manual);
   });
+  return out;
 }
 
 async function ciLoadActions(pool, invoiceId) {
@@ -1519,12 +1580,22 @@ function registerContInvoicesRoutes(app, pool) {
          ) pay ON pay.invoice_id = i.id
          ORDER BY i.updated_at DESC, i.id DESC`,
       );
+      const scope = ciStr(req.query.scope);
+      const visibleRows = r.rows.filter((row) => {
+        if (scope === 'ledger') {
+          return (
+            ciCanAccessList(user, req) &&
+            ciIsPostedInvoiceStatus(ciStr(row.status))
+          );
+        }
+        return ciCanViewWorkflowInvoice(user, row, req);
+      });
       const paysByInv = await ciLoadPaymentsForInvoices(
         pool,
         r.rows.map((row) => row.id),
       );
       res.json(
-        r.rows.map((row) =>
+        visibleRows.map((row) =>
           ciRowToJson(
             row,
             [],
@@ -1555,6 +1626,14 @@ function registerContInvoicesRoutes(app, pool) {
         id,
       ]);
       if (!r.rows.length) return res.status(404).json({ error: 'not found' });
+      const row = r.rows[0];
+      const posted = ciIsPostedInvoiceStatus(ciStr(row.status));
+      if (
+        !ciCanViewWorkflowInvoice(user, row, req) &&
+        !(posted && ciCanAccessList(user, req))
+      ) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
       const lines = await ciLoadLines(pool, id);
       const actions = await ciLoadActions(pool, id);
       const payments = await ciLoadPayments(pool, id);
