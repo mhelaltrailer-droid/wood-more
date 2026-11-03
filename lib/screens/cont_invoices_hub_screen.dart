@@ -34,6 +34,7 @@ class _ContInvoicesHubScreenState extends State<ContInvoicesHubScreen> {
 
   bool get _canCreate =>
       isContInvoicesQsEmail(widget.currentUser.email) ||
+      isContInvoicesAhAminEmail(widget.currentUser.email) ||
       widget.currentUser.isPrimaryAppAdmin;
 
   bool get _canDelete => widget.currentUser.isPrimaryAppAdmin;

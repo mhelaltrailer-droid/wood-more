@@ -3638,9 +3638,11 @@ class ApiStorageService {
   Future<ContInvoiceModel> createContInvoice({
     required int userId,
     required ContInvoiceModel invoice,
+    bool sendToPm = false,
   }) async {
     final body = invoice.toMap();
     body['userId'] = userId;
+    if (sendToPm) body['send_to_pm'] = true;
     final uri = Uri.parse(_path('cont-invoices'));
     final r = await http.post(
       uri,

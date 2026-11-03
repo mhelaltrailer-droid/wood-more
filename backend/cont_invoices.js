@@ -91,7 +91,7 @@ function ciCanAccessList(user, req) {
 }
 
 function ciCanCreate(user, req) {
-  return ciIsQs(user) || ciIsPrimaryAdmin(user, req);
+  return ciIsQs(user) || ciIsAhAmin(user) || ciIsPrimaryAdmin(user, req);
 }
 
 function ciIsWorkflowQs(user) {
@@ -117,6 +117,8 @@ function ciCanViewWorkflowInvoice(user, row, req) {
   const isCreator =
     Number.isFinite(createdBy) && createdBy === parseInt(user.id, 10);
   if (ciIsWorkflowQs(user) && (status === 'draft' || isCreator)) return true;
+  // ah-amin يرى ما أنشأه بعد الإرسال (اطلاع) + مراجعة السعر والصرف.
+  if (ciIsAhAmin(user) && isCreator) return true;
   if (status === 'draft') return false;
   if (status === 'pending_price') return ciIsAhAmin(user);
   if (status === 'pending_pm') return ciIsWorkflowPm(user);
@@ -1760,15 +1762,32 @@ function registerContInvoicesRoutes(app, pool) {
       const contractType =
         ciStr(b.contract_type ?? b.contractType) || 'تركيب';
       const notes = ciStr(b.notes);
+      // ah-amin: إنشاء = إرسال مباشر لمدير المشروعات (بدون مسودة / بدون مراجعة سعر).
+      const createAsPendingPm = ciIsAhAmin(user);
+      if (createAsPendingPm) {
+        const rawLines = Array.isArray(b.lines) ? b.lines : [];
+        if (!rawLines.length) {
+          return res.status(400).json({ error: 'lines required' });
+        }
+      }
 
       await client.query('BEGIN');
+      let assigneeId = null;
+      let assigneeName = '';
+      let initialStatus = 'draft';
+      if (createAsPendingPm) {
+        const assignee = await ciAssigneeUser(pool, CI_ACTOR_PM_ID);
+        assigneeId = assignee.id;
+        assigneeName = assignee.name || '';
+        initialStatus = 'pending_pm';
+      }
       const ins = await client.query(
         `INSERT INTO cont_invoices (
           contractor_id, contractor_name, project_id, project_name,
           statement_date, contract_type, previously_paid, other_deductions,
           notes, status, created_by_user_id, created_by_user_name,
           current_assignee_user_id, current_assignee_user_name
-        ) VALUES ($1,$2,$3,$4,$5,$6,0,0,$7,'draft',$8,$9,NULL,'')
+        ) VALUES ($1,$2,$3,$4,$5,$6,0,0,$7,$8,$9,$10,$11,$12)
         RETURNING *`,
         [
           Number.isFinite(contractorId) ? contractorId : null,
@@ -1778,8 +1797,11 @@ function registerContInvoicesRoutes(app, pool) {
           statementDate,
           contractType,
           notes,
+          initialStatus,
           userId,
           user.name || '',
+          assigneeId,
+          assigneeName,
         ],
       );
       const invoiceId = parseInt(ins.rows[0].id, 10);
@@ -1817,6 +1839,15 @@ function registerContInvoicesRoutes(app, pool) {
         [totalAmount, amountDue, invoiceId],
       );
       await ciLogAction(client, invoiceId, user, 'create', '');
+      if (createAsPendingPm) {
+        await ciLogAction(
+          client,
+          invoiceId,
+          user,
+          'submit_to_pm',
+          'إرسال مباشر لمدير المشروعات (بدون مسودة)',
+        );
+      }
       await client.query('COMMIT');
       const lines = await ciLoadLines(pool, invoiceId);
       const actions = await ciLoadActions(pool, invoiceId);

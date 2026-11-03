@@ -146,8 +146,14 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   bool get _isApi => _storage is ApiStorageService;
   ApiStorageService get _api => _storage as ApiStorageService;
 
+  bool get _isAhAminComposer =>
+      isContInvoicesAhAminEmail(widget.currentUser.email) &&
+      _effectiveInvoiceId == null;
+
   _ContLineEditMode get _lineEditMode {
     if (widget.currentUser.isPrimaryAppAdmin) return _ContLineEditMode.full;
+    // ah-amin يجهّز مستخلصاً جديداً محلياً ثم يرسل لمدير المشروعات مباشرة.
+    if (_isAhAminComposer) return _ContLineEditMode.full;
     final email = widget.currentUser.email;
     switch (_status) {
       case contStatusDraft:
@@ -167,13 +173,17 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     }
   }
 
-  bool get _canSaveLines => _lineEditMode != _ContLineEditMode.none;
+  /// ah-amin عند الإنشاء الجديد لا يحفظ مسودة — إرسال مباشر فقط.
+  bool get _canSaveLines =>
+      _lineEditMode != _ContLineEditMode.none && !_isAhAminComposer;
 
   bool get _canSubmit =>
       _status == contStatusDraft &&
       _effectiveInvoiceId != null &&
       (isContInvoicesQsEmail(widget.currentUser.email) ||
           widget.currentUser.isPrimaryAppAdmin);
+
+  bool get _canSendDirectToPm => _isAhAminComposer;
 
   bool get _canForward {
     if (_effectiveInvoiceId == null) return false;
@@ -1489,6 +1499,46 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
     await _persistDraft(pop: true);
   }
 
+  Future<void> _sendDirectToPm() async {
+    if (!_canSendDirectToPm || _workflowBusy || _saving) return;
+    if (_sections.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('أضف موقعاً واحداً على الأقل')),
+      );
+      return;
+    }
+    setState(() => _workflowBusy = true);
+    try {
+      final invoice = ContInvoiceModel(
+        contractorId: widget.contractor.id,
+        contractorName: widget.contractor.name,
+        projectId: widget.project.id,
+        projectName: widget.project.name,
+        statementDate: _statementDate,
+        contractType: _resolvedContractType,
+        previouslyPaid: 0,
+        otherDeductions: 0,
+        notes: _notesCtrl.text.trim(),
+        status: contStatusPendingPm,
+        lines: _collectLines(),
+      );
+      final saved = await _api.createContInvoice(
+        userId: widget.currentUser.id,
+        invoice: invoice,
+        sendToPm: true,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(saved);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('فشل الإرسال: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _workflowBusy = false);
+    }
+  }
+
   Future<void> _saveThenWorkflow(
     Future<ContInvoiceModel> Function(int invoiceId) workflow,
   ) async {
@@ -2089,6 +2139,18 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                             backgroundColor: const Color(0xFF1B5E20),
                           ),
                         ),
+                      if (_canSendDirectToPm) ...[
+                        if (_canSaveLines) const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: busy ? null : _sendDirectToPm,
+                          icon: const Icon(Icons.send),
+                          label: const Text('إرسال لمدير المشروعات'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                            backgroundColor: const Color(0xFF1565C0),
+                          ),
+                        ),
+                      ],
                       if (_canSubmit) ...[
                         const SizedBox(height: 10),
                         FilledButton.icon(
