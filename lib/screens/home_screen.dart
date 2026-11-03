@@ -32,7 +32,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with RouteAware, SingleTickerProviderStateMixin {
+    with RouteAware, SingleTickerProviderStateMixin, WidgetsBindingObserver {
   bool _subscribed = false;
   Map<String, bool>? _iconConfig;
   int _unreadNotificationsCount = 0;
@@ -75,6 +75,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void dispose() {
     _notificationsPollTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _wrRotateController.dispose();
     RouteObserverProvider.routeObserver.unsubscribe(this);
     super.dispose();
@@ -97,6 +98,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // كل فتح للرئيسية يبدأ بوضع المسؤول الأساسي (لا يُحفظ View as بين الجلسات).
     if (widget.currentUser.canUseViewAsRole) {
       ViewAsRoleSession.clear();
@@ -119,6 +121,21 @@ class _HomeScreenState extends State<HomeScreen>
     _loadPendingInvoicesOwnerCount();
     _loadAppReleaseUpdateBadge();
     _startNotificationsPollingIfManager();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startNotificationsPollingIfManager();
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _notificationsPollTimer?.cancel();
+      _notificationsPollTimer = null;
+    }
   }
 
   Future<void> _onViewAsChanged(String value) async {

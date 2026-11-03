@@ -67,11 +67,7 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadProjects();
-    _pollTimer = Timer.periodic(AppPollingIntervals.openHubScreens, (_) {
-      if (_selectedProject != null && mounted) {
-        _refreshWithdrawalRequestsOnly();
-      }
-    });
+    _startPolling();
   }
 
   @override
@@ -81,11 +77,31 @@ class _EngineerWithdrawMaterialsScreenState extends State<EngineerWithdrawMateri
     super.dispose();
   }
 
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(AppPollingIntervals.openHubScreens, (_) {
+      if (_selectedProject != null && mounted) {
+        _refreshWithdrawalRequestsOnly();
+      }
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed || _selectedProject == null) return;
-    if (_warehouseLoading || _loadError == null) return;
-    _loadLocationsAndMaterials();
+    if (state == AppLifecycleState.resumed) {
+      _startPolling();
+      if (_selectedProject == null) return;
+      if (_warehouseLoading || _loadError == null) return;
+      _loadLocationsAndMaterials();
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    }
   }
 
   WithdrawalRequestModel? _requestFor(int locationId, String phase) =>

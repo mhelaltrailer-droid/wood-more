@@ -34,7 +34,7 @@ class InvoicesOwnerHubScreen extends StatefulWidget {
 }
 
 class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   final _storage = getStorage();
   bool _loading = true;
@@ -88,6 +88,7 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final tabs = _tabs;
     var idx = widget.initialTabIndex;
     if (idx >= tabs.length) idx = 0;
@@ -98,15 +99,39 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
       _loadTab(_tabs[_tabController.index].key);
     });
     _loadAll();
-    _pollTimer =
-        Timer.periodic(AppPollingIntervals.openHubScreens, (_) => _refreshSilently());
+    _startPolling();
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(
+      AppPollingIntervals.openHubScreens,
+      (_) => _refreshSilently(),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshSilently();
+      _startPolling();
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    }
   }
 
   Future<void> _loadNotifications() async {

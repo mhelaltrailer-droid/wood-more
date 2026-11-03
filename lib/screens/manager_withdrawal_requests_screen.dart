@@ -25,7 +25,7 @@ class ManagerWithdrawalRequestsScreen extends StatefulWidget {
 }
 
 class _ManagerWithdrawalRequestsScreenState
-    extends State<ManagerWithdrawalRequestsScreen> {
+    extends State<ManagerWithdrawalRequestsScreen> with WidgetsBindingObserver {
   final _db = getStorage();
   List<WithdrawalRequestModel> _items = [];
   List<PendingPostponeFineActionModel> _postponeItems = [];
@@ -47,14 +47,40 @@ class _ManagerWithdrawalRequestsScreenState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
-    _pollTimer = Timer.periodic(AppPollingIntervals.openHubScreens, (_) => _refreshSilently());
+    _startPolling();
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(
+      AppPollingIntervals.openHubScreens,
+      (_) => _refreshSilently(),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshSilently();
+      _startPolling();
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    }
   }
 
   Future<void> _load() async {

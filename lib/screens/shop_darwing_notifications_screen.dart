@@ -21,7 +21,7 @@ class ShopDarwingNotificationsScreen extends StatefulWidget {
 }
 
 class _ShopDarwingNotificationsScreenState
-    extends State<ShopDarwingNotificationsScreen> {
+    extends State<ShopDarwingNotificationsScreen> with WidgetsBindingObserver {
   List<ShopDarwingNotificationModel> _items = const [];
   bool _isLoading = true;
   String? _error;
@@ -30,7 +30,20 @@ class _ShopDarwingNotificationsScreenState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadNotifications();
+    _startPolling();
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
     _pollTimer = Timer.periodic(
       AppPollingIntervals.notificationLists,
       (_) => _refreshSilently(),
@@ -38,9 +51,19 @@ class _ShopDarwingNotificationsScreenState
   }
 
   @override
-  void dispose() {
-    _pollTimer?.cancel();
-    super.dispose();
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshSilently();
+      _startPolling();
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    }
   }
 
   Future<void> _loadNotifications() async {
