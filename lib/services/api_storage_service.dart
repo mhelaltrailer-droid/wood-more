@@ -3865,6 +3865,8 @@ class ApiStorageService {
     required int projectId,
     int? contractorId,
     String? contractorName,
+    bool forImport = false,
+    int? excludeInvoiceId,
   }) async {
     final qp = <String, String>{
       'userId': userId.toString(),
@@ -3873,6 +3875,10 @@ class ApiStorageService {
     if (contractorId != null) qp['contractorId'] = contractorId.toString();
     if (contractorName != null && contractorName.trim().isNotEmpty) {
       qp['contractorName'] = contractorName.trim();
+    }
+    if (forImport) qp['forImport'] = '1';
+    if (excludeInvoiceId != null) {
+      qp['excludeInvoiceId'] = excludeInvoiceId.toString();
     }
     final uri =
         Uri.parse(_path('cont-progress/summary')).replace(queryParameters: qp);

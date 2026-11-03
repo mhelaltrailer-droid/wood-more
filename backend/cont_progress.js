@@ -169,6 +169,19 @@ async function ensureContProgressTables(pool) {
     CREATE INDEX IF NOT EXISTS idx_cont_progress_location
     ON cont_progress_reports (structure_location_id, created_at DESC)
   `);
+  await pool.query(
+    `ALTER TABLE cont_progress_reports
+     ADD COLUMN IF NOT EXISTS used_at TIMESTAMPTZ`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_progress_reports
+     ADD COLUMN IF NOT EXISTS used_invoice_id INTEGER`,
+  );
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_cont_progress_unused
+    ON cont_progress_reports (project_id, structure_location_id)
+    WHERE used_invoice_id IS NULL
+  `);
 }
 
 function cpRowToJson(row) {
@@ -189,6 +202,9 @@ function cpRowToJson(row) {
     progress_value: cpNum(row.progress_value),
     notes: row.notes || '',
     status: row.status || 'submitted',
+    used_at: row.used_at || null,
+    used_invoice_id:
+      row.used_invoice_id != null ? parseInt(row.used_invoice_id, 10) : null,
     created_by_user_id:
       row.created_by_user_id != null
         ? parseInt(row.created_by_user_id, 10)
@@ -249,8 +265,8 @@ function registerContProgressRoutes(app, pool) {
   });
 
   /**
-   * ملخص آخر إنجاز لكل موقع (لنفس المقاول+المشروع)
-   * جاهز لاحقاً لشاشة QS.
+   * ملخص آخر إنجاز لكل موقع (لنفس المقاول+المشروع).
+   * forImport=1 → آخر إنجاز غير مستخدم فقط (أو المستخدم في excludeInvoiceId).
    */
   app.get('/cont-progress/summary', async (req, res) => {
     try {
@@ -269,6 +285,16 @@ function registerContProgressRoutes(app, pool) {
           ? null
           : parseInt(String(contractorIdRaw), 10);
       const contractorName = cpStr(req.query.contractorName);
+      const forImport =
+        String(req.query.forImport || req.query.for_import || '') === '1' ||
+        String(req.query.forImport || req.query.for_import || '')
+          .toLowerCase() === 'true';
+      const excludeInvoiceIdRaw =
+        req.query.excludeInvoiceId ?? req.query.exclude_invoice_id;
+      const excludeInvoiceId =
+        excludeInvoiceIdRaw == null || excludeInvoiceIdRaw === ''
+          ? null
+          : parseInt(String(excludeInvoiceIdRaw), 10);
 
       const params = [projectId];
       let contractorClause = '';
@@ -280,12 +306,23 @@ function registerContProgressRoutes(app, pool) {
         contractorClause = `AND LOWER(TRIM(contractor_name)) = LOWER(TRIM($${params.length}))`;
       }
 
+      let usedClause = '';
+      if (forImport) {
+        if (Number.isFinite(excludeInvoiceId)) {
+          params.push(excludeInvoiceId);
+          usedClause = `AND (used_invoice_id IS NULL OR used_invoice_id = $${params.length})`;
+        } else {
+          usedClause = `AND used_invoice_id IS NULL`;
+        }
+      }
+
       const r = await pool.query(
         `
         SELECT DISTINCT ON (structure_location_id) *
         FROM cont_progress_reports
         WHERE project_id = $1
           ${contractorClause}
+          ${usedClause}
         ORDER BY structure_location_id, created_at DESC, id DESC
         `,
         params,

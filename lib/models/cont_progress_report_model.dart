@@ -23,6 +23,8 @@ class ContProgressReportModel {
   final double progressValue;
   final String notes;
   final String status;
+  final DateTime? usedAt;
+  final int? usedInvoiceId;
   final int? createdByUserId;
   final String createdByUserName;
   final DateTime? createdAt;
@@ -40,6 +42,8 @@ class ContProgressReportModel {
     this.progressValue = 0,
     this.notes = '',
     this.status = 'submitted',
+    this.usedAt,
+    this.usedInvoiceId,
     this.createdByUserId,
     this.createdByUserName = '',
     this.createdAt,
@@ -47,6 +51,7 @@ class ContProgressReportModel {
 
   bool get isPercent => progressKind == 'percent';
   bool get isMeters => progressKind == 'meters';
+  bool get isUsed => usedInvoiceId != null;
 
   String get valueLabel {
     if (isMeters) {
@@ -100,6 +105,8 @@ class ContProgressReportModel {
       progressValue: _cpNum(m['progress_value'] ?? m['progressValue']),
       notes: (m['notes'] ?? '').toString(),
       status: (m['status'] ?? 'submitted').toString(),
+      usedAt: parseDate(m['used_at'] ?? m['usedAt']),
+      usedInvoiceId: _cpInt(m['used_invoice_id'] ?? m['usedInvoiceId']),
       createdByUserId: _cpInt(
         m['created_by_user_id'] ?? m['createdByUserId'],
       ),

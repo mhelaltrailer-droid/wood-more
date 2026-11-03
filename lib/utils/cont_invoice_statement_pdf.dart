@@ -172,18 +172,6 @@ Future<void> printContInvoiceStatementPdf(ContInvoiceModel inv) async {
                   ],
                 ),
                 pw.TableRow(
-                  children: [
-                    cell('السابق صرفه'),
-                    cell(money.format(inv.previouslyPaid)),
-                  ],
-                ),
-                pw.TableRow(
-                  children: [
-                    cell('خصومات أخرى'),
-                    cell(money.format(inv.otherDeductions)),
-                  ],
-                ),
-                pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey200),
                   children: [
                     cell('المستحق', header: true),

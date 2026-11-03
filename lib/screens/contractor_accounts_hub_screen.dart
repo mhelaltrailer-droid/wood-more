@@ -462,7 +462,7 @@ class _ContractorAccountsHubScreenState
                 ),
               ),
             pw.Text(
-              'حسابات المقاولين — ملخص',
+              'ملخص مالية — حسابات المقاولين',
               style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
               textAlign: pw.TextAlign.right,
             ),
@@ -507,7 +507,7 @@ class _ContractorAccountsHubScreenState
       );
       await Printing.layoutPdf(
         onLayout: (_) async => doc.save(),
-        name: 'حسابات_المقاولين_ملخص.pdf',
+        name: 'ملخص_مالية_حسابات_المقاولين.pdf',
       );
     } catch (e) {
       if (!mounted) return;
@@ -544,8 +544,8 @@ class _ContractorAccountsHubScreenState
                 ),
               pw.Text(
                 only == null
-                    ? 'كشف تفصيلي — حسابات المقاولين'
-                    : 'كشف تفصيلي — ${only.contractorName}',
+                    ? 'كشف حساب تفصيلي — حسابات المقاولين'
+                    : 'كشف حساب تفصيلي — ${only.contractorName}',
                 style: pw.TextStyle(
                   fontSize: 16,
                   fontWeight: pw.FontWeight.bold,
@@ -790,11 +790,11 @@ class _ContractorAccountsHubScreenState
               itemBuilder: (_) => const [
                 PopupMenuItem(
                   value: 'summary',
-                  child: Text('ملخص المقاولين'),
+                  child: Text('تقرير: ملخص مالية'),
                 ),
                 PopupMenuItem(
                   value: 'detail',
-                  child: Text('كشف تفصيلي لكل مقاول'),
+                  child: Text('تقرير: كشف حساب تفصيلي'),
                 ),
               ],
             ),
@@ -906,6 +906,50 @@ class _ContractorAccountsHubScreenState
                               icon: const Icon(Icons.clear),
                             ),
                           ],
+                        ),
+                      ),
+                      Card(
+                        margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                        color: const Color(0xFFE3F2FD),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Text(
+                                'تقارير',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'ملخص مالية لكل المقاولين، أو كشف حساب تفصيلي بالمستخلصات والدفعات حسب الفلاتر المختارة.',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  FilledButton.tonalIcon(
+                                    onPressed: _printing || _rows.isEmpty
+                                        ? null
+                                        : _printSummary,
+                                    icon: const Icon(Icons.summarize_outlined),
+                                    label: const Text('ملخص مالية'),
+                                  ),
+                                  FilledButton.tonalIcon(
+                                    onPressed: _printing || _rows.isEmpty
+                                        ? null
+                                        : () => _printDetailed(),
+                                    icon: const Icon(
+                                      Icons.description_outlined,
+                                    ),
+                                    label: const Text('كشف حساب تفصيلي'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       Card(

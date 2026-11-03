@@ -712,6 +712,9 @@ class _ContProgressScreenState extends State<ContProgressScreen> {
                           final when = r.createdAt == null
                               ? '—'
                               : _dateFmt.format(r.createdAt!.toLocal());
+                          final usedLabel = r.isUsed
+                              ? 'مستخدَم في مستخلص #${r.usedInvoiceId}'
+                              : null;
                           return Card(
                             margin: const EdgeInsets.only(bottom: 8),
                             child: ListTile(
@@ -723,7 +726,8 @@ class _ContProgressScreenState extends State<ContProgressScreen> {
                               ),
                               subtitle: Text(
                                 '${r.projectName}\n${r.locationLabel}\n$when'
-                                '${r.createdByUserName.isNotEmpty ? ' · ${r.createdByUserName}' : ''}',
+                                '${r.createdByUserName.isNotEmpty ? ' · ${r.createdByUserName}' : ''}'
+                                '${usedLabel != null ? '\n$usedLabel' : ''}',
                               ),
                               isThreeLine: true,
                               trailing: _canManage && r.id != null

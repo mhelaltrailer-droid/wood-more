@@ -202,6 +202,7 @@ function ciCopyExecutionLine(row, incoming) {
     deduction_kind: row.deduction_kind,
     counterparty_contractor_id: row.counterparty_contractor_id,
     counterparty_contractor_name: row.counterparty_contractor_name,
+    progress_report_id: row.progress_report_id,
   };
 }
 
@@ -361,6 +362,12 @@ function ciNormalizeLine(raw, index) {
     raw.counterparty_contractor_name ?? raw.counterpartyContractorName,
   );
   const deductionKind = ciStr(raw.deduction_kind ?? raw.deductionKind);
+  const progressReportIdRaw =
+    raw.progress_report_id ?? raw.progressReportId;
+  const progressReportId =
+    progressReportIdRaw == null || progressReportIdRaw === ''
+      ? null
+      : parseInt(String(progressReportIdRaw), 10);
 
   let lineTotal;
   if (kind === 'execution') {
@@ -410,6 +417,9 @@ function ciNormalizeLine(raw, index) {
       ? counterpartyContractorId
       : null,
     counterparty_contractor_name: counterpartyContractorName,
+    progress_report_id: Number.isFinite(progressReportId)
+      ? progressReportId
+      : null,
     line_total: lineTotal,
   };
 }
@@ -626,10 +636,9 @@ function ciRowToJson(row, lines = [], actions = null, payments = null) {
   const totalAmount = ciNum(row.total_amount);
   const previouslyPaid = ciNum(row.previously_paid);
   const otherDeductions = ciNum(row.other_deductions);
+  // المستحق = مجموع بنود هذا المستخلص فقط (فروقات + إضافات − خصوم البنود).
   const amountDue =
-    row.amount_due != null
-      ? ciNum(row.amount_due)
-      : ciRound2(totalAmount - previouslyPaid - otherDeductions);
+    row.amount_due != null ? ciNum(row.amount_due) : ciRound2(totalAmount);
   const status = row.status || 'draft';
   const out = {
     id: parseInt(row.id, 10),
@@ -694,6 +703,10 @@ function ciRowToJson(row, lines = [], actions = null, payments = null) {
           ? parseInt(l.counterparty_contractor_id, 10)
           : null,
       counterparty_contractor_name: l.counterparty_contractor_name || '',
+      progress_report_id:
+        l.progress_report_id != null
+          ? parseInt(l.progress_report_id, 10)
+          : null,
       line_total: ciNum(l.line_total),
     })),
   };
@@ -811,8 +824,9 @@ async function ciReplaceLines(client, invoiceId, rawLines) {
         location_label, description, unit,
         prev_qty, current_qty, total_qty, base_qty, unit_price,
         prev_percent, percent, deduction_kind,
-        counterparty_contractor_id, counterparty_contractor_name, line_total
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+        counterparty_contractor_id, counterparty_contractor_name,
+        progress_report_id, line_total
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
       [
         invoiceId,
         line.sort_order,
@@ -832,11 +846,74 @@ async function ciReplaceLines(client, invoiceId, rawLines) {
         line.deduction_kind,
         line.counterparty_contractor_id,
         line.counterparty_contractor_name,
+        line.progress_report_id,
         line.line_total,
       ],
     );
   }
   return Math.round(total * 100) / 100;
+}
+
+/** وسم إنجازات Progress المستخدمة في بنود التنفيذ، وتحرير ما لم يعد مرتبطاً. */
+async function ciSyncProgressUsage(client, invoiceId, rawLines) {
+  const lines = Array.isArray(rawLines) ? rawLines : [];
+  const reportIds = [];
+  const seen = new Set();
+  for (const raw of lines) {
+    if (ciNormalizeKind(raw) !== 'execution') continue;
+    const idRaw = raw.progress_report_id ?? raw.progressReportId;
+    const id =
+      idRaw == null || idRaw === '' ? null : parseInt(String(idRaw), 10);
+    if (!Number.isFinite(id) || seen.has(id)) continue;
+    seen.add(id);
+    reportIds.push(id);
+  }
+
+  await client.query(
+    `UPDATE cont_progress_reports
+     SET used_invoice_id = NULL, used_at = NULL
+     WHERE used_invoice_id = $1
+       AND (
+         cardinality($2::int[]) = 0
+         OR id <> ALL($2::int[])
+       )`,
+    [invoiceId, reportIds],
+  );
+
+  if (!reportIds.length) return;
+
+  const conflict = await client.query(
+    `SELECT id, used_invoice_id
+     FROM cont_progress_reports
+     WHERE id = ANY($1::int[])
+       AND used_invoice_id IS NOT NULL
+       AND used_invoice_id <> $2`,
+    [reportIds, invoiceId],
+  );
+  if (conflict.rows.length) {
+    const ids = conflict.rows.map((r) => r.id).join(', ');
+    const err = new Error(
+      `إنجاز Progress مستخدم في مستخلص آخر (تقرير: ${ids})`,
+    );
+    err.code = 'progress_already_used';
+    throw err;
+  }
+
+  await client.query(
+    `UPDATE cont_progress_reports
+     SET used_invoice_id = $1, used_at = NOW()
+     WHERE id = ANY($2::int[])`,
+    [invoiceId, reportIds],
+  );
+}
+
+async function ciReleaseProgressUsage(client, invoiceId) {
+  await client.query(
+    `UPDATE cont_progress_reports
+     SET used_invoice_id = NULL, used_at = NULL
+     WHERE used_invoice_id = $1`,
+    [invoiceId],
+  );
 }
 
 async function ciSyncStructureFromLines(client, projectId, rawLines) {
@@ -1109,6 +1186,9 @@ async function ensureContInvoicesTables(pool) {
   );
   await pool.query(
     `ALTER TABLE cont_invoice_lines ADD COLUMN IF NOT EXISTS counterparty_contractor_name TEXT NOT NULL DEFAULT ''`,
+  );
+  await pool.query(
+    `ALTER TABLE cont_invoice_lines ADD COLUMN IF NOT EXISTS progress_report_id INTEGER`,
   );
   await pool.query(`
     CREATE TABLE IF NOT EXISTS cont_invoice_pending_cross (
@@ -1679,8 +1759,6 @@ function registerContInvoicesRoutes(app, pool) {
       const statementDate = ciStr(b.statement_date ?? b.statementDate) || null;
       const contractType =
         ciStr(b.contract_type ?? b.contractType) || 'تركيب';
-      const previouslyPaid = ciNum(b.previously_paid ?? b.previouslyPaid);
-      const otherDeductions = ciNum(b.other_deductions ?? b.otherDeductions);
       const notes = ciStr(b.notes);
 
       await client.query('BEGIN');
@@ -1690,7 +1768,7 @@ function registerContInvoicesRoutes(app, pool) {
           statement_date, contract_type, previously_paid, other_deductions,
           notes, status, created_by_user_id, created_by_user_name,
           current_assignee_user_id, current_assignee_user_name
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'draft',$10,$11,NULL,'')
+        ) VALUES ($1,$2,$3,$4,$5,$6,0,0,$7,'draft',$8,$9,NULL,'')
         RETURNING *`,
         [
           Number.isFinite(contractorId) ? contractorId : null,
@@ -1699,8 +1777,6 @@ function registerContInvoicesRoutes(app, pool) {
           projectName,
           statementDate,
           contractType,
-          previouslyPaid,
-          otherDeductions,
           notes,
           userId,
           user.name || '',
@@ -1730,12 +1806,12 @@ function registerContInvoicesRoutes(app, pool) {
         beneficiaryContractorName: contractorName,
         rawLines: linesPayload,
       });
-      const amountDue =
-        Math.round((totalAmount - previouslyPaid - otherDeductions) * 100) /
-        100;
+      await ciSyncProgressUsage(client, invoiceId, linesPayload);
+      const amountDue = ciRound2(totalAmount);
       const upd = await client.query(
         `UPDATE cont_invoices
-         SET total_amount = $1, amount_due = $2, updated_at = NOW()
+         SET total_amount = $1, amount_due = $2,
+             previously_paid = 0, other_deductions = 0, updated_at = NOW()
          WHERE id = $3
          RETURNING *`,
         [totalAmount, amountDue, invoiceId],
@@ -1749,6 +1825,9 @@ function registerContInvoicesRoutes(app, pool) {
       try {
         await client.query('ROLLBACK');
       } catch (_) {}
+      if (e && e.code === 'progress_already_used') {
+        return res.status(400).json({ error: String(e.message) });
+      }
       res.status(500).json({ error: String(e.message) });
     } finally {
       client.release();
@@ -1792,8 +1871,6 @@ function registerContInvoicesRoutes(app, pool) {
         ? String(invRow.statement_date).slice(0, 10)
         : null;
       let contractType = invRow.contract_type || 'تركيب';
-      let previouslyPaid = ciNum(invRow.previously_paid);
-      let otherDeductions = ciNum(invRow.other_deductions);
       let notes = ciStr(invRow.notes);
 
       if (editMode === 'full') {
@@ -1817,8 +1894,6 @@ function registerContInvoicesRoutes(app, pool) {
             : parseInt(String(projectIdRaw), 10);
         statementDate = ciStr(b.statement_date ?? b.statementDate) || null;
         contractType = ciStr(b.contract_type ?? b.contractType) || 'تركيب';
-        previouslyPaid = ciNum(b.previously_paid ?? b.previouslyPaid);
-        otherDeductions = ciNum(b.other_deductions ?? b.otherDeductions);
         notes = ciStr(b.notes);
       }
 
@@ -1838,11 +1913,11 @@ function registerContInvoicesRoutes(app, pool) {
             project_name = $4,
             statement_date = $5,
             contract_type = $6,
-            previously_paid = $7,
-            other_deductions = $8,
-            notes = $9,
+            previously_paid = 0,
+            other_deductions = 0,
+            notes = $7,
             updated_at = NOW()
-           WHERE id = $10`,
+           WHERE id = $8`,
           [
             Number.isFinite(contractorId) ? contractorId : null,
             contractorName,
@@ -1850,15 +1925,17 @@ function registerContInvoicesRoutes(app, pool) {
             projectName,
             statementDate,
             contractType,
-            previouslyPaid,
-            otherDeductions,
             notes,
             id,
           ],
         );
       } else {
         await client.query(
-          `UPDATE cont_invoices SET updated_at = NOW() WHERE id = $1`,
+          `UPDATE cont_invoices SET
+            previously_paid = 0,
+            other_deductions = 0,
+            updated_at = NOW()
+           WHERE id = $1`,
           [id],
         );
       }
@@ -1877,12 +1954,12 @@ function registerContInvoicesRoutes(app, pool) {
         beneficiaryContractorName: contractorName,
         rawLines: linesPayload,
       });
-      const amountDue =
-        Math.round((totalAmount - previouslyPaid - otherDeductions) * 100) /
-        100;
+      await ciSyncProgressUsage(client, id, linesPayload);
+      const amountDue = ciRound2(totalAmount);
       const upd = await client.query(
         `UPDATE cont_invoices
-         SET total_amount = $1, amount_due = $2, updated_at = NOW()
+         SET total_amount = $1, amount_due = $2,
+             previously_paid = 0, other_deductions = 0, updated_at = NOW()
          WHERE id = $3
          RETURNING *`,
         [totalAmount, amountDue, id],
@@ -1902,6 +1979,9 @@ function registerContInvoicesRoutes(app, pool) {
       try {
         await client.query('ROLLBACK');
       } catch (_) {}
+      if (e && e.code === 'progress_already_used') {
+        return res.status(400).json({ error: String(e.message) });
+      }
       res.status(500).json({ error: String(e.message) });
     } finally {
       client.release();
@@ -2618,12 +2698,28 @@ function registerContInvoicesRoutes(app, pool) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
-      const r = await pool.query(
-        'DELETE FROM cont_invoices WHERE id = $1 RETURNING id',
-        [id],
-      );
-      if (!r.rows.length) return res.status(404).json({ error: 'not found' });
-      res.json({ ok: true });
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await ciReleaseProgressUsage(client, id);
+        const r = await client.query(
+          'DELETE FROM cont_invoices WHERE id = $1 RETURNING id',
+          [id],
+        );
+        if (!r.rows.length) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'not found' });
+        }
+        await client.query('COMMIT');
+        res.json({ ok: true });
+      } catch (e) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (_) {}
+        throw e;
+      } finally {
+        client.release();
+      }
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }

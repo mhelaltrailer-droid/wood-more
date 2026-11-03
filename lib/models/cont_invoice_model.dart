@@ -30,6 +30,7 @@ class ContInvoiceLineModel {
   final String deductionKind;
   final int? counterpartyContractorId;
   final String counterpartyContractorName;
+  final int? progressReportId;
 
   const ContInvoiceLineModel({
     this.id,
@@ -49,6 +50,7 @@ class ContInvoiceLineModel {
     this.deductionKind = '',
     this.counterpartyContractorId,
     this.counterpartyContractorName = '',
+    this.progressReportId,
   });
 
   bool get isExecution => lineKind == 'execution';
@@ -94,6 +96,7 @@ class ContInvoiceLineModel {
     String? deductionKind,
     int? counterpartyContractorId,
     String? counterpartyContractorName,
+    int? progressReportId,
   }) {
     return ContInvoiceLineModel(
       id: id ?? this.id,
@@ -115,6 +118,7 @@ class ContInvoiceLineModel {
           counterpartyContractorId ?? this.counterpartyContractorId,
       counterpartyContractorName:
           counterpartyContractorName ?? this.counterpartyContractorName,
+      progressReportId: progressReportId ?? this.progressReportId,
     );
   }
 
@@ -137,6 +141,7 @@ class ContInvoiceLineModel {
         'deduction_kind': deductionKind,
         'counterparty_contractor_id': counterpartyContractorId,
         'counterparty_contractor_name': counterpartyContractorName,
+        if (progressReportId != null) 'progress_report_id': progressReportId,
         'amount': lineTotal.abs(),
         'line_total': lineTotal,
       };
@@ -171,6 +176,9 @@ class ContInvoiceLineModel {
               m['counterpartyContractorName'] ??
               '')
           .toString(),
+      progressReportId: _ciInt(
+        m['progress_report_id'] ?? m['progressReportId'],
+      ),
     );
   }
 }

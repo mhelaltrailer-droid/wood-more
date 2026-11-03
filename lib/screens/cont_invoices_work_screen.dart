@@ -50,6 +50,7 @@ class _SectionState {
   final TextEditingController unitPrice;
   final TextEditingController currentPercent;
   double prevPercent;
+  int? progressReportId;
   final List<_ManualLineState> manuals;
 
   _SectionState({
@@ -59,6 +60,7 @@ class _SectionState {
     required this.unitPrice,
     required this.currentPercent,
     this.prevPercent = 0,
+    this.progressReportId,
     List<_ManualLineState>? manuals,
   }) : manuals = manuals ?? [];
 
@@ -123,8 +125,6 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   DateTime _statementDate = DateTime.now();
   String _contractTypeChoice = contInvoicesDefaultContractType;
   final _contractTypeOtherCtrl = TextEditingController();
-  final _previouslyPaidCtrl = TextEditingController(text: '0');
-  final _otherDeductionsCtrl = TextEditingController(text: '0');
   final _notesCtrl = TextEditingController();
 
   String _status = contStatusDraft;
@@ -245,8 +245,6 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
   @override
   void dispose() {
     _contractTypeOtherCtrl.dispose();
-    _previouslyPaidCtrl.dispose();
-    _otherDeductionsCtrl.dispose();
     _notesCtrl.dispose();
     for (final s in _sections) {
       s.dispose();
@@ -291,7 +289,6 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         );
         _applyExisting(detail);
       } else {
-        await _autofillPreviouslyPaid();
         importedProgress = await _importProgressSections();
       }
       await _loadOpenRemainders();
@@ -320,6 +317,8 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         projectId: widget.project.id,
         contractorId: widget.contractor.id,
         contractorName: widget.contractor.name,
+        forImport: true,
+        excludeInvoiceId: _effectiveInvoiceId,
       );
     } catch (_) {
       return 0;
@@ -397,27 +396,12 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
           ),
           currentPercent: TextEditingController(text: percentText),
           prevPercent: prevPercent.clamp(0, 100).toDouble(),
+          progressReportId: report.id,
         ),
       );
       added++;
     }
     return added;
-  }
-
-  Future<void> _autofillPreviouslyPaid() async {
-    try {
-      final data = await _api.getContInvoicePreviousPaid(
-        userId: widget.currentUser.id,
-        contractorId: widget.contractor.id,
-        contractorName: widget.contractor.name,
-      );
-      final amount = (data['previously_paid'] is num)
-          ? (data['previously_paid'] as num).toDouble()
-          : 0.0;
-      _previouslyPaidCtrl.text = amount == amount.roundToDouble()
-          ? amount.toInt().toString()
-          : amount.toString();
-    } catch (_) {}
   }
 
   bool _sameContractor(ContInvoiceModel inv) {
@@ -474,8 +458,6 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
       _contractTypeChoice = contInvoicesContractTypeOther;
       _contractTypeOtherCtrl.text = ct;
     }
-    _previouslyPaidCtrl.text = inv.previouslyPaid.toString();
-    _otherDeductionsCtrl.text = inv.otherDeductions.toString();
     _notesCtrl.text = inv.notes;
 
     final byLoc = <int, List<ContInvoiceLineModel>>{};
@@ -512,6 +494,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
               : _trim(e0.percent.clamp(0, 100).toDouble()),
         ),
         prevPercent: e0?.prevPercent ?? 0,
+        progressReportId: e0?.progressReportId,
       );
       for (final m in manuals) {
         section.manuals.add(_manualFromLine(m));
@@ -1106,6 +1089,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
           unitPrice: unitPrice,
           prevPercent: s.prevPercent,
           percent: percent,
+          progressReportId: s.progressReportId,
         ),
       );
       for (final m in s.manuals) {
@@ -1136,11 +1120,8 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
 
   double get _grandTotal =>
       _collectLines().fold<double>(0, (s, l) => s + l.lineTotal);
-  double get _previouslyPaid => _parse(_previouslyPaidCtrl.text);
-  double get _otherDeductions => _parse(_otherDeductionsCtrl.text);
-  double get _amountDue =>
-      double.parse((_grandTotal - _previouslyPaid - _otherDeductions)
-          .toStringAsFixed(2));
+  /// المستحق = مجموع بنود هذا المستخلص فقط (فروقات + إضافات − خصوم البنود).
+  double get _amountDue => double.parse(_grandTotal.toStringAsFixed(2));
 
   Future<void> _runWorkflow(
     Future<ContInvoiceModel> Function() call, {
@@ -1430,8 +1411,8 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         projectName: widget.project.name,
         statementDate: _statementDate,
         contractType: _resolvedContractType,
-        previouslyPaid: _previouslyPaid,
-        otherDeductions: _otherDeductions,
+        previouslyPaid: 0,
+        otherDeductions: 0,
         totalAmount: _grandTotal,
         amountDue: _amountDue,
         notes: _notesCtrl.text.trim(),
@@ -1470,8 +1451,8 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
         projectName: widget.project.name,
         statementDate: _statementDate,
         contractType: _resolvedContractType,
-        previouslyPaid: _previouslyPaid,
-        otherDeductions: _otherDeductions,
+        previouslyPaid: 0,
+        otherDeductions: 0,
         notes: _notesCtrl.text.trim(),
         status: _status,
         lines: _collectLines(),
@@ -2038,49 +2019,7 @@ class _ContInvoicesWorkScreenState extends State<ContInvoicesWorkScreen> {
                           padding: const EdgeInsets.all(14),
                           child: Column(
                             children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _previouslyPaidCtrl,
-                                      readOnly: headerReadOnly,
-                                      decoration: const InputDecoration(
-                                        labelText: 'السابق صرفه',
-                                        border: OutlineInputBorder(),
-                                      ),
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                        decimal: true,
-                                      ),
-                                      onChanged: headerReadOnly
-                                          ? null
-                                          : (_) => setState(() {}),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _otherDeductionsCtrl,
-                                      readOnly: headerReadOnly,
-                                      decoration: const InputDecoration(
-                                        labelText: 'خصومات أخرى',
-                                        border: OutlineInputBorder(),
-                                      ),
-                                      keyboardType:
-                                          const TextInputType.numberWithOptions(
-                                        decimal: true,
-                                      ),
-                                      onChanged: headerReadOnly
-                                          ? null
-                                          : (_) => setState(() {}),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
                               _sumRow('الإجمالي', _grandTotal, bold: true),
-                              _sumRow('السابق صرفه', _previouslyPaid),
-                              _sumRow('خصومات أخرى', _otherDeductions),
                               const Divider(),
                               _sumRow('المستحق', _amountDue, bold: true, due: true),
                               if (_showCashLedger) ...[
