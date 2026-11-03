@@ -16,7 +16,7 @@ class AppPollingIntervals {
   static const Duration openHubScreens = Duration(minutes: 2);
 
   /// فحص System Lock أثناء الجلسة (مع فحص إضافي عند Resume).
-  /// أقصر من باقي الـ polls لأن القفل يجب أن يُطرد الجلسة بسرعة؛
-  /// منع الكتابة الفعلي يتم أيضاً من السيرفر (423) حتى قبل الطرد.
-  static const Duration systemLock = Duration(seconds: 45);
+  /// أطول من نافذة نوم Neon (~5 دقائق) حتى لا تبقى الجلسة موقظة للـ compute.
+  /// منع الكتابة الفعلي يتم من السيرفر (423)؛ الطرد السريع عند Resume.
+  static const Duration systemLock = Duration(minutes: 6);
 }

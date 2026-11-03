@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/polling_intervals.dart';
 import '../models/user_model.dart';
 import '../screens/login_screen.dart';
 import '../services/auth_persistence.dart';
 import '../services/storage_service.dart';
 import '../services/system_lock_service.dart';
-import '../core/polling_intervals.dart';
 
 /// Polls maintenance lock while a user session is active and signs out non-admin users.
 class SystemLockWatch extends StatefulWidget {
@@ -33,10 +33,7 @@ class _SystemLockWatchState extends State<SystemLockWatch>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _timer = Timer.periodic(
-      AppPollingIntervals.systemLock,
-      (_) => _checkMaintenanceLock(),
-    );
+    _startPolling();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkMaintenanceLock());
   }
 
@@ -47,10 +44,34 @@ class _SystemLockWatchState extends State<SystemLockWatch>
     super.dispose();
   }
 
+  void _startPolling() {
+    _timer?.cancel();
+    _timer = Timer.periodic(
+      AppPollingIntervals.systemLock,
+      (_) => _checkMaintenanceLock(),
+    );
+  }
+
+  void _stopPolling() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  bool _isBackground(AppLifecycleState state) =>
+      state == AppLifecycleState.paused ||
+      state == AppLifecycleState.inactive ||
+      state == AppLifecycleState.hidden ||
+      state == AppLifecycleState.detached;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _checkMaintenanceLock();
+      _startPolling();
+      return;
+    }
+    if (_isBackground(state)) {
+      _stopPolling();
     }
   }
 

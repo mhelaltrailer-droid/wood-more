@@ -23,7 +23,8 @@ class NotificationsScreen extends StatefulWidget {
   State<NotificationsScreen> createState() => _NotificationsScreenState();
 }
 
-class _NotificationsScreenState extends State<NotificationsScreen> {
+class _NotificationsScreenState extends State<NotificationsScreen>
+    with WidgetsBindingObserver {
   /// حجم الصفحة الواحدة — القائمة تنمو بالتمرير بدل تحميل كل الإشعارات دفعة واحدة.
   static const int _pageSize = 30;
 
@@ -54,8 +55,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onScroll);
     _loadNotifications();
+    _startPolling();
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
     _pollTimer = Timer.periodic(
       AppPollingIntervals.notificationLists,
       (_) => _refreshSilently(),
@@ -63,11 +79,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   }
 
   @override
-  void dispose() {
-    _pollTimer?.cancel();
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
-    super.dispose();
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshSilently();
+      _startPolling();
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    }
   }
 
   void _onScroll() {
