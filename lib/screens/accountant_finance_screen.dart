@@ -761,8 +761,8 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
 
   static const _approvedExpensesTotalLabel = 'اجمالي بيانات الصرف المعتمدة';
 
-  /// تمييز صفوف إضافة/سحب الرصيد — PDF بلون #939393 أوضح للتقارير.
-  static const _balanceMovementPdfColor = pdf.PdfColor(0.576, 0.576, 0.576); // #939393
+  /// تمييز صفوف إضافة/سحب الرصيد — PDF بلون #545151 أوضح للتقارير.
+  static const _balanceMovementPdfColor = pdf.PdfColor(0.329, 0.318, 0.318); // #545151
   static final _balanceMovementScreenColor = Colors.grey.shade100;
 
   bool _isBalanceMovement(Map<String, dynamic> e) {
