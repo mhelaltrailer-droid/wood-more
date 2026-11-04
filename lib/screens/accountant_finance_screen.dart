@@ -761,8 +761,8 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
 
   static const _approvedExpensesTotalLabel = 'اجمالي بيانات الصرف المعتمدة';
 
-  /// تمييز صفوف إضافة/سحب الرصيد بلون رصاصي فاتح في الشاشة والـ PDF.
-  static const _balanceMovementPdfColor = pdf.PdfColors.grey100;
+  /// تمييز صفوف إضافة/سحب الرصيد — PDF بلون #939393 أوضح للتقارير.
+  static const _balanceMovementPdfColor = pdf.PdfColor(0.576, 0.576, 0.576); // #939393
   static final _balanceMovementScreenColor = Colors.grey.shade100;
 
   bool _isBalanceMovement(Map<String, dynamic> e) {
@@ -873,16 +873,23 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
               ),
               ...movements.map((e) {
                 final dt = DateTime.parse(e['created_at'] as String);
+                final isBalance = _isBalanceMovement(e);
+                final textColor =
+                    isBalance ? pdf.PdfColors.white : pdf.PdfColors.black;
                 return pw.TableRow(
-                  decoration: _isBalanceMovement(e)
+                  decoration: isBalance
                       ? const pw.BoxDecoration(color: _balanceMovementPdfColor)
                       : null,
                   children: [
-                    _cell(_typeLabel(e), false),
-                    _cell((e['amount'] as num).toStringAsFixed(2), false),
-                    _cell(e['note'] as String? ?? '—', false),
-                    _cell(_userName(e), false),
-                    _cell(dateFormat.format(dt), false),
+                    _cell(_typeLabel(e), false, color: textColor),
+                    _cell(
+                      (e['amount'] as num).toStringAsFixed(2),
+                      false,
+                      color: textColor,
+                    ),
+                    _cell(e['note'] as String? ?? '—', false, color: textColor),
+                    _cell(_userName(e), false, color: textColor),
+                    _cell(dateFormat.format(dt), false, color: textColor),
                   ],
                 );
               }),
@@ -909,7 +916,11 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
     );
   }
 
-  static pw.Widget _cell(String text, bool isHeader) {
+  static pw.Widget _cell(
+    String text,
+    bool isHeader, {
+    pdf.PdfColor? color,
+  }) {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 5),
       child: pw.Text(
@@ -918,7 +929,8 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
         style: pw.TextStyle(
           fontSize: 8,
           fontWeight: isHeader ? pw.FontWeight.bold : pw.FontWeight.normal,
-          color: isHeader ? pdf.PdfColors.green900 : pdf.PdfColors.black,
+          color: color ??
+              (isHeader ? pdf.PdfColors.green900 : pdf.PdfColors.black),
         ),
       ),
     );
