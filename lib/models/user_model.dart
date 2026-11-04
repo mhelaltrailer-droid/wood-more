@@ -265,7 +265,7 @@ class UserModel {
 
   /// سجل تداول Invoices (Owner) — المسؤول الأساسي + مدير العمليات.
   bool get canViewInvoicesOwnerActivityLog =>
-      isPrimaryAppAdmin || isOperationManager;
+      isPrimaryAppAdmin || isOperationManager || isTechnicalOffice;
 
   /// التصرف في خطوة الحالة الحالية (اعتماد أو إعادة).
   bool canActOnInvoicesOwnerStatus(String status) {
