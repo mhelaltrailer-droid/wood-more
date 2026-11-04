@@ -462,27 +462,27 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       });
     }
 
-    // بيانات الصرف المعتمدة — لا تُدرج عند اختيار ah-amin (لا يدخل بيانات صرف)
+    // بيانات الصرف المعتمدة — فلترة حسب تاريخ الاعتماد؛ لا تُدرج عند اختيار ah-amin
     if (!filterAmin) {
       final statements = await _db.getExpenseStatements(
         statuses: [ExpenseStatementModel.statusApproved],
       );
       for (final s in statements) {
         if (!s.isApproved) continue;
-        final created = s.createdAt;
-        if (created.isBefore(from) || created.isAfter(toEnd)) continue;
+        final approvalAt = s.respondedAt;
+        if (approvalAt == null) continue;
+        if (approvalAt.isBefore(from) || approvalAt.isAfter(toEnd)) continue;
         if (!filterAll && s.balanceUserId != selectedEngineer!.id) continue;
 
-        // ترتيب زمني حسب لحظة الاعتماد (وقت الخصم)، مع الإبقاء على فلترة created_at
-        final sortAt = s.respondedAt ?? s.createdAt;
         combined.add({
           'type': 'expense',
-          'created_at': sortAt.toIso8601String(),
+          'created_at': approvalAt.toIso8601String(),
           'user_id': s.balanceUserId,
           'user_name': nameById[s.balanceUserId] ?? s.submitterUserName,
           'note': s.description.trim().isEmpty ? '—' : s.description,
           'amount': s.amount,
           'balance_after': s.balanceAfter,
+          'counts_in_total': true,
         });
       }
     }
@@ -759,20 +759,20 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
     return '—';
   }
 
+  static const _approvedExpensesTotalLabel = 'اجمالي بيانات الصرف المعتمدة';
+
   String _typeLabel(Map<String, dynamic> e) {
     final t = e['type'] as String?;
-    if (t == 'expense') return 'بيان صرف';
+    if (t == 'expense') return 'بيان صرف معتمد';
     if (t == 'add_balance') return 'إضافة رصيد';
     if (t == 'withdraw_balance') return 'سحب رصيد';
     return '—';
   }
 
-  /// الاجمالي يستثني الإضافة الذاتية (تظهر في الجدول فقط لتجنّب العدّ المزدوج).
+  /// الإجمالي يحسب بيانات الصرف المعتمدة فقط (إضافة/سحب تظهر ولا تدخل في الجمع).
   bool _countsTowardTotal(Map<String, dynamic> e) {
-    if (e['is_self_add'] == true) return false;
-    final note = (e['note'] as String?)?.trim() ?? '';
-    if (note == 'إضافة رصيد ذاتي') return false;
-    return true;
+    if (e['counts_in_total'] == true) return true;
+    return e['type'] == 'expense';
   }
 
   double get _totalAmount => movements.fold<double>(
@@ -879,7 +879,7 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
                 children: [
                   _cell('', true),
                   _cell(totalLabel, true),
-                  _cell('الاجمالي', true),
+                  _cell(_approvedExpensesTotalLabel, true),
                   _cell('', true),
                   _cell('', true),
                 ],
@@ -1017,7 +1017,7 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
                       children: [
                         _screenCell(''),
                         _screenCell(''),
-                        _screenCell('الاجمالي', bold: true),
+                        _screenCell(_approvedExpensesTotalLabel, bold: true),
                         _screenCell(totalLabel, bold: true),
                         _screenCell(''),
                       ],
