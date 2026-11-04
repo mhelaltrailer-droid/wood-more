@@ -761,6 +761,15 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
 
   static const _approvedExpensesTotalLabel = 'اجمالي بيانات الصرف المعتمدة';
 
+  /// تمييز صفوف إضافة/سحب الرصيد بلون رصاصي فاتح في الشاشة والـ PDF.
+  static const _balanceMovementPdfColor = pdf.PdfColors.grey100;
+  static final _balanceMovementScreenColor = Colors.grey.shade100;
+
+  bool _isBalanceMovement(Map<String, dynamic> e) {
+    final t = e['type'] as String?;
+    return t == 'add_balance' || t == 'withdraw_balance';
+  }
+
   String _typeLabel(Map<String, dynamic> e) {
     final t = e['type'] as String?;
     if (t == 'expense') return 'بيان صرف معتمد';
@@ -865,6 +874,9 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
               ...movements.map((e) {
                 final dt = DateTime.parse(e['created_at'] as String);
                 return pw.TableRow(
+                  decoration: _isBalanceMovement(e)
+                      ? const pw.BoxDecoration(color: _balanceMovementPdfColor)
+                      : null,
                   children: [
                     _cell(_typeLabel(e), false),
                     _cell((e['amount'] as num).toStringAsFixed(2), false),
@@ -1000,6 +1012,9 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
                     ...movements.map((e) {
                       final dt = DateTime.parse(e['created_at'] as String);
                       return TableRow(
+                        decoration: _isBalanceMovement(e)
+                            ? BoxDecoration(color: _balanceMovementScreenColor)
+                            : null,
                         children: [
                           _screenCell(dateFormat.format(dt)),
                           _screenCell(_userName(e)),
