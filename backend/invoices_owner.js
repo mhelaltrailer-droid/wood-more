@@ -300,9 +300,11 @@ function ioIsOperationManager(user) {
   return String(user.role || '').trim() === 'operation_manager';
 }
 
-/** سجل التداول: المسؤول الأساسي + مدير العمليات فقط. */
+/** سجل التداول: المسؤول الأساسي + مدير العمليات + المكتب الفني. */
 function ioCanViewActivityLog(user) {
-  return ioIsPrimaryAdmin(user) || ioIsOperationManager(user);
+  if (!user) return false;
+  if (ioIsPrimaryAdmin(user) || ioIsOperationManager(user)) return true;
+  return String(user.role || '').trim() === 'technical_office';
 }
 
 function ioCanAccessModule(user) {
