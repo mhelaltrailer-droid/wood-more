@@ -18,6 +18,26 @@ String invoicesOwnerFormatAttachmentSize(int bytes) {
 
 const String invoicesOwnerHomeIconLabel = 'Invoices (Owner)';
 const String invoicesOwnerMonthlyChecklistTabLabel = 'Monthly Checklist';
+
+const List<String> invoicesOwnerArabicMonthNames = [
+  'يناير',
+  'فبراير',
+  'مارس',
+  'أبريل',
+  'مايو',
+  'يونيو',
+  'يوليو',
+  'أغسطس',
+  'سبتمبر',
+  'أكتوبر',
+  'نوفمبر',
+  'ديسمبر',
+];
+
+String invoicesOwnerArabicMonthLabel(int monthNumber) {
+  if (monthNumber < 1 || monthNumber > 12) return '$monthNumber';
+  return invoicesOwnerArabicMonthNames[monthNumber - 1];
+}
 const String invoicesOwnerOtherProjectDropdownValueKey = 'other';
 const int invoicesOwnerOtherProjectDropdownValue = -1;
 const String invoicesOwnerOtherProjectDropdownLabel = 'مشروع آخر';

@@ -3542,10 +3542,16 @@ class ApiStorageService {
 
   Future<InvoicesOwnerMonthlyChecklistResult> getInvoicesOwnerMonthlyChecklist({
     required int userId,
+    int? year,
+    int? month,
   }) async {
-    final data = await _get(
-      'invoices-owner/monthly-checklist?userId=$userId',
-    );
+    final qp = <String, String>{'userId': userId.toString()};
+    if (year != null) qp['year'] = year.toString();
+    if (month != null) qp['month'] = month.toString();
+    final query = qp.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    final data = await _get('invoices-owner/monthly-checklist?$query');
     return InvoicesOwnerMonthlyChecklistResult.fromMap(data);
   }
 
@@ -3586,11 +3592,13 @@ class ApiStorageService {
     required int userId,
     bool? sentToClient,
     bool? clientReplied,
+    bool? collected,
   }) async {
     final uri = Uri.parse(_path('invoices-owner/$invoiceId/client-flags'));
     final body = <String, dynamic>{'userId': userId};
     if (sentToClient != null) body['sentToClient'] = sentToClient;
     if (clientReplied != null) body['clientReplied'] = clientReplied;
+    if (collected != null) body['collected'] = collected;
     final r = await http.put(
       uri,
       headers: _reqHeaders({'Content-Type': 'application/json'}),

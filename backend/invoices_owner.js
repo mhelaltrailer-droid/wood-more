@@ -125,6 +125,10 @@ async function ensureInvoicesOwnerTables(pool) {
          ADD COLUMN IF NOT EXISTS client_replied BOOLEAN NOT NULL DEFAULT FALSE`,
       );
       await pool.query(
+        `ALTER TABLE invoices_owner
+         ADD COLUMN IF NOT EXISTS collected BOOLEAN NOT NULL DEFAULT FALSE`,
+      );
+      await pool.query(
         `CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_owner_extract_number
          ON invoices_owner (extract_number)
          WHERE extract_number IS NOT NULL AND extract_number <> ''`,
@@ -315,9 +319,8 @@ async function ioUpsertMonthlyChecklistEntry(
   return parseInt(insOther.rows[0].id, 10);
 }
 
-async function ioSyncMonthlyChecklistFromCurrentMonth(pool) {
+async function ioSyncMonthlyChecklistForMonth(pool, bounds) {
   try {
-    const bounds = ioCurrentCalendarMonthBoundsEgypt();
     const inv = await pool.query(
       `SELECT DISTINCT ON (
           CASE
@@ -352,8 +355,15 @@ async function ioSyncMonthlyChecklistFromCurrentMonth(pool) {
       });
     }
   } catch (e) {
-    console.warn('ioSyncMonthlyChecklistFromCurrentMonth:', e.message);
+    console.warn('ioSyncMonthlyChecklistForMonth:', e.message);
   }
+}
+
+async function ioSyncMonthlyChecklistFromCurrentMonth(pool) {
+  await ioSyncMonthlyChecklistForMonth(
+    pool,
+    ioCurrentCalendarMonthBoundsEgypt(),
+  );
 }
 
 async function ioRemoveChecklistIfNoCurrentMonthInvoice(pool, invoiceRow) {
@@ -570,30 +580,61 @@ function ioCanManageMonthlyChecklist(user) {
   return ioIsPrimaryAdmin(user) || ioIsOperationManager(user);
 }
 
+/** حدود شهر ميلادي بتوقيت مصر (ISO UTC). */
+function ioCalendarMonthBoundsEgypt(year, month) {
+  const { EGYPT_UTC_OFFSET_MS } = require('./egypt_local_time');
+  const y = parseInt(String(year), 10);
+  const m = parseInt(String(month), 10);
+  if (Number.isNaN(y) || Number.isNaN(m) || m < 1 || m > 12) {
+    return null;
+  }
+  const startUtcMs = Date.UTC(y, m - 1, 1, 0, 0, 0, 0) - EGYPT_UTC_OFFSET_MS;
+  const endUtcMs = Date.UTC(y, m, 1, 0, 0, 0, 0) - EGYPT_UTC_OFFSET_MS;
+  return {
+    year: y,
+    month: m,
+    startIso: new Date(startUtcMs).toISOString(),
+    endIso: new Date(endUtcMs).toISOString(),
+  };
+}
+
 /** حدود الشهر الميلادي الحالي بتوقيت مصر (ISO UTC). */
 function ioCurrentCalendarMonthBoundsEgypt() {
-  const { EGYPT_UTC_OFFSET_MS, toEgyptWallClock } = require('./egypt_local_time');
+  const { toEgyptWallClock } = require('./egypt_local_time');
   const wall = toEgyptWallClock(new Date().toISOString());
   if (!wall) {
     const now = new Date();
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-    return {
-      year: now.getUTCFullYear(),
-      month: now.getUTCMonth() + 1,
-      startIso: start.toISOString(),
-      endIso: end.toISOString(),
-    };
+    return ioCalendarMonthBoundsEgypt(
+      now.getUTCFullYear(),
+      now.getUTCMonth() + 1,
+    );
   }
-  const startUtcMs =
-    Date.UTC(wall.year, wall.month - 1, 1, 0, 0, 0, 0) - EGYPT_UTC_OFFSET_MS;
-  const endUtcMs =
-    Date.UTC(wall.year, wall.month, 1, 0, 0, 0, 0) - EGYPT_UTC_OFFSET_MS;
+  return ioCalendarMonthBoundsEgypt(wall.year, wall.month);
+}
+
+function ioParseMonthQuery(query) {
+  const current = ioCurrentCalendarMonthBoundsEgypt();
+  const yearRaw = query.year != null ? parseInt(String(query.year), 10) : NaN;
+  const monthRaw =
+    query.month != null ? parseInt(String(query.month), 10) : NaN;
+  if (!Number.isNaN(yearRaw) && !Number.isNaN(monthRaw)) {
+    const bounds = ioCalendarMonthBoundsEgypt(yearRaw, monthRaw);
+    if (bounds) return bounds;
+  }
+  return current;
+}
+
+/** تلوين اكتمال المراحل يبدأ من نوفمبر 2026 فقط وللأشهر المنتهية. */
+function ioMonthCompletionColoring(bounds) {
+  const current = ioCurrentCalendarMonthBoundsEgypt();
+  const selectedKey = bounds.year * 100 + bounds.month;
+  const currentKey = current.year * 100 + current.month;
+  const featureStartKey = 2026 * 100 + 11;
+  const monthEnded = selectedKey < currentKey;
+  const applies = monthEnded && selectedKey >= featureStartKey;
   return {
-    year: wall.year,
-    month: wall.month,
-    startIso: new Date(startUtcMs).toISOString(),
-    endIso: new Date(endUtcMs).toISOString(),
+    month_ended: monthEnded,
+    completion_coloring_applies: applies,
   };
 }
 
@@ -923,6 +964,7 @@ function ioMapRow(row, attachments = [], actions = []) {
     extract_number_locked: ioIsExtractLocked(row),
     sent_to_client: ioAsBool(row.sent_to_client),
     client_replied: ioAsBool(row.client_replied),
+    collected: ioAsBool(row.collected),
     created_at: row.created_at,
     updated_at: row.updated_at,
     approved_at: row.approved_at || null,
@@ -1397,10 +1439,11 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
-      await ioSyncMonthlyChecklistFromCurrentMonth(pool);
+      const bounds = ioParseMonthQuery(req.query || {});
+      await ioSyncMonthlyChecklistForMonth(pool, bounds);
 
-      const bounds = ioCurrentCalendarMonthBoundsEgypt();
       const monthKey = `${bounds.year}-${String(bounds.month).padStart(2, '0')}`;
+      const coloring = ioMonthCompletionColoring(bounds);
       const projects = await pool.query(
         `SELECT c.id AS checklist_id, c.project_id, c.is_other_project,
                 CASE
@@ -1422,7 +1465,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         const inv = await pool.query(
           `SELECT DISTINCT ON (project_id)
               id, project_id, project_name, status, extract_number,
-              sent_to_client, client_replied, created_at
+              sent_to_client, client_replied, collected, created_at
            FROM invoices_owner
            WHERE project_id = ANY($1::int[])
              AND created_at >= $2
@@ -1444,7 +1487,7 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         const invOther = await pool.query(
           `SELECT DISTINCT ON (lower(trim(project_name)))
               id, project_id, project_name, status, extract_number,
-              sent_to_client, client_replied, created_at
+              sent_to_client, client_replied, collected, created_at
            FROM invoices_owner
            WHERE project_id IS NULL
              AND lower(trim(project_name)) = ANY($1::text[])
@@ -1463,6 +1506,10 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
 
       res.json({
         month: monthKey,
+        year: bounds.year,
+        month_number: bounds.month,
+        month_ended: coloring.month_ended,
+        completion_coloring_applies: coloring.completion_coloring_applies,
         items: projects.rows.map((p) => {
           const checklistId = parseInt(p.checklist_id, 10);
           const projectId =
@@ -1478,6 +1525,19 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
               ) || null;
           const hasExtract = !!inv;
           const status = inv ? String(inv.status || '') : '';
+          const started = hasExtract;
+          const omApproved = hasExtract && status === IO_STATUS.APPROVED;
+          const sentToClient = hasExtract ? ioAsBool(inv.sent_to_client) : false;
+          const clientReplied = hasExtract
+            ? ioAsBool(inv.client_replied)
+            : false;
+          const collected = hasExtract ? ioAsBool(inv.collected) : false;
+          const allStagesComplete =
+            started &&
+            omApproved &&
+            sentToClient &&
+            clientReplied &&
+            collected;
           return {
             checklist_id: checklistId,
             project_id:
@@ -1490,10 +1550,12 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
               ? String(inv.extract_number)
               : null,
             invoice_status: status || null,
-            started: hasExtract,
-            om_approved: hasExtract && status === IO_STATUS.APPROVED,
-            sent_to_client: hasExtract ? ioAsBool(inv.sent_to_client) : false,
-            client_replied: hasExtract ? ioAsBool(inv.client_replied) : false,
+            started,
+            om_approved: omApproved,
+            sent_to_client: sentToClient,
+            client_replied: clientReplied,
+            collected,
+            all_stages_complete: allStagesComplete,
           };
         }),
       });
@@ -2329,29 +2391,42 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const hasRepliedKey =
         Object.prototype.hasOwnProperty.call(b, 'clientReplied') ||
         Object.prototype.hasOwnProperty.call(b, 'client_replied');
-      if (!hasSentKey && !hasRepliedKey) {
+      const hasCollectedKey =
+        Object.prototype.hasOwnProperty.call(b, 'collected');
+      if (!hasSentKey && !hasRepliedKey && !hasCollectedKey) {
         return res.status(400).json({ error: 'no_flags' });
       }
 
       let nextSent = ioAsBool(row.sent_to_client);
       let nextReplied = ioAsBool(row.client_replied);
+      let nextCollected = ioAsBool(row.collected);
       if (hasSentKey) {
         nextSent = ioAsBool(b.sentToClient ?? b.sent_to_client);
       }
       if (hasRepliedKey) {
         nextReplied = ioAsBool(b.clientReplied ?? b.client_replied);
       }
-      if (!nextSent) nextReplied = false;
+      if (hasCollectedKey) {
+        nextCollected = ioAsBool(b.collected);
+      }
+      if (!nextSent) {
+        nextReplied = false;
+        nextCollected = false;
+      }
+      if (!nextReplied) nextCollected = false;
       if (nextReplied && !nextSent) {
         return res.status(400).json({ error: 'sent_required' });
+      }
+      if (nextCollected && !nextReplied) {
+        return res.status(400).json({ error: 'client_replied_required' });
       }
 
       const now = new Date().toISOString();
       await pool.query(
         `UPDATE invoices_owner
-         SET sent_to_client=$1, client_replied=$2, updated_at=$3
-         WHERE id=$4`,
-        [nextSent, nextReplied, now, id],
+         SET sent_to_client=$1, client_replied=$2, collected=$3, updated_at=$4
+         WHERE id=$5`,
+        [nextSent, nextReplied, nextCollected, now, id],
       );
 
       res.json(await ioLoadDetail(pool, id));
