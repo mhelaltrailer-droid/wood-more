@@ -47,11 +47,11 @@ class _InvoicesOwnerMonthlyChecklistTabState
   void didUpdateWidget(covariant InvoicesOwnerMonthlyChecklistTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.refreshToken != widget.refreshToken) {
-      _load();
+      _load(silent: true);
     }
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool silent = false}) async {
     if (_storage is! ApiStorageService) {
       setState(() {
         _loading = false;
@@ -59,10 +59,13 @@ class _InvoicesOwnerMonthlyChecklistTabState
       });
       return;
     }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    final showFullLoader = !silent || _items.isEmpty;
+    if (showFullLoader) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final result = await _storage.getInvoicesOwnerMonthlyChecklist(
         userId: widget.currentUser.id,
@@ -81,6 +84,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
           _selectedProjectId = null;
         }
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -89,6 +93,25 @@ class _InvoicesOwnerMonthlyChecklistTabState
         _loading = false;
       });
     }
+  }
+
+  void _patchItemFlags({
+    required int projectId,
+    required bool sentToClient,
+    required bool clientReplied,
+  }) {
+    setState(() {
+      _items = [
+        for (final item in _items)
+          if (item.projectId == projectId)
+            item.copyWith(
+              sentToClient: sentToClient,
+              clientReplied: clientReplied,
+            )
+          else
+            item,
+      ];
+    });
   }
 
   Future<void> _addProject() async {
@@ -169,7 +192,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
         ),
       ),
     );
-    if (changed == true || mounted) await _load();
+    if (changed == true || mounted) await _load(silent: true);
     await widget.onRefreshParent();
   }
 
@@ -179,16 +202,34 @@ class _InvoicesOwnerMonthlyChecklistTabState
   ) async {
     final invoiceId = item.invoiceId;
     if (invoiceId == null || _storage is! ApiStorageService) return;
+    final previousSent = item.sentToClient;
+    final previousReplied = item.clientReplied;
+    final nextReplied = value ? item.clientReplied : false;
+    _patchItemFlags(
+      projectId: item.projectId,
+      sentToClient: value,
+      clientReplied: nextReplied,
+    );
     setState(() => _busyInvoiceIds.add(invoiceId));
     try {
-      await _storage.updateInvoicesOwnerClientFlags(
+      final updated = await _storage.updateInvoicesOwnerClientFlags(
         invoiceId: invoiceId,
         userId: widget.currentUser.id,
         sentToClient: value,
       );
-      await _load();
+      if (!mounted) return;
+      _patchItemFlags(
+        projectId: item.projectId,
+        sentToClient: updated.sentToClient,
+        clientReplied: updated.clientReplied,
+      );
     } catch (e) {
       if (!mounted) return;
+      _patchItemFlags(
+        projectId: item.projectId,
+        sentToClient: previousSent,
+        clientReplied: previousReplied,
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('تعذر التحديث: $e')),
       );
@@ -211,16 +252,32 @@ class _InvoicesOwnerMonthlyChecklistTabState
       );
       return;
     }
+    final previousReplied = item.clientReplied;
+    _patchItemFlags(
+      projectId: item.projectId,
+      sentToClient: item.sentToClient,
+      clientReplied: value,
+    );
     setState(() => _busyInvoiceIds.add(invoiceId));
     try {
-      await _storage.updateInvoicesOwnerClientFlags(
+      final updated = await _storage.updateInvoicesOwnerClientFlags(
         invoiceId: invoiceId,
         userId: widget.currentUser.id,
         clientReplied: value,
       );
-      await _load();
+      if (!mounted) return;
+      _patchItemFlags(
+        projectId: item.projectId,
+        sentToClient: updated.sentToClient,
+        clientReplied: updated.clientReplied,
+      );
     } catch (e) {
       if (!mounted) return;
+      _patchItemFlags(
+        projectId: item.projectId,
+        sentToClient: item.sentToClient,
+        clientReplied: previousReplied,
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('تعذر التحديث: $e')),
       );
