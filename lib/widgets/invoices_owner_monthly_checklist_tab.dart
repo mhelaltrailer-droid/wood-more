@@ -72,7 +72,10 @@ class _InvoicesOwnerMonthlyChecklistTabState
       );
       final projects = await _storage.getProjects();
       if (!mounted) return;
-      final listedIds = result.items.map((e) => e.projectId).toSet();
+      final listedIds = result.items
+          .map((e) => e.projectId)
+          .whereType<int>()
+          .toSet();
       final available = projects.where((p) => !listedIds.contains(p.id)).toList()
         ..sort((a, b) => a.name.compareTo(b.name));
       setState(() {
@@ -96,14 +99,14 @@ class _InvoicesOwnerMonthlyChecklistTabState
   }
 
   void _patchItemFlags({
-    required int projectId,
+    required int checklistId,
     required bool sentToClient,
     required bool clientReplied,
   }) {
     setState(() {
       _items = [
         for (final item in _items)
-          if (item.projectId == projectId)
+          if (item.checklistId == checklistId)
             item.copyWith(
               sentToClient: sentToClient,
               clientReplied: clientReplied,
@@ -148,7 +151,9 @@ class _InvoicesOwnerMonthlyChecklistTabState
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('إزالة المشروع'),
-        content: Text('إزالة «${item.projectName}» من قائمة Monthly Checklist؟'),
+        content: Text(
+          'إزالة «${item.displayProjectName}» من قائمة Monthly Checklist؟',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -163,11 +168,18 @@ class _InvoicesOwnerMonthlyChecklistTabState
     );
     if (ok != true) return;
     try {
-      await _storage.removeInvoicesOwnerMonthlyChecklistProject(
-        userId: widget.currentUser.id,
-        projectId: item.projectId,
-      );
-      await _load();
+      if (item.checklistId > 0) {
+        await _storage.removeInvoicesOwnerMonthlyChecklistEntry(
+          userId: widget.currentUser.id,
+          checklistId: item.checklistId,
+        );
+      } else if (item.projectId != null) {
+        await _storage.removeInvoicesOwnerMonthlyChecklistProject(
+          userId: widget.currentUser.id,
+          projectId: item.projectId!,
+        );
+      }
+      await _load(silent: true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -206,7 +218,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
     final previousReplied = item.clientReplied;
     final nextReplied = value ? item.clientReplied : false;
     _patchItemFlags(
-      projectId: item.projectId,
+      checklistId: item.checklistId,
       sentToClient: value,
       clientReplied: nextReplied,
     );
@@ -219,14 +231,14 @@ class _InvoicesOwnerMonthlyChecklistTabState
       );
       if (!mounted) return;
       _patchItemFlags(
-        projectId: item.projectId,
+        checklistId: item.checklistId,
         sentToClient: updated.sentToClient,
         clientReplied: updated.clientReplied,
       );
     } catch (e) {
       if (!mounted) return;
       _patchItemFlags(
-        projectId: item.projectId,
+        checklistId: item.checklistId,
         sentToClient: previousSent,
         clientReplied: previousReplied,
       );
@@ -254,7 +266,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
     }
     final previousReplied = item.clientReplied;
     _patchItemFlags(
-      projectId: item.projectId,
+      checklistId: item.checklistId,
       sentToClient: item.sentToClient,
       clientReplied: value,
     );
@@ -267,14 +279,14 @@ class _InvoicesOwnerMonthlyChecklistTabState
       );
       if (!mounted) return;
       _patchItemFlags(
-        projectId: item.projectId,
+        checklistId: item.checklistId,
         sentToClient: updated.sentToClient,
         clientReplied: updated.clientReplied,
       );
     } catch (e) {
       if (!mounted) return;
       _patchItemFlags(
-        projectId: item.projectId,
+        checklistId: item.checklistId,
         sentToClient: item.sentToClient,
         clientReplied: previousReplied,
       );
@@ -420,7 +432,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
                   Expanded(
                     child: Text(
                       invoicesOwnerProjectHeading(
-                        item.projectName,
+                        item.displayProjectName,
                         item.extractNumber,
                       ),
                       style: const TextStyle(fontWeight: FontWeight.bold),
