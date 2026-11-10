@@ -396,10 +396,6 @@ class _InvoicesOwnerMonthlyChecklistTabState
                 value: item.started,
                 onChanged: null,
                 title: const Text('تم البدأ فيه (قيد التداول)'),
-                secondary: const Text(
-                  'تلقائي',
-                  style: TextStyle(fontSize: 11, color: Colors.grey),
-                ),
               ),
               CheckboxListTile(
                 dense: true,
@@ -408,10 +404,6 @@ class _InvoicesOwnerMonthlyChecklistTabState
                 value: item.omApproved,
                 onChanged: null,
                 title: const Text('اعتماد نهائي من Operation Manager'),
-                secondary: const Text(
-                  'تلقائي',
-                  style: TextStyle(fontSize: 11, color: Colors.grey),
-                ),
               ),
               CheckboxListTile(
                 dense: true,
