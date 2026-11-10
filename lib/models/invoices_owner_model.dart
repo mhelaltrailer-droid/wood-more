@@ -502,6 +502,24 @@ class InvoicesOwnerMonthlyChecklistItem {
       clientReplied: _asBool(map['client_replied'] ?? map['clientReplied']),
     );
   }
+
+  InvoicesOwnerMonthlyChecklistItem copyWith({
+    bool? sentToClient,
+    bool? clientReplied,
+  }) {
+    return InvoicesOwnerMonthlyChecklistItem(
+      projectId: projectId,
+      projectName: projectName,
+      hasExtractThisMonth: hasExtractThisMonth,
+      invoiceId: invoiceId,
+      extractNumber: extractNumber,
+      invoiceStatus: invoiceStatus,
+      started: started,
+      omApproved: omApproved,
+      sentToClient: sentToClient ?? this.sentToClient,
+      clientReplied: clientReplied ?? this.clientReplied,
+    );
+  }
 }
 
 class InvoicesOwnerMonthlyChecklistResult {
