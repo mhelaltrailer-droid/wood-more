@@ -260,6 +260,8 @@ class InvoicesOwnerModel {
   final bool sentToClient;
   /// رد العميل على المستخلص (يدوي — يتطلب الإرسال أولاً).
   final bool clientReplied;
+  /// تم التحصيل (يدوي — يتطلب رد العميل أولاً).
+  final bool collected;
   /// قائمة مراجعة OM المحفوظة مع الاعتماد النهائي (✓ + ملاحظة البند).
   final Map<String, InvoicesOwnerOmChecklistEntry> omChecklist;
   final List<InvoicesOwnerAttachmentModel> attachments;
@@ -283,6 +285,7 @@ class InvoicesOwnerModel {
     this.approvedAt,
     this.sentToClient = false,
     this.clientReplied = false,
+    this.collected = false,
     this.omChecklist = const {},
     this.attachments = const [],
     this.actions = const [],
@@ -357,6 +360,7 @@ class InvoicesOwnerModel {
       approvedAt: parseDateOrNull(map['approved_at']),
       sentToClient: _asBool(map['sent_to_client'] ?? map['sentToClient']),
       clientReplied: _asBool(map['client_replied'] ?? map['clientReplied']),
+      collected: _asBool(map['collected']),
       omChecklist: omChecklistParsed,
       attachments: attachmentsRaw is List
           ? attachmentsRaw
@@ -470,6 +474,8 @@ class InvoicesOwnerMonthlyChecklistItem {
   final bool omApproved;
   final bool sentToClient;
   final bool clientReplied;
+  final bool collected;
+  final bool allStagesComplete;
 
   const InvoicesOwnerMonthlyChecklistItem({
     required this.checklistId,
@@ -484,6 +490,8 @@ class InvoicesOwnerMonthlyChecklistItem {
     required this.omApproved,
     required this.sentToClient,
     required this.clientReplied,
+    this.collected = false,
+    this.allStagesComplete = false,
   });
 
   String get displayProjectName {
@@ -519,13 +527,22 @@ class InvoicesOwnerMonthlyChecklistItem {
       omApproved: _asBool(map['om_approved'] ?? map['omApproved']),
       sentToClient: _asBool(map['sent_to_client'] ?? map['sentToClient']),
       clientReplied: _asBool(map['client_replied'] ?? map['clientReplied']),
+      collected: _asBool(map['collected']),
+      allStagesComplete: _asBool(
+        map['all_stages_complete'] ?? map['allStagesComplete'],
+      ),
     );
   }
 
   InvoicesOwnerMonthlyChecklistItem copyWith({
     bool? sentToClient,
     bool? clientReplied,
+    bool? collected,
+    bool? allStagesComplete,
   }) {
+    final nextSent = sentToClient ?? this.sentToClient;
+    final nextReplied = clientReplied ?? this.clientReplied;
+    final nextCollected = collected ?? this.collected;
     return InvoicesOwnerMonthlyChecklistItem(
       checklistId: checklistId,
       projectId: projectId,
@@ -537,18 +554,33 @@ class InvoicesOwnerMonthlyChecklistItem {
       invoiceStatus: invoiceStatus,
       started: started,
       omApproved: omApproved,
-      sentToClient: sentToClient ?? this.sentToClient,
-      clientReplied: clientReplied ?? this.clientReplied,
+      sentToClient: nextSent,
+      clientReplied: nextReplied,
+      collected: nextCollected,
+      allStagesComplete: allStagesComplete ??
+          (started &&
+              omApproved &&
+              nextSent &&
+              nextReplied &&
+              nextCollected),
     );
   }
 }
 
 class InvoicesOwnerMonthlyChecklistResult {
   final String month;
+  final int year;
+  final int monthNumber;
+  final bool monthEnded;
+  final bool completionColoringApplies;
   final List<InvoicesOwnerMonthlyChecklistItem> items;
 
   const InvoicesOwnerMonthlyChecklistResult({
     required this.month,
+    required this.year,
+    required this.monthNumber,
+    this.monthEnded = false,
+    this.completionColoringApplies = false,
     required this.items,
   });
 
@@ -556,8 +588,21 @@ class InvoicesOwnerMonthlyChecklistResult {
     Map<String, dynamic> map,
   ) {
     final raw = map['items'];
+    final month = (map['month'] ?? '').toString();
+    final parts = month.split('-');
+    final parsedYear = parts.isNotEmpty ? int.tryParse(parts[0]) : null;
+    final parsedMonth = parts.length > 1 ? int.tryParse(parts[1]) : null;
     return InvoicesOwnerMonthlyChecklistResult(
-      month: (map['month'] ?? '').toString(),
+      month: month,
+      year: (map['year'] as num?)?.toInt() ?? parsedYear ?? DateTime.now().year,
+      monthNumber: (map['month_number'] as num?)?.toInt() ??
+          (map['monthNumber'] as num?)?.toInt() ??
+          parsedMonth ??
+          DateTime.now().month,
+      monthEnded: _asBool(map['month_ended'] ?? map['monthEnded']),
+      completionColoringApplies: _asBool(
+        map['completion_coloring_applies'] ?? map['completionColoringApplies'],
+      ),
       items: raw is List
           ? raw
               .map(

@@ -30,7 +30,10 @@ class _InvoicesOwnerMonthlyChecklistTabState
   final _storage = getStorage();
   bool _loading = true;
   String? _error;
-  String _month = '';
+  late int _selectedYear;
+  late int _selectedMonth;
+  bool _monthEnded = false;
+  bool _completionColoringApplies = false;
   List<InvoicesOwnerMonthlyChecklistItem> _items = const [];
   List<ProjectModel> _allProjects = const [];
   int? _selectedProjectId;
@@ -40,6 +43,9 @@ class _InvoicesOwnerMonthlyChecklistTabState
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    _selectedYear = now.year;
+    _selectedMonth = now.month;
     _load();
   }
 
@@ -69,6 +75,8 @@ class _InvoicesOwnerMonthlyChecklistTabState
     try {
       final result = await _storage.getInvoicesOwnerMonthlyChecklist(
         userId: widget.currentUser.id,
+        year: _selectedYear,
+        month: _selectedMonth,
       );
       final projects = await _storage.getProjects();
       if (!mounted) return;
@@ -79,7 +87,10 @@ class _InvoicesOwnerMonthlyChecklistTabState
       final available = projects.where((p) => !listedIds.contains(p.id)).toList()
         ..sort((a, b) => a.name.compareTo(b.name));
       setState(() {
-        _month = result.month;
+        _selectedYear = result.year;
+        _selectedMonth = result.monthNumber;
+        _monthEnded = result.monthEnded;
+        _completionColoringApplies = result.completionColoringApplies;
         _items = result.items;
         _allProjects = available;
         if (_selectedProjectId != null &&
@@ -98,10 +109,111 @@ class _InvoicesOwnerMonthlyChecklistTabState
     }
   }
 
+  void _shiftMonth(int delta) {
+    var y = _selectedYear;
+    var m = _selectedMonth + delta;
+    while (m < 1) {
+      m += 12;
+      y -= 1;
+    }
+    while (m > 12) {
+      m -= 12;
+      y += 1;
+    }
+    setState(() {
+      _selectedYear = y;
+      _selectedMonth = m;
+    });
+    _load();
+  }
+
+  Future<void> _pickMonthYear() async {
+    var draftYear = _selectedYear;
+    var draftMonth = _selectedMonth;
+    final years = List<int>.generate(16, (i) => DateTime.now().year - 8 + i);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return AlertDialog(
+              title: const Text('اختيار الشهر'),
+              content: Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      value: draftMonth,
+                      decoration: const InputDecoration(
+                        labelText: 'الشهر',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        for (var i = 1; i <= 12; i++)
+                          DropdownMenuItem(
+                            value: i,
+                            child: Text(invoicesOwnerArabicMonthLabel(i)),
+                          ),
+                      ],
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setLocal(() => draftMonth = v);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      value: draftYear,
+                      decoration: const InputDecoration(
+                        labelText: 'السنة',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: years
+                          .map(
+                            (y) => DropdownMenuItem(
+                              value: y,
+                              child: Text('$y'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setLocal(() => draftYear = v);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('إلغاء'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('عرض'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _selectedYear = draftYear;
+      _selectedMonth = draftMonth;
+    });
+    await _load();
+  }
+
   void _patchItemFlags({
     required int checklistId,
     required bool sentToClient,
     required bool clientReplied,
+    required bool collected,
   }) {
     setState(() {
       _items = [
@@ -110,6 +222,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
             item.copyWith(
               sentToClient: sentToClient,
               clientReplied: clientReplied,
+              collected: collected,
             )
           else
             item,
@@ -133,7 +246,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
         projectId: projectId,
       );
       _selectedProjectId = null;
-      await _load();
+      await _load(silent: true);
     } catch (e) {
       if (!mounted) return;
       final msg = '$e'.contains('already_added')
@@ -192,7 +305,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
     final invoiceId = item.invoiceId;
     if (invoiceId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('لا يوجد مستخلص لهذا المشروع في الشهر الجاري')),
+        const SnackBar(content: Text('لا يوجد مستخلص لهذا المشروع في هذا الشهر')),
       );
       return;
     }
@@ -216,11 +329,14 @@ class _InvoicesOwnerMonthlyChecklistTabState
     if (invoiceId == null || _storage is! ApiStorageService) return;
     final previousSent = item.sentToClient;
     final previousReplied = item.clientReplied;
+    final previousCollected = item.collected;
     final nextReplied = value ? item.clientReplied : false;
+    final nextCollected = value ? item.collected : false;
     _patchItemFlags(
       checklistId: item.checklistId,
       sentToClient: value,
       clientReplied: nextReplied,
+      collected: nextCollected,
     );
     setState(() => _busyInvoiceIds.add(invoiceId));
     try {
@@ -234,6 +350,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
         checklistId: item.checklistId,
         sentToClient: updated.sentToClient,
         clientReplied: updated.clientReplied,
+        collected: updated.collected,
       );
     } catch (e) {
       if (!mounted) return;
@@ -241,6 +358,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
         checklistId: item.checklistId,
         sentToClient: previousSent,
         clientReplied: previousReplied,
+        collected: previousCollected,
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('تعذر التحديث: $e')),
@@ -265,10 +383,13 @@ class _InvoicesOwnerMonthlyChecklistTabState
       return;
     }
     final previousReplied = item.clientReplied;
+    final previousCollected = item.collected;
+    final nextCollected = value ? item.collected : false;
     _patchItemFlags(
       checklistId: item.checklistId,
       sentToClient: item.sentToClient,
       clientReplied: value,
+      collected: nextCollected,
     );
     setState(() => _busyInvoiceIds.add(invoiceId));
     try {
@@ -282,6 +403,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
         checklistId: item.checklistId,
         sentToClient: updated.sentToClient,
         clientReplied: updated.clientReplied,
+        collected: updated.collected,
       );
     } catch (e) {
       if (!mounted) return;
@@ -289,6 +411,58 @@ class _InvoicesOwnerMonthlyChecklistTabState
         checklistId: item.checklistId,
         sentToClient: item.sentToClient,
         clientReplied: previousReplied,
+        collected: previousCollected,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر التحديث: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _busyInvoiceIds.remove(invoiceId));
+      }
+    }
+  }
+
+  Future<void> _setCollected(
+    InvoicesOwnerMonthlyChecklistItem item,
+    bool value,
+  ) async {
+    final invoiceId = item.invoiceId;
+    if (invoiceId == null || _storage is! ApiStorageService) return;
+    if (value && !item.clientReplied) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('يجب تعليم «الاعتماد النهائي من العميل» أولاً')),
+      );
+      return;
+    }
+    final previousCollected = item.collected;
+    _patchItemFlags(
+      checklistId: item.checklistId,
+      sentToClient: item.sentToClient,
+      clientReplied: item.clientReplied,
+      collected: value,
+    );
+    setState(() => _busyInvoiceIds.add(invoiceId));
+    try {
+      final updated = await _storage.updateInvoicesOwnerClientFlags(
+        invoiceId: invoiceId,
+        userId: widget.currentUser.id,
+        collected: value,
+      );
+      if (!mounted) return;
+      _patchItemFlags(
+        checklistId: item.checklistId,
+        sentToClient: updated.sentToClient,
+        clientReplied: updated.clientReplied,
+        collected: updated.collected,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _patchItemFlags(
+        checklistId: item.checklistId,
+        sentToClient: item.sentToClient,
+        clientReplied: item.clientReplied,
+        collected: previousCollected,
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('تعذر التحديث: $e')),
@@ -320,23 +494,58 @@ class _InvoicesOwnerMonthlyChecklistTabState
       );
     }
 
+    final monthTitle =
+        '${invoicesOwnerArabicMonthLabel(_selectedMonth)} $_selectedYear';
+
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.all(16),
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          if (_month.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                'الشهر الميلادي: $_month',
-                style: TextStyle(
-                  color: Colors.grey.shade700,
-                  fontWeight: FontWeight.w600,
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'الشهر السابق',
+                onPressed: () => _shiftMonth(-1),
+                icon: const Icon(Icons.chevron_right),
+              ),
+              Expanded(
+                child: InkWell(
+                  onTap: _pickMonthYear,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Column(
+                      children: [
+                        Text(
+                          monthTitle,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        Text(
+                          _monthEnded ? 'شهر منتهٍ — اضغط للتغيير' : 'اضغط لاختيار شهر/سنة',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
+              IconButton(
+                tooltip: 'الشهر التالي',
+                onPressed: () => _shiftMonth(1),
+                icon: const Icon(Icons.chevron_left),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           if (_allProjects.isEmpty)
             Text(
               'كل المشروعات مضافة للقائمة، أو لا توجد مشروعات في النظام.',
@@ -413,6 +622,13 @@ class _InvoicesOwnerMonthlyChecklistTabState
     );
   }
 
+  Color? _cardColor(InvoicesOwnerMonthlyChecklistItem item) {
+    if (!_completionColoringApplies) return null;
+    return item.allStagesComplete
+        ? const Color(0xFFE8F5E9)
+        : const Color(0xFFFFEBEE);
+  }
+
   Widget _buildProjectCard(InvoicesOwnerMonthlyChecklistItem item) {
     final busy = item.invoiceId != null &&
         _busyInvoiceIds.contains(item.invoiceId);
@@ -420,6 +636,7 @@ class _InvoicesOwnerMonthlyChecklistTabState
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      color: _cardColor(item),
       child: InkWell(
         onTap: () => _openInvoice(item),
         child: Padding(
@@ -448,8 +665,8 @@ class _InvoicesOwnerMonthlyChecklistTabState
               const SizedBox(height: 4),
               Text(
                 item.hasExtractThisMonth
-                    ? 'تم عمل مستخلص في الشهر الجاري'
-                    : 'لم يتم عمل مستخلص في الشهر الجاري',
+                    ? 'تم عمل مستخلص في هذا الشهر'
+                    : 'لم يتم عمل مستخلص في هذا الشهر',
                 style: TextStyle(
                   color: item.hasExtractThisMonth
                       ? const Color(0xFF1B5E20)
@@ -493,6 +710,16 @@ class _InvoicesOwnerMonthlyChecklistTabState
                     ? (v) => _setClientReplied(item, v ?? false)
                     : null,
                 title: const Text('الاعتماد النهائي من العميل'),
+              ),
+              CheckboxListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: item.collected,
+                onChanged: canManual && item.clientReplied
+                    ? (v) => _setCollected(item, v ?? false)
+                    : null,
+                title: const Text('تم التحصيل'),
               ),
               if (busy)
                 const Padding(
