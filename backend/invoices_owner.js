@@ -117,12 +117,37 @@ async function ensureInvoicesOwnerTables(pool) {
          ADD COLUMN IF NOT EXISTS extract_number_locked BOOLEAN NOT NULL DEFAULT FALSE`,
       );
       await pool.query(
+        `ALTER TABLE invoices_owner
+         ADD COLUMN IF NOT EXISTS sent_to_client BOOLEAN NOT NULL DEFAULT FALSE`,
+      );
+      await pool.query(
+        `ALTER TABLE invoices_owner
+         ADD COLUMN IF NOT EXISTS client_replied BOOLEAN NOT NULL DEFAULT FALSE`,
+      );
+      await pool.query(
         `CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_owner_extract_number
          ON invoices_owner (extract_number)
          WHERE extract_number IS NOT NULL AND extract_number <> ''`,
       );
     } catch (e) {
       console.warn('ensureInvoicesOwnerTables om_checklist_json:', e.message);
+    }
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS invoices_owner_monthly_checklist_projects (
+          id SERIAL PRIMARY KEY,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          project_name TEXT NOT NULL DEFAULT '',
+          added_by_user_id INTEGER REFERENCES users(id),
+          created_at TEXT NOT NULL,
+          UNIQUE (project_id)
+        )
+      `);
+    } catch (e) {
+      console.warn(
+        'ensureInvoicesOwnerTables monthly_checklist_projects:',
+        e.message,
+      );
     }
     try {
       await pool.query(`
@@ -298,6 +323,43 @@ function ioActionVisibleOnInvoicePath(row, primaryAdminUserId) {
 function ioIsOperationManager(user) {
   if (!user) return false;
   return String(user.role || '').trim() === 'operation_manager';
+}
+
+/** Monthly Checklist: مدير العمليات + المسؤول الأساسي. */
+function ioCanManageMonthlyChecklist(user) {
+  if (!user) return false;
+  return ioIsPrimaryAdmin(user) || ioIsOperationManager(user);
+}
+
+/** حدود الشهر الميلادي الحالي بتوقيت مصر (ISO UTC). */
+function ioCurrentCalendarMonthBoundsEgypt() {
+  const { EGYPT_UTC_OFFSET_MS, toEgyptWallClock } = require('./egypt_local_time');
+  const wall = toEgyptWallClock(new Date().toISOString());
+  if (!wall) {
+    const now = new Date();
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    return {
+      year: now.getUTCFullYear(),
+      month: now.getUTCMonth() + 1,
+      startIso: start.toISOString(),
+      endIso: end.toISOString(),
+    };
+  }
+  const startUtcMs =
+    Date.UTC(wall.year, wall.month - 1, 1, 0, 0, 0, 0) - EGYPT_UTC_OFFSET_MS;
+  const endUtcMs =
+    Date.UTC(wall.year, wall.month, 1, 0, 0, 0, 0) - EGYPT_UTC_OFFSET_MS;
+  return {
+    year: wall.year,
+    month: wall.month,
+    startIso: new Date(startUtcMs).toISOString(),
+    endIso: new Date(endUtcMs).toISOString(),
+  };
+}
+
+function ioAsBool(value) {
+  return value === true || value === 1 || value === '1' || value === 'true';
 }
 
 /** سجل التداول: المسؤول الأساسي + مدير العمليات + المكتب الفني. */
@@ -620,6 +682,8 @@ function ioMapRow(row, attachments = [], actions = []) {
     return_reason: row.return_reason || null,
     extract_number: row.extract_number ? String(row.extract_number) : null,
     extract_number_locked: ioIsExtractLocked(row),
+    sent_to_client: ioAsBool(row.sent_to_client),
+    client_replied: ioAsBool(row.client_replied),
     created_at: row.created_at,
     updated_at: row.updated_at,
     approved_at: row.approved_at || null,
@@ -1082,6 +1146,151 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       res.status(500).json({ error: String(e.message) });
     }
   });
+
+  app.get('/invoices-owner/monthly-checklist', async (req, res) => {
+    try {
+      const userId = parseInt(String(req.query.userId || ''), 10);
+      if (Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'userId required' });
+      }
+      const user = await ioGetUser(pool, userId, req);
+      if (!user || !ioCanManageMonthlyChecklist(user)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const bounds = ioCurrentCalendarMonthBoundsEgypt();
+      const monthKey = `${bounds.year}-${String(bounds.month).padStart(2, '0')}`;
+      const projects = await pool.query(
+        `SELECT c.project_id, COALESCE(NULLIF(p.name, ''), c.project_name) AS project_name
+         FROM invoices_owner_monthly_checklist_projects c
+         LEFT JOIN projects p ON p.id = c.project_id
+         ORDER BY project_name ASC, c.project_id ASC`,
+      );
+
+      const projectIds = projects.rows
+        .map((r) => parseInt(r.project_id, 10))
+        .filter((id) => !Number.isNaN(id));
+
+      const invoiceByProject = new Map();
+      if (projectIds.length > 0) {
+        const inv = await pool.query(
+          `SELECT DISTINCT ON (project_id)
+              id, project_id, project_name, status, extract_number,
+              sent_to_client, client_replied, created_at
+           FROM invoices_owner
+           WHERE project_id = ANY($1::int[])
+             AND created_at >= $2
+             AND created_at < $3
+           ORDER BY project_id, created_at DESC, id DESC`,
+          [projectIds, bounds.startIso, bounds.endIso],
+        );
+        for (const row of inv.rows) {
+          invoiceByProject.set(parseInt(row.project_id, 10), row);
+        }
+      }
+
+      res.json({
+        month: monthKey,
+        items: projects.rows.map((p) => {
+          const projectId = parseInt(p.project_id, 10);
+          const inv = invoiceByProject.get(projectId) || null;
+          const hasExtract = !!inv;
+          const status = inv ? String(inv.status || '') : '';
+          return {
+            project_id: projectId,
+            project_name: p.project_name || '',
+            has_extract_this_month: hasExtract,
+            invoice_id: inv ? parseInt(inv.id, 10) : null,
+            extract_number: inv && inv.extract_number
+              ? String(inv.extract_number)
+              : null,
+            invoice_status: status || null,
+            started: hasExtract,
+            om_approved: hasExtract && status === IO_STATUS.APPROVED,
+            sent_to_client: hasExtract ? ioAsBool(inv.sent_to_client) : false,
+            client_replied: hasExtract ? ioAsBool(inv.client_replied) : false,
+          };
+        }),
+      });
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.post('/invoices-owner/monthly-checklist/projects', async (req, res) => {
+    try {
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      const projectId = parseInt(String(b.projectId ?? b.project_id ?? ''), 10);
+      if (Number.isNaN(userId) || Number.isNaN(projectId)) {
+        return res.status(400).json({ error: 'invalid' });
+      }
+      const user = await ioGetUser(pool, userId, req);
+      if (!user || !ioCanManageMonthlyChecklist(user)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const pr = await pool.query(
+        'SELECT id, name FROM projects WHERE id = $1',
+        [projectId],
+      );
+      if (pr.rows.length === 0) {
+        return res.status(404).json({ error: 'project_not_found' });
+      }
+
+      const existing = await pool.query(
+        `SELECT project_id FROM invoices_owner_monthly_checklist_projects
+         WHERE project_id = $1`,
+        [projectId],
+      );
+      if (existing.rows.length > 0) {
+        return res.status(409).json({ error: 'already_added' });
+      }
+
+      const now = new Date().toISOString();
+      await pool.query(
+        `INSERT INTO invoices_owner_monthly_checklist_projects (
+           project_id, project_name, added_by_user_id, created_at
+         ) VALUES ($1, $2, $3, $4)`,
+        [projectId, String(pr.rows[0].name || ''), userId, now],
+      );
+      res.json({ ok: true, project_id: projectId });
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.delete(
+    '/invoices-owner/monthly-checklist/projects/:projectId',
+    async (req, res) => {
+      try {
+        const projectId = parseInt(String(req.params.projectId || ''), 10);
+        const userId = parseInt(
+          String(req.query.userId || req.body?.userId || ''),
+          10,
+        );
+        if (Number.isNaN(projectId) || Number.isNaN(userId)) {
+          return res.status(400).json({ error: 'invalid' });
+        }
+        const user = await ioGetUser(pool, userId, req);
+        if (!user || !ioCanManageMonthlyChecklist(user)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        const del = await pool.query(
+          `DELETE FROM invoices_owner_monthly_checklist_projects
+           WHERE project_id = $1
+           RETURNING project_id`,
+          [projectId],
+        );
+        if (del.rows.length === 0) {
+          return res.status(404).json({ error: 'not found' });
+        }
+        res.json({ ok: true });
+      } catch (e) {
+        res.status(500).json({ error: String(e.message) });
+      }
+    },
+  );
 
   app.get('/invoices-owner/:id', async (req, res) => {
     try {
@@ -1726,6 +1935,61 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       await pool.query(
         `UPDATE invoices_owner SET om_checklist_json=$1, updated_at=$2 WHERE id=$3`,
         [omChecklistJson, now, id],
+      );
+
+      res.json(await ioLoadDetail(pool, id));
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.put('/invoices-owner/:id/client-flags', async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId)) {
+        return res.status(400).json({ error: 'invalid' });
+      }
+
+      const actor = await ioGetUser(pool, userId, req);
+      if (!actor || !ioCanManageMonthlyChecklist(actor)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const rq = await pool.query('SELECT * FROM invoices_owner WHERE id = $1', [id]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      const row = rq.rows[0];
+
+      const hasSentKey =
+        Object.prototype.hasOwnProperty.call(b, 'sentToClient') ||
+        Object.prototype.hasOwnProperty.call(b, 'sent_to_client');
+      const hasRepliedKey =
+        Object.prototype.hasOwnProperty.call(b, 'clientReplied') ||
+        Object.prototype.hasOwnProperty.call(b, 'client_replied');
+      if (!hasSentKey && !hasRepliedKey) {
+        return res.status(400).json({ error: 'no_flags' });
+      }
+
+      let nextSent = ioAsBool(row.sent_to_client);
+      let nextReplied = ioAsBool(row.client_replied);
+      if (hasSentKey) {
+        nextSent = ioAsBool(b.sentToClient ?? b.sent_to_client);
+      }
+      if (hasRepliedKey) {
+        nextReplied = ioAsBool(b.clientReplied ?? b.client_replied);
+      }
+      if (!nextSent) nextReplied = false;
+      if (nextReplied && !nextSent) {
+        return res.status(400).json({ error: 'sent_required' });
+      }
+
+      const now = new Date().toISOString();
+      await pool.query(
+        `UPDATE invoices_owner
+         SET sent_to_client=$1, client_replied=$2, updated_at=$3
+         WHERE id=$4`,
+        [nextSent, nextReplied, now, id],
       );
 
       res.json(await ioLoadDetail(pool, id));

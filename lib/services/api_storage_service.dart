@@ -3540,6 +3540,57 @@ class ApiStorageService {
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
+  Future<InvoicesOwnerMonthlyChecklistResult> getInvoicesOwnerMonthlyChecklist({
+    required int userId,
+  }) async {
+    final data = await _get(
+      'invoices-owner/monthly-checklist?userId=$userId',
+    );
+    return InvoicesOwnerMonthlyChecklistResult.fromMap(data);
+  }
+
+  Future<void> addInvoicesOwnerMonthlyChecklistProject({
+    required int userId,
+    required int projectId,
+  }) async {
+    await _postVoid('invoices-owner/monthly-checklist/projects', {
+      'userId': userId,
+      'projectId': projectId,
+    });
+  }
+
+  Future<void> removeInvoicesOwnerMonthlyChecklistProject({
+    required int userId,
+    required int projectId,
+  }) async {
+    final uri = Uri.parse(
+      _path('invoices-owner/monthly-checklist/projects/$projectId'),
+    ).replace(queryParameters: {'userId': userId.toString()});
+    final r = await http.delete(uri, headers: _reqHeaders());
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
+  Future<InvoicesOwnerModel> updateInvoicesOwnerClientFlags({
+    required int invoiceId,
+    required int userId,
+    bool? sentToClient,
+    bool? clientReplied,
+  }) async {
+    final uri = Uri.parse(_path('invoices-owner/$invoiceId/client-flags'));
+    final body = <String, dynamic>{'userId': userId};
+    if (sentToClient != null) body['sentToClient'] = sentToClient;
+    if (clientReplied != null) body['clientReplied'] = clientReplied;
+    final r = await http.put(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode(body),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return InvoicesOwnerModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
   Future<InvoicesOwnerModel> deleteInvoicesOwnerAttachment({
     required int invoiceId,
     required int attachmentId,
