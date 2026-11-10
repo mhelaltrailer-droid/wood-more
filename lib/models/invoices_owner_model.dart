@@ -256,6 +256,10 @@ class InvoicesOwnerModel {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? approvedAt;
+  /// إرسال المستخلص للعميل (يدوي — Monthly Checklist).
+  final bool sentToClient;
+  /// رد العميل على المستخلص (يدوي — يتطلب الإرسال أولاً).
+  final bool clientReplied;
   /// قائمة مراجعة OM المحفوظة مع الاعتماد النهائي (✓ + ملاحظة البند).
   final Map<String, InvoicesOwnerOmChecklistEntry> omChecklist;
   final List<InvoicesOwnerAttachmentModel> attachments;
@@ -277,6 +281,8 @@ class InvoicesOwnerModel {
     required this.createdAt,
     required this.updatedAt,
     this.approvedAt,
+    this.sentToClient = false,
+    this.clientReplied = false,
     this.omChecklist = const {},
     this.attachments = const [],
     this.actions = const [],
@@ -349,6 +355,8 @@ class InvoicesOwnerModel {
       createdAt: parseDate(map['created_at']),
       updatedAt: parseDate(map['updated_at']),
       approvedAt: parseDateOrNull(map['approved_at']),
+      sentToClient: _asBool(map['sent_to_client'] ?? map['sentToClient']),
+      clientReplied: _asBool(map['client_replied'] ?? map['clientReplied']),
       omChecklist: omChecklistParsed,
       attachments: attachmentsRaw is List
           ? attachmentsRaw
@@ -444,6 +452,82 @@ class InvoicesOwnerChainRoute {
           : const [],
       defaultApproveUserId: (map['default_approve_user_id'] as num?)?.toInt(),
       defaultReturnUserId: (map['default_return_user_id'] as num?)?.toInt(),
+    );
+  }
+}
+
+/// صف في تبويب Monthly Checklist (مشروع نشط + حالة مستخلص الشهر).
+class InvoicesOwnerMonthlyChecklistItem {
+  final int projectId;
+  final String projectName;
+  final bool hasExtractThisMonth;
+  final int? invoiceId;
+  final String? extractNumber;
+  final String? invoiceStatus;
+  final bool started;
+  final bool omApproved;
+  final bool sentToClient;
+  final bool clientReplied;
+
+  const InvoicesOwnerMonthlyChecklistItem({
+    required this.projectId,
+    required this.projectName,
+    required this.hasExtractThisMonth,
+    this.invoiceId,
+    this.extractNumber,
+    this.invoiceStatus,
+    required this.started,
+    required this.omApproved,
+    required this.sentToClient,
+    required this.clientReplied,
+  });
+
+  factory InvoicesOwnerMonthlyChecklistItem.fromMap(Map<String, dynamic> map) {
+    return InvoicesOwnerMonthlyChecklistItem(
+      projectId: (map['project_id'] as num).toInt(),
+      projectName: (map['project_name'] ?? map['projectName'] ?? '').toString(),
+      hasExtractThisMonth: _asBool(
+        map['has_extract_this_month'] ?? map['hasExtractThisMonth'],
+      ),
+      invoiceId: (map['invoice_id'] as num?)?.toInt() ??
+          (map['invoiceId'] as num?)?.toInt(),
+      extractNumber:
+          _optionalText(map['extract_number'] ?? map['extractNumber']),
+      invoiceStatus: _optionalText(
+        map['invoice_status'] ?? map['invoiceStatus'],
+      ),
+      started: _asBool(map['started']),
+      omApproved: _asBool(map['om_approved'] ?? map['omApproved']),
+      sentToClient: _asBool(map['sent_to_client'] ?? map['sentToClient']),
+      clientReplied: _asBool(map['client_replied'] ?? map['clientReplied']),
+    );
+  }
+}
+
+class InvoicesOwnerMonthlyChecklistResult {
+  final String month;
+  final List<InvoicesOwnerMonthlyChecklistItem> items;
+
+  const InvoicesOwnerMonthlyChecklistResult({
+    required this.month,
+    required this.items,
+  });
+
+  factory InvoicesOwnerMonthlyChecklistResult.fromMap(
+    Map<String, dynamic> map,
+  ) {
+    final raw = map['items'];
+    return InvoicesOwnerMonthlyChecklistResult(
+      month: (map['month'] ?? '').toString(),
+      items: raw is List
+          ? raw
+              .map(
+                (e) => InvoicesOwnerMonthlyChecklistItem.fromMap(
+                  Map<String, dynamic>.from(e as Map),
+                ),
+              )
+              .toList()
+          : const [],
     );
   }
 }

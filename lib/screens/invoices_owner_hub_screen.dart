@@ -10,6 +10,7 @@ import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
 import '../utils/notification_time_display.dart';
+import '../widgets/invoices_owner_monthly_checklist_tab.dart';
 import 'invoices_owner_detail_screen.dart';
 import 'invoices_owner_form_screen.dart';
 
@@ -43,6 +44,7 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
   List<InvoicesOwnerActivityLogItem> _activityLog = const [];
   List<Map<String, dynamic>> _notifications = const [];
   int _unread = 0;
+  int _monthlyChecklistRefreshToken = 0;
   Timer? _pollTimer;
 
   List<_TabDef> get _tabs {
@@ -52,6 +54,11 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
         const _TabDef('all', 'الكل'),
         const _TabDef('pending', 'قيد التداول'),
         const _TabDef('approved', 'معتمدة'),
+        if (user.canAccessInvoicesOwnerMonthlyChecklist)
+          const _TabDef(
+            'monthly_checklist',
+            invoicesOwnerMonthlyChecklistTabLabel,
+          ),
         if (user.canViewInvoicesOwnerActivityLog)
           const _TabDef('activity', 'سجل التداول'),
         const _TabDef('notifications', 'إشعارات'),
@@ -63,22 +70,37 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
         const _TabDef('returned', 'معادة للتعديل'),
         const _TabDef('sent', 'مرسلة'),
         const _TabDef('approved', 'معتمدة'),
+        if (user.canAccessInvoicesOwnerMonthlyChecklist)
+          const _TabDef(
+            'monthly_checklist',
+            invoicesOwnerMonthlyChecklistTabLabel,
+          ),
         if (user.canViewInvoicesOwnerActivityLog)
           const _TabDef('activity', 'سجل التداول'),
         const _TabDef('notifications', 'إشعارات'),
       ];
     }
     if (user.canCreateInvoicesOwner) {
-      return const [
-        _TabDef('returned', 'معادة للتعديل'),
-        _TabDef('sent', 'مرسلة'),
-        _TabDef('approved', 'معتمدة'),
-        _TabDef('notifications', 'إشعارات'),
+      return [
+        const _TabDef('returned', 'معادة للتعديل'),
+        const _TabDef('sent', 'مرسلة'),
+        const _TabDef('approved', 'معتمدة'),
+        if (user.canAccessInvoicesOwnerMonthlyChecklist)
+          const _TabDef(
+            'monthly_checklist',
+            invoicesOwnerMonthlyChecklistTabLabel,
+          ),
+        const _TabDef('notifications', 'إشعارات'),
       ];
     }
     return [
       const _TabDef('pending', 'بانتظار إجرائي'),
       const _TabDef('approved', 'معتمدة'),
+      if (user.canAccessInvoicesOwnerMonthlyChecklist)
+        const _TabDef(
+          'monthly_checklist',
+          invoicesOwnerMonthlyChecklistTabLabel,
+        ),
       if (user.canViewInvoicesOwnerActivityLog)
         const _TabDef('activity', 'سجل التداول'),
       const _TabDef('notifications', 'إشعارات'),
@@ -156,6 +178,12 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
     }
     if (tabKey == 'activity') {
       await _loadActivityLog();
+      return;
+    }
+    if (tabKey == 'monthly_checklist') {
+      if (mounted) {
+        setState(() => _monthlyChecklistRefreshToken++);
+      }
       return;
     }
     if (_storage is! ApiStorageService) {
@@ -339,6 +367,13 @@ class _InvoicesOwnerHubScreenState extends State<InvoicesOwnerHubScreen>
                     }
                     if (t.key == 'activity') {
                       return _buildActivityTab(fmt);
+                    }
+                    if (t.key == 'monthly_checklist') {
+                      return InvoicesOwnerMonthlyChecklistTab(
+                        currentUser: widget.currentUser,
+                        refreshToken: _monthlyChecklistRefreshToken,
+                        onRefreshParent: _loadNotifications,
+                      );
                     }
                     return _buildListTab(
                       items: _lists[t.key] ?? const [],

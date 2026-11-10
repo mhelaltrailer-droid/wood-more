@@ -17,7 +17,7 @@ String invoicesOwnerFormatAttachmentSize(int bytes) {
 }
 
 const String invoicesOwnerHomeIconLabel = 'Invoices (Owner)';
-
+const String invoicesOwnerMonthlyChecklistTabLabel = 'Monthly Checklist';
 const String invoicesOwnerOtherProjectDropdownValueKey = 'other';
 const int invoicesOwnerOtherProjectDropdownValue = -1;
 const String invoicesOwnerOtherProjectDropdownLabel = 'مشروع آخر';

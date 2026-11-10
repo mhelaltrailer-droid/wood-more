@@ -267,6 +267,10 @@ class UserModel {
   bool get canViewInvoicesOwnerActivityLog =>
       isPrimaryAppAdmin || isOperationManager || isTechnicalOffice;
 
+  /// تبويب Monthly Checklist + إدارة قائمة المشاريع والعلامات اليدوية.
+  bool get canAccessInvoicesOwnerMonthlyChecklist =>
+      isPrimaryAppAdmin || isOperationManager;
+
   /// التصرف في خطوة الحالة الحالية (اعتماد أو إعادة).
   bool canActOnInvoicesOwnerStatus(String status) {
     switch (status.trim()) {
