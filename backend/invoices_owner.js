@@ -165,9 +165,64 @@ async function ensureInvoicesOwnerTables(pool) {
     } catch (e) {
       console.warn('ensureInvoicesOwnerTables attachment storage cols:', e.message);
     }
+    await ioBackfillManualProjectLinks(pool);
     console.log('ensureInvoicesOwnerTables: ok');
   } catch (e) {
     console.warn('ensureInvoicesOwnerTables:', e.message);
+  }
+}
+
+/**
+ * يربط مستخلصات «مشروع آخر» بمشروع الكتالوج عند تطابق أسماء معروفة.
+ * آمن للتكرار (لا يغيّر إلا إذا project_id فارغ).
+ */
+async function ioBackfillManualProjectLinks(pool) {
+  const mappings = [
+    {
+      catalogName: '(197) Mivida Gardens - inovvo',
+      aliases: [
+        '197- Mivida Gardens - inovvo',
+        'Mivida Gardens - inovvo - 197',
+      ],
+    },
+  ];
+  try {
+    for (const m of mappings) {
+      const pr = await pool.query(
+        `SELECT id, name FROM projects
+         WHERE lower(trim(name)) = lower(trim($1))
+         ORDER BY id ASC
+         LIMIT 1`,
+        [m.catalogName],
+      );
+      if (pr.rows.length === 0) continue;
+      const projectId = parseInt(pr.rows[0].id, 10);
+      const projectName = String(pr.rows[0].name || m.catalogName);
+      const now = new Date().toISOString();
+      const upd = await pool.query(
+        `UPDATE invoices_owner
+         SET project_id = $1, project_name = $2, updated_at = $3
+         WHERE project_id IS NULL
+           AND lower(trim(project_name)) = ANY($4::text[])
+         RETURNING id`,
+        [
+          projectId,
+          projectName,
+          now,
+          m.aliases.map((a) => a.trim().toLowerCase()),
+        ],
+      );
+      if (upd.rows.length > 0) {
+        console.log(
+          'ioBackfillManualProjectLinks:',
+          m.catalogName,
+          '->',
+          upd.rows.map((r) => r.id).join(','),
+        );
+      }
+    }
+  } catch (e) {
+    console.warn('ioBackfillManualProjectLinks:', e.message);
   }
 }
 
@@ -1935,6 +1990,46 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       await pool.query(
         `UPDATE invoices_owner SET om_checklist_json=$1, updated_at=$2 WHERE id=$3`,
         [omChecklistJson, now, id],
+      );
+
+      res.json(await ioLoadDetail(pool, id));
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.put('/invoices-owner/:id/link-project', async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      const projectId = parseInt(String(b.projectId ?? b.project_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId) || Number.isNaN(projectId)) {
+        return res.status(400).json({ error: 'invalid' });
+      }
+
+      const actor = await ioGetUser(pool, userId, req);
+      if (!actor || !ioIsPrimaryAdmin(actor)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const rq = await pool.query('SELECT id FROM invoices_owner WHERE id = $1', [id]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+
+      const pr = await pool.query(
+        'SELECT id, name FROM projects WHERE id = $1',
+        [projectId],
+      );
+      if (pr.rows.length === 0) {
+        return res.status(404).json({ error: 'project_not_found' });
+      }
+
+      const now = new Date().toISOString();
+      await pool.query(
+        `UPDATE invoices_owner
+         SET project_id = $1, project_name = $2, updated_at = $3
+         WHERE id = $4`,
+        [projectId, String(pr.rows[0].name || ''), now, id],
       );
 
       res.json(await ioLoadDetail(pool, id));
