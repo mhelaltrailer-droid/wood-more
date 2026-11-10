@@ -3570,6 +3570,17 @@ class ApiStorageService {
     if (r.statusCode >= 400) throw Exception(r.body);
   }
 
+  Future<void> removeInvoicesOwnerMonthlyChecklistEntry({
+    required int userId,
+    required int checklistId,
+  }) async {
+    final uri = Uri.parse(
+      _path('invoices-owner/monthly-checklist/entries/$checklistId'),
+    ).replace(queryParameters: {'userId': userId.toString()});
+    final r = await http.delete(uri, headers: _reqHeaders());
+    if (r.statusCode >= 400) throw Exception(r.body);
+  }
+
   Future<InvoicesOwnerModel> updateInvoicesOwnerClientFlags({
     required int invoiceId,
     required int userId,

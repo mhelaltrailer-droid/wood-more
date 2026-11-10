@@ -458,8 +458,10 @@ class InvoicesOwnerChainRoute {
 
 /// صف في تبويب Monthly Checklist (مشروع نشط + حالة مستخلص الشهر).
 class InvoicesOwnerMonthlyChecklistItem {
-  final int projectId;
+  final int checklistId;
+  final int? projectId;
   final String projectName;
+  final bool isOtherProject;
   final bool hasExtractThisMonth;
   final int? invoiceId;
   final String? extractNumber;
@@ -470,8 +472,10 @@ class InvoicesOwnerMonthlyChecklistItem {
   final bool clientReplied;
 
   const InvoicesOwnerMonthlyChecklistItem({
-    required this.projectId,
+    required this.checklistId,
+    this.projectId,
     required this.projectName,
+    this.isOtherProject = false,
     required this.hasExtractThisMonth,
     this.invoiceId,
     this.extractNumber,
@@ -482,10 +486,25 @@ class InvoicesOwnerMonthlyChecklistItem {
     required this.clientReplied,
   });
 
+  String get displayProjectName {
+    if (!isOtherProject) return projectName;
+    final base = projectName.trim();
+    if (base.isEmpty) return 'مشروع آخر';
+    if (base.contains('مشروع آخر')) return base;
+    return '$base (مشروع آخر)';
+  }
+
   factory InvoicesOwnerMonthlyChecklistItem.fromMap(Map<String, dynamic> map) {
     return InvoicesOwnerMonthlyChecklistItem(
-      projectId: (map['project_id'] as num).toInt(),
+      checklistId: (map['checklist_id'] as num?)?.toInt() ??
+          (map['checklistId'] as num?)?.toInt() ??
+          0,
+      projectId: (map['project_id'] as num?)?.toInt() ??
+          (map['projectId'] as num?)?.toInt(),
       projectName: (map['project_name'] ?? map['projectName'] ?? '').toString(),
+      isOtherProject: _asBool(
+        map['is_other_project'] ?? map['isOtherProject'],
+      ),
       hasExtractThisMonth: _asBool(
         map['has_extract_this_month'] ?? map['hasExtractThisMonth'],
       ),
@@ -508,8 +527,10 @@ class InvoicesOwnerMonthlyChecklistItem {
     bool? clientReplied,
   }) {
     return InvoicesOwnerMonthlyChecklistItem(
+      checklistId: checklistId,
       projectId: projectId,
       projectName: projectName,
+      isOtherProject: isOtherProject,
       hasExtractThisMonth: hasExtractThisMonth,
       invoiceId: invoiceId,
       extractNumber: extractNumber,

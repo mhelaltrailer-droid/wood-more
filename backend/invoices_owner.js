@@ -136,12 +136,42 @@ async function ensureInvoicesOwnerTables(pool) {
       await pool.query(`
         CREATE TABLE IF NOT EXISTS invoices_owner_monthly_checklist_projects (
           id SERIAL PRIMARY KEY,
-          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
           project_name TEXT NOT NULL DEFAULT '',
+          is_other_project BOOLEAN NOT NULL DEFAULT FALSE,
           added_by_user_id INTEGER REFERENCES users(id),
-          created_at TEXT NOT NULL,
-          UNIQUE (project_id)
+          created_at TEXT NOT NULL
         )
+      `);
+      await pool.query(`
+        ALTER TABLE invoices_owner_monthly_checklist_projects
+          ALTER COLUMN project_id DROP NOT NULL
+      `).catch(() => {});
+      await pool.query(`
+        ALTER TABLE invoices_owner_monthly_checklist_projects
+          ADD COLUMN IF NOT EXISTS is_other_project BOOLEAN NOT NULL DEFAULT FALSE
+      `);
+      await pool.query(`
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'invoices_owner_monthly_checklist_projects_project_id_key'
+          ) THEN
+            ALTER TABLE invoices_owner_monthly_checklist_projects
+              DROP CONSTRAINT invoices_owner_monthly_checklist_projects_project_id_key;
+          END IF;
+        END $$;
+      `).catch(() => {});
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_io_mcp_project_id
+        ON invoices_owner_monthly_checklist_projects (project_id)
+        WHERE project_id IS NOT NULL
+      `);
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_io_mcp_other_name
+        ON invoices_owner_monthly_checklist_projects (lower(trim(project_name)))
+        WHERE project_id IS NULL AND is_other_project = TRUE
       `);
     } catch (e) {
       console.warn(
@@ -166,6 +196,7 @@ async function ensureInvoicesOwnerTables(pool) {
       console.warn('ensureInvoicesOwnerTables attachment storage cols:', e.message);
     }
     await ioBackfillManualProjectLinks(pool);
+    await ioSyncMonthlyChecklistFromCurrentMonth(pool);
     console.log('ensureInvoicesOwnerTables: ok');
   } catch (e) {
     console.warn('ensureInvoicesOwnerTables:', e.message);
@@ -223,6 +254,159 @@ async function ioBackfillManualProjectLinks(pool) {
     }
   } catch (e) {
     console.warn('ioBackfillManualProjectLinks:', e.message);
+  }
+}
+
+async function ioUpsertMonthlyChecklistEntry(
+  pool,
+  { projectId = null, projectName = '', userId = null, isOther = false },
+) {
+  const name = String(projectName || '').trim();
+  if (!name && (projectId == null || Number.isNaN(projectId))) return null;
+  const now = new Date().toISOString();
+
+  if (projectId != null && !Number.isNaN(projectId) && !isOther) {
+    const existing = await pool.query(
+      `SELECT id FROM invoices_owner_monthly_checklist_projects
+       WHERE project_id = $1
+       LIMIT 1`,
+      [projectId],
+    );
+    if (existing.rows.length > 0) {
+      if (name) {
+        await pool.query(
+          `UPDATE invoices_owner_monthly_checklist_projects
+           SET project_name = $1
+           WHERE project_id = $2`,
+          [name, projectId],
+        );
+      }
+      return parseInt(existing.rows[0].id, 10);
+    }
+    const ins = await pool.query(
+      `INSERT INTO invoices_owner_monthly_checklist_projects (
+         project_id, project_name, is_other_project, added_by_user_id, created_at
+       ) VALUES ($1, $2, FALSE, $3, $4)
+       RETURNING id`,
+      [projectId, name, userId, now],
+    );
+    return parseInt(ins.rows[0].id, 10);
+  }
+
+  if (!name) return null;
+  const existingOther = await pool.query(
+    `SELECT id FROM invoices_owner_monthly_checklist_projects
+     WHERE project_id IS NULL
+       AND is_other_project = TRUE
+       AND lower(trim(project_name)) = lower(trim($1))
+     LIMIT 1`,
+    [name],
+  );
+  if (existingOther.rows.length > 0) {
+    return parseInt(existingOther.rows[0].id, 10);
+  }
+  const insOther = await pool.query(
+    `INSERT INTO invoices_owner_monthly_checklist_projects (
+       project_id, project_name, is_other_project, added_by_user_id, created_at
+     ) VALUES (NULL, $1, TRUE, $2, $3)
+     RETURNING id`,
+    [name, userId, now],
+  );
+  return parseInt(insOther.rows[0].id, 10);
+}
+
+async function ioSyncMonthlyChecklistFromCurrentMonth(pool) {
+  try {
+    const bounds = ioCurrentCalendarMonthBoundsEgypt();
+    const inv = await pool.query(
+      `SELECT DISTINCT ON (
+          CASE
+            WHEN project_id IS NOT NULL THEN 'id:' || project_id::text
+            ELSE 'name:' || lower(trim(project_name))
+          END
+        )
+        project_id, project_name, created_by_user_id
+       FROM invoices_owner
+       WHERE created_at >= $1
+         AND created_at < $2
+         AND trim(COALESCE(project_name, '')) <> ''
+       ORDER BY
+         CASE
+           WHEN project_id IS NOT NULL THEN 'id:' || project_id::text
+           ELSE 'name:' || lower(trim(project_name))
+         END,
+         id DESC`,
+      [bounds.startIso, bounds.endIso],
+    );
+    for (const row of inv.rows) {
+      const projectId =
+        row.project_id != null ? parseInt(row.project_id, 10) : null;
+      await ioUpsertMonthlyChecklistEntry(pool, {
+        projectId: Number.isNaN(projectId) ? null : projectId,
+        projectName: row.project_name || '',
+        userId:
+          row.created_by_user_id != null
+            ? parseInt(row.created_by_user_id, 10)
+            : null,
+        isOther: projectId == null || Number.isNaN(projectId),
+      });
+    }
+  } catch (e) {
+    console.warn('ioSyncMonthlyChecklistFromCurrentMonth:', e.message);
+  }
+}
+
+async function ioRemoveChecklistIfNoCurrentMonthInvoice(pool, invoiceRow) {
+  try {
+    const bounds = ioCurrentCalendarMonthBoundsEgypt();
+    const projectId =
+      invoiceRow.project_id != null
+        ? parseInt(invoiceRow.project_id, 10)
+        : null;
+    const projectName = String(invoiceRow.project_name || '').trim();
+    const excludeId = parseInt(invoiceRow.id, 10);
+
+    let remaining;
+    if (projectId != null && !Number.isNaN(projectId)) {
+      remaining = await pool.query(
+        `SELECT id FROM invoices_owner
+         WHERE project_id = $1
+           AND id <> $2
+           AND created_at >= $3
+           AND created_at < $4
+         LIMIT 1`,
+        [projectId, excludeId, bounds.startIso, bounds.endIso],
+      );
+      if (remaining.rows.length > 0) return;
+      await pool.query(
+        `DELETE FROM invoices_owner_monthly_checklist_projects
+         WHERE project_id = $1`,
+        [projectId],
+      );
+      return;
+    }
+
+    if (!projectName) return;
+    remaining = await pool.query(
+      `SELECT id FROM invoices_owner
+       WHERE project_id IS NULL
+         AND lower(trim(project_name)) = lower(trim($1))
+         AND id <> $2
+         AND created_at >= $3
+         AND created_at < $4
+       LIMIT 1`,
+      [projectName, excludeId, bounds.startIso, bounds.endIso],
+    );
+    if (remaining.rows.length > 0) return;
+    await pool.query(
+      `DELETE FROM invoices_owner_monthly_checklist_projects
+       WHERE project_id IS NULL
+         AND is_other_project = TRUE
+         AND lower(trim(project_name)) = lower(trim($1))`,
+      [projectName],
+    );
+  } catch (e) {
+    console.warn('ioRemoveChecklistIfNoCurrentMonthInvoice:', e.message);
   }
 }
 
@@ -1213,20 +1397,27 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(403).json({ error: 'forbidden' });
       }
 
+      await ioSyncMonthlyChecklistFromCurrentMonth(pool);
+
       const bounds = ioCurrentCalendarMonthBoundsEgypt();
       const monthKey = `${bounds.year}-${String(bounds.month).padStart(2, '0')}`;
       const projects = await pool.query(
-        `SELECT c.project_id, COALESCE(NULLIF(p.name, ''), c.project_name) AS project_name
+        `SELECT c.id AS checklist_id, c.project_id, c.is_other_project,
+                CASE
+                  WHEN c.project_id IS NOT NULL
+                    THEN COALESCE(NULLIF(p.name, ''), c.project_name)
+                  ELSE c.project_name
+                END AS project_name
          FROM invoices_owner_monthly_checklist_projects c
          LEFT JOIN projects p ON p.id = c.project_id
-         ORDER BY project_name ASC, c.project_id ASC`,
+         ORDER BY project_name ASC, c.id ASC`,
       );
 
       const projectIds = projects.rows
-        .map((r) => parseInt(r.project_id, 10))
-        .filter((id) => !Number.isNaN(id));
+        .map((r) => (r.project_id != null ? parseInt(r.project_id, 10) : null))
+        .filter((id) => id != null && !Number.isNaN(id));
 
-      const invoiceByProject = new Map();
+      const invoiceByProjectId = new Map();
       if (projectIds.length > 0) {
         const inv = await pool.query(
           `SELECT DISTINCT ON (project_id)
@@ -1240,20 +1431,59 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
           [projectIds, bounds.startIso, bounds.endIso],
         );
         for (const row of inv.rows) {
-          invoiceByProject.set(parseInt(row.project_id, 10), row);
+          invoiceByProjectId.set(parseInt(row.project_id, 10), row);
+        }
+      }
+
+      const otherNames = projects.rows
+        .filter((r) => r.project_id == null || ioAsBool(r.is_other_project))
+        .map((r) => String(r.project_name || '').trim().toLowerCase())
+        .filter((n) => n);
+      const invoiceByOtherName = new Map();
+      if (otherNames.length > 0) {
+        const invOther = await pool.query(
+          `SELECT DISTINCT ON (lower(trim(project_name)))
+              id, project_id, project_name, status, extract_number,
+              sent_to_client, client_replied, created_at
+           FROM invoices_owner
+           WHERE project_id IS NULL
+             AND lower(trim(project_name)) = ANY($1::text[])
+             AND created_at >= $2
+             AND created_at < $3
+           ORDER BY lower(trim(project_name)), created_at DESC, id DESC`,
+          [otherNames, bounds.startIso, bounds.endIso],
+        );
+        for (const row of invOther.rows) {
+          invoiceByOtherName.set(
+            String(row.project_name || '').trim().toLowerCase(),
+            row,
+          );
         }
       }
 
       res.json({
         month: monthKey,
         items: projects.rows.map((p) => {
-          const projectId = parseInt(p.project_id, 10);
-          const inv = invoiceByProject.get(projectId) || null;
+          const checklistId = parseInt(p.checklist_id, 10);
+          const projectId =
+            p.project_id != null ? parseInt(p.project_id, 10) : null;
+          const isOther =
+            ioAsBool(p.is_other_project) ||
+            projectId == null ||
+            Number.isNaN(projectId);
+          const inv = !isOther && projectId != null
+            ? invoiceByProjectId.get(projectId) || null
+            : invoiceByOtherName.get(
+                String(p.project_name || '').trim().toLowerCase(),
+              ) || null;
           const hasExtract = !!inv;
           const status = inv ? String(inv.status || '') : '';
           return {
-            project_id: projectId,
+            checklist_id: checklistId,
+            project_id:
+              projectId != null && !Number.isNaN(projectId) ? projectId : null,
             project_name: p.project_name || '',
+            is_other_project: isOther,
             has_extract_this_month: hasExtract,
             invoice_id: inv ? parseInt(inv.id, 10) : null,
             extract_number: inv && inv.extract_number
@@ -1293,23 +1523,16 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         return res.status(404).json({ error: 'project_not_found' });
       }
 
-      const existing = await pool.query(
-        `SELECT project_id FROM invoices_owner_monthly_checklist_projects
-         WHERE project_id = $1`,
-        [projectId],
-      );
-      if (existing.rows.length > 0) {
+      const checklistId = await ioUpsertMonthlyChecklistEntry(pool, {
+        projectId,
+        projectName: String(pr.rows[0].name || ''),
+        userId,
+        isOther: false,
+      });
+      if (checklistId == null) {
         return res.status(409).json({ error: 'already_added' });
       }
-
-      const now = new Date().toISOString();
-      await pool.query(
-        `INSERT INTO invoices_owner_monthly_checklist_projects (
-           project_id, project_name, added_by_user_id, created_at
-         ) VALUES ($1, $2, $3, $4)`,
-        [projectId, String(pr.rows[0].name || ''), userId, now],
-      );
-      res.json({ ok: true, project_id: projectId });
+      res.json({ ok: true, project_id: projectId, checklist_id: checklistId });
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
     }
@@ -1336,6 +1559,38 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
            WHERE project_id = $1
            RETURNING project_id`,
           [projectId],
+        );
+        if (del.rows.length === 0) {
+          return res.status(404).json({ error: 'not found' });
+        }
+        res.json({ ok: true });
+      } catch (e) {
+        res.status(500).json({ error: String(e.message) });
+      }
+    },
+  );
+
+  app.delete(
+    '/invoices-owner/monthly-checklist/entries/:checklistId',
+    async (req, res) => {
+      try {
+        const checklistId = parseInt(String(req.params.checklistId || ''), 10);
+        const userId = parseInt(
+          String(req.query.userId || req.body?.userId || ''),
+          10,
+        );
+        if (Number.isNaN(checklistId) || Number.isNaN(userId)) {
+          return res.status(400).json({ error: 'invalid' });
+        }
+        const user = await ioGetUser(pool, userId, req);
+        if (!user || !ioCanManageMonthlyChecklist(user)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+        const del = await pool.query(
+          `DELETE FROM invoices_owner_monthly_checklist_projects
+           WHERE id = $1
+           RETURNING id`,
+          [checklistId],
         );
         if (del.rows.length === 0) {
           return res.status(404).json({ error: 'not found' });
@@ -1593,6 +1848,12 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         comment: notes || null,
         createdAt: now,
       });
+      await ioUpsertMonthlyChecklistEntry(pool, {
+        projectId: project.project_id,
+        projectName: project.project_name,
+        userId,
+        isOther: project.project_id == null,
+      });
 
       const title = 'Invoices (Owner) — طلب جديد';
       const body = ioNotificationBody(actor.name, 'رفع', project.project_name, now);
@@ -1676,6 +1937,12 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
         action: 'resubmit',
         comment: notes || null,
         createdAt: now,
+      });
+      await ioUpsertMonthlyChecklistEntry(pool, {
+        projectId: project.project_id,
+        projectName: project.project_name,
+        userId,
+        isOther: project.project_id == null,
       });
 
       const title = 'Invoices (Owner) — إعادة إرسال';
@@ -2157,10 +2424,15 @@ function registerInvoicesOwnerRoutes(app, pool, deps) {
       const actor = await ioGetUser(pool, userId, req);
       if (!ioIsPrimaryAdmin(actor)) return res.status(403).json({ error: 'forbidden' });
 
-      const rq = await pool.query('SELECT id FROM invoices_owner WHERE id = $1', [id]);
+      const rq = await pool.query(
+        'SELECT id, project_id, project_name, created_at FROM invoices_owner WHERE id = $1',
+        [id],
+      );
       if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      const deletedRow = rq.rows[0];
 
       await pool.query('DELETE FROM invoices_owner WHERE id = $1', [id]);
+      await ioRemoveChecklistIfNoCurrentMonthInvoice(pool, deletedRow);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: String(e.message) });
