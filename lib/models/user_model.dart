@@ -360,6 +360,10 @@ class UserModel {
 
   bool get canViewReportsSysAllTab => canViewReportsSysFullAccess;
 
+  /// تصدير PDF للتقارير المؤرشفة — مدير العمليات + مسؤولو التطبيق.
+  bool get canExportReportsSysArchivePdf =>
+      isOperationManager || isAdmin;
+
   /// تبويب سجل حركات Reports-SYS — Operation Manager + المسؤول الأساسي فقط.
   bool get canViewReportsSysActivityLog =>
       isOperationManager || isPrimaryAppAdmin;

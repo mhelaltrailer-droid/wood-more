@@ -5,6 +5,7 @@ import '../models/reports_sys_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
+import '../utils/reports_sys_archive_pdf.dart';
 import '../widgets/reports_sys_timeline.dart';
 import '../widgets/reports_sys_attachments_panel.dart';
 import 'reports_sys_form_screen.dart';
@@ -32,6 +33,7 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
   List<UserModel> _users = const [];
   bool _loading = true;
   bool _acting = false;
+  bool _exportingPdf = false;
   String? _error;
   int? _forwardToUserId;
 
@@ -260,6 +262,31 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
     );
   }
 
+  Future<void> _exportArchivePdf() async {
+    final report = _report;
+    if (report == null || _storage is! ApiStorageService) return;
+    if (!widget.currentUser.canExportReportsSysArchivePdf) return;
+    if (report.status != ReportsSysModel.statusArchived) return;
+    if (_exportingPdf) return;
+    setState(() => _exportingPdf = true);
+    try {
+      await shareReportsSysArchivePdf(
+        report: report,
+        loadAttachment: (attachmentId) => _storage.getReportsSysAttachmentData(
+          reportId: report.id,
+          attachmentId: attachmentId,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingPdf = false);
+    }
+  }
+
   Future<void> _deleteReport() async {
     final report = _report;
     if (report == null || _storage is! ApiStorageService) return;
@@ -342,6 +369,8 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
     final canRelaunch = report.isTerminal;
     final showAssigneePicker =
         canAct || canResubmitAfterReturn || canCreatorResendPending;
+    final canExportPdf = report.status == ReportsSysModel.statusArchived &&
+        widget.currentUser.canExportReportsSysArchivePdf;
 
     return Scaffold(
       appBar: AppBar(
@@ -349,6 +378,21 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
         backgroundColor: const Color(0xFF1B5E20),
         foregroundColor: Colors.white,
         actions: [
+          if (canExportPdf)
+            IconButton(
+              tooltip: 'export-pdf',
+              onPressed: (_acting || _exportingPdf) ? null : _exportArchivePdf,
+              icon: _exportingPdf
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.picture_as_pdf_outlined),
+            ),
           if (canEdit)
             IconButton(
               tooltip: 'تعديل',
@@ -530,6 +574,27 @@ class _ReportsSysDetailScreenState extends State<ReportsSysDetailScreen> {
                   ),
                 ),
               ],
+            ),
+          ],
+          if (canExportPdf) ...[
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: (_acting || _exportingPdf) ? null : _exportArchivePdf,
+              icon: _exportingPdf
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.picture_as_pdf_outlined),
+              label: const Text('export-pdf'),
             ),
           ],
           if (canRelaunch) ...[
