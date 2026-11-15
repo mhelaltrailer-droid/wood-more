@@ -184,12 +184,21 @@ class ReportsSysModel {
   static const String otherProjectLabel = 'مشروع اخر';
   static const int maxAttachmentBytes = 5 * 1024 * 1024;
 
-  /// مستخدمون لا يظهرون في قائمة «المسند إليه».
+  /// مستخدمون لا يظهرون في قائمة «المسند إليه» (بريد).
   static const Set<String> hiddenAssigneeEmails = {
     'cipherpath@proton.me', // cipherpath
     'shalaby', // Eng/M.shalaby
     'mahatowab@gmail.com', // Eng/Maha
     'mouhamedhelal.cor@gmail.com', // Manager Tester
+  };
+
+  /// أسماء ظاهرة تُستبعد من قائمة المسند إليه في Reports-SYS فقط.
+  static const Set<String> hiddenAssigneeDisplayNames = {
+    'helal',
+    'nashwa',
+    'admin',
+    'admin1',
+    'testsiteengineer',
   };
 
   static String _normalizeAssigneeKey(String value) => value
@@ -207,6 +216,8 @@ class ReportsSysModel {
     if (e.contains('cipherpath')) return true;
 
     final compact = _normalizeAssigneeKey(name);
+    if (hiddenAssigneeDisplayNames.contains(compact)) return true;
+
     const nameNeedles = [
       'cipherpath',
       'engmshalaby',

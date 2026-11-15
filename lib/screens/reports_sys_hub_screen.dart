@@ -5,6 +5,7 @@ import '../models/reports_sys_model.dart';
 import '../models/user_model.dart';
 import '../services/api_storage_service.dart';
 import '../services/storage_service.dart';
+import '../utils/reports_sys_archive_pdf.dart';
 import 'reports_sys_detail_screen.dart';
 import 'reports_sys_form_screen.dart';
 
@@ -33,6 +34,7 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
   List<ReportsSysActivityLogEntry> _activity = const [];
   String _archiveSearch = '';
   String _rejectedSearch = '';
+  int? _exportingReportId;
 
   List<_TabDef> get _tabs {
     final tabs = <_TabDef>[
@@ -188,6 +190,38 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
     if (changed == true) await _loadAll();
   }
 
+  Future<void> _exportArchivePdf(ReportsSysModel report) async {
+    if (!widget.currentUser.canExportReportsSysArchivePdf) return;
+    if (_storage is! ApiStorageService) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reports-SYS يتطلب اتصال API'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    if (_exportingReportId != null) return;
+    setState(() => _exportingReportId = report.id);
+    try {
+      final detail = await _storage.getReportsSysDetail(report.id);
+      await shareReportsSysArchivePdf(
+        report: detail,
+        loadAttachment: (attachmentId) => _storage.getReportsSysAttachmentData(
+          reportId: detail.id,
+          attachmentId: attachmentId,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingReportId = null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final tabs = _tabs;
@@ -272,6 +306,8 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
                           return _buildTabList(
                             items: items,
                             fmt: fmt,
+                            showExportPdf: t.key == 'archive' &&
+                                widget.currentUser.canExportReportsSysArchivePdf,
                             emptyMessage: _tabSupportsSearch(t.key) &&
                                     _searchForTab(t.key).isNotEmpty
                                 ? 'لا توجد نتائج للبحث'
@@ -345,6 +381,7 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
     required List<ReportsSysModel> items,
     required DateFormat fmt,
     required String emptyMessage,
+    bool showExportPdf = false,
   }) {
     if (items.isEmpty) {
       return RefreshIndicator(
@@ -366,6 +403,7 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (context, index) {
           final r = items[index];
+          final exporting = _exportingReportId == r.id;
           return Card(
             child: ListTile(
               onTap: () => _openReport(r),
@@ -393,7 +431,21 @@ class _ReportsSysHubScreenState extends State<ReportsSysHubScreen>
                   Text(fmt.format(r.updatedAt)),
                 ],
               ),
-              trailing: const Icon(Icons.chevron_left),
+              trailing: showExportPdf
+                  ? IconButton(
+                      tooltip: 'export-pdf',
+                      onPressed: (_exportingReportId != null)
+                          ? null
+                          : () => _exportArchivePdf(r),
+                      icon: exporting
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.picture_as_pdf_outlined),
+                    )
+                  : const Icon(Icons.chevron_left),
             ),
           );
         },
