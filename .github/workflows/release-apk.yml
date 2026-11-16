@@ -1,0 +1,289 @@
+# Builds sideload release APKs and attaches them to a GitHub Release.
+# Manual run: Actions → Release APK → Run workflow.
+# Tag run: push a tag vX.Y.Z that matches the version name in pubspec.yaml.
+#
+# Flutter is pinned to 3.44.9 (stable, Dart 3.12.2). pubspec.lock requires
+# Flutter >= 3.44 and Dart >= 3.12, which satisfies pubspec sdk: ^3.11.0.
+# Current stable (3.50) rejects this project's AGP 8.11.1 / Gradle 8.14.
+name: Release APK
+
+"on":
+  workflow_dispatch:
+    inputs:
+      universal:
+        description: Also build a universal APK
+        required: false
+        default: true
+        type: boolean
+      include_x86_64:
+        description: Also build an x86_64 APK (emulators only)
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    name: Build release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.44.9"
+          cache: true
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          version_line=$(grep -E '^version:' pubspec.yaml | head -n 1 | awk '{print $2}' | tr -d "\"'")
+          if [[ ! "$version_line" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$ ]]; then
+            echo "pubspec.yaml version must look like 1.2.3+4 (found: ${version_line:-empty})." >&2
+            exit 1
+          fi
+          version_name="${BASH_REMATCH[1]}"
+          version_code="${BASH_REMATCH[2]}"
+          release_tag="v${version_name}"
+
+          if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+            tag="${GITHUB_REF_NAME:-}"
+            if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(\+([0-9]+))?$ ]]; then
+              echo "Tag ${tag} does not match pubspec version ${version_name}." >&2
+              echo "Push a tag v${version_name} (optional build suffix +${version_code})." >&2
+              exit 1
+            fi
+            tag_name="${BASH_REMATCH[1]}"
+            tag_code="${BASH_REMATCH[3]:-}"
+            if [[ "$tag_name" != "$version_name" ]]; then
+              echo "Tag ${tag} does not match pubspec version ${version_name}." >&2
+              echo "Bump pubspec.yaml or push v${version_name}." >&2
+              exit 1
+            fi
+            if [[ -n "$tag_code" && "$tag_code" != "$version_code" ]]; then
+              echo "Tag build ${tag_code} does not match pubspec build ${version_code}." >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "version_name=${version_name}"
+            echo "version_code=${version_code}"
+            echo "release_tag=${release_tag}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version ${version_name}+${version_code} (release ${release_tag})"
+
+      - name: Configure release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          count=0
+          [[ -n "${KEYSTORE_BASE64-}" ]] && count=$((count + 1))
+          [[ -n "${KEYSTORE_PASSWORD-}" ]] && count=$((count + 1))
+          [[ -n "${KEY_ALIAS-}" ]] && count=$((count + 1))
+          [[ -n "${KEY_PASSWORD-}" ]] && count=$((count + 1))
+
+          if [[ "$count" -eq 0 ]]; then
+            echo "::warning title=Debug signing::Release keystore secrets are not set. APKs will be signed with the Android debug key. A later release key cannot update an app that was installed with the debug key."
+            mkdir -p "${HOME}/.android"
+            if [[ ! -f "${HOME}/.android/debug.keystore" ]]; then
+              keytool -genkeypair -keystore "${HOME}/.android/debug.keystore" \
+                -storepass android \
+                -alias androiddebugkey \
+                -keypass android \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
+            echo "No release keystore secrets. android/app/build.gradle.kts will use the debug signingConfig."
+            exit 0
+          fi
+
+          if [[ "$count" -ne 4 ]]; then
+            echo "::error::Signing secrets are incomplete (${count}/4). Set all of KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD, or leave all of them empty."
+            exit 1
+          fi
+
+          mkdir -p android/app
+          if ! printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > android/app/upload-keystore.jks; then
+            echo "::error::KEYSTORE_BASE64 is not valid base64."
+            exit 1
+          fi
+          size=$(wc -c < android/app/upload-keystore.jks | tr -d ' ')
+          if [[ "$size" -lt 64 ]]; then
+            echo "::error::Decoded keystore is unexpectedly small (${size} bytes)."
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          def escape(value: str) -> str:
+              out = []
+              for ch in value:
+                  code = ord(ch)
+                  if ch == "\\":
+                      out.append("\\\\")
+                  elif ch == "\n":
+                      out.append("\\n")
+                  elif ch == "\r":
+                      out.append("\\r")
+                  elif ch == "\t":
+                      out.append("\\t")
+                  elif ch in "=: #!" or code < 0x20 or code > 0x7E:
+                      if ch in "=: #!":
+                          out.append("\\" + ch)
+                      else:
+                          out.append(f"\\u{code:04x}")
+                  else:
+                      out.append(ch)
+              return "".join(out)
+
+          lines = [
+              f"storePassword={escape(os.environ['KEYSTORE_PASSWORD'])}",
+              f"keyPassword={escape(os.environ['KEY_PASSWORD'])}",
+              f"keyAlias={escape(os.environ['KEY_ALIAS'])}",
+              "storeFile=app/upload-keystore.jks",
+          ]
+          Path("android/key.properties").write_text("\n".join(lines) + "\n", encoding="ascii")
+          PY
+          chmod 600 android/key.properties android/app/upload-keystore.jks
+          echo "Release keystore decoded (${size} bytes). Wrote android/key.properties. Secret values were not printed."
+
+      - name: Build release APKs
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          UNIVERSAL: ${{ (github.event_name != 'workflow_dispatch' || inputs.universal) && 'true' || 'false' }}
+          INCLUDE_X86_64: ${{ (github.event_name == 'workflow_dispatch' && inputs.include_x86_64) && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          platforms="android-arm,android-arm64"
+          if [[ "$INCLUDE_X86_64" == "true" ]]; then
+            platforms="${platforms},android-x64"
+          fi
+
+          out_dir="build/app/outputs/flutter-apk"
+          dist_dir="${out_dir}/dist"
+          mkdir -p "$dist_dir"
+          file_version="${VERSION_NAME}-${VERSION_CODE}"
+
+          copy_apk() {
+            local src_name="$1"
+            local dest_name="$2"
+            local src="${out_dir}/${src_name}"
+            if [[ ! -f "$src" ]]; then
+              echo "Expected APK was not produced: ${src}" >&2
+              exit 1
+            fi
+            cp -f "$src" "${dist_dir}/${dest_name}"
+            echo "${dist_dir}/${dest_name}"
+          }
+
+          echo "Building split release APKs (${platforms}) for ${VERSION_NAME}+${VERSION_CODE}"
+          flutter build apk --release \
+            --split-per-abi \
+            --target-platform "$platforms"
+
+          copy_apk "app-armeabi-v7a-release.apk" "wood-more-${file_version}-armeabi-v7a.apk"
+          copy_apk "app-arm64-v8a-release.apk" "wood-more-${file_version}-arm64-v8a.apk"
+          if [[ "$INCLUDE_X86_64" == "true" ]]; then
+            copy_apk "app-x86_64-release.apk" "wood-more-${file_version}-x86_64.apk"
+          fi
+
+          if [[ "$UNIVERSAL" == "true" ]]; then
+            echo "Building universal release APK"
+            flutter build apk --release
+            copy_apk "app-release.apk" "wood-more-${file_version}-universal.apk"
+          fi
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wood-more-apk-${{ steps.version.outputs.version_name }}-${{ steps.version.outputs.version_code }}
+          path: build/app/outputs/flutter-apk/dist/*.apk
+          if-no-files-found: error
+
+      - name: Attach APKs to the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          notes=$(mktemp)
+          NOTES_PATH="$notes" python3 - <<'PY'
+          import os
+          from pathlib import Path
+          version_name = os.environ["VERSION_NAME"]
+          version_code = os.environ["VERSION_CODE"]
+          Path(os.environ["NOTES_PATH"]).write_text(
+              f"""## Wood & More {version_name} ({version_code})
+
+          Sideload APKs. Application id: `com.example.wood_and_more_app`.
+
+          - `arm64-v8a`: most current Android phones.
+          - `armeabi-v7a`: older 32-bit phones.
+          - `universal`: one file for every ABI. Larger download.
+          - `x86_64`: emulators only. Built only when a manual run asks for it.
+
+          ## وود آند مور {version_name} ({version_code})
+
+          ملفات تثبيت جانبي. معرّف التطبيق: `com.example.wood_and_more_app`.
+
+          - `arm64-v8a`: معظم موبايلات أندرويد الحالية.
+          - `armeabi-v7a`: الموبايلات الأقدم ٣٢ بت.
+          - `universal`: ملف واحد لكل المعماريات، وحجمه أكبر.
+          - `x86_64`: للمحاكي فقط، ويُبنى عند طلبه في التشغيل اليدوي.
+          """,
+              encoding="utf-8",
+          )
+          PY
+          shopt -s nullglob
+          files=(build/app/outputs/flutter-apk/dist/*.apk)
+          if [[ "${#files[@]}" -eq 0 ]]; then
+            echo "No APKs found to publish." >&2
+            exit 1
+          fi
+          title="Wood & More ${VERSION_NAME} (${VERSION_CODE})"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+            gh release edit "$RELEASE_TAG" --title "$title" --notes-file "$notes"
+          else
+            gh release create "$RELEASE_TAG" "${files[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "$title" \
+              --notes-file "$notes"
+          fi
