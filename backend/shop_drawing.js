@@ -278,6 +278,22 @@ async function shopDrawingInsertAction(pool, fields) {
   );
 }
 
+/** آخر إجراء إرجاع (PM أو OM) يحدد وجهة إعادة إرسال المكتب الفني. */
+async function shopDrawingLastReturnAction(pool, drawingId) {
+  const r = await pool.query(
+    `SELECT action FROM shop_drawing_actions
+     WHERE drawing_id = $1 AND action IN ('pm_return', 'om_return')
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`,
+    [drawingId],
+  );
+  return r.rows[0]?.action || null;
+}
+
+function shopDrawingIsOmActor(user) {
+  return !!user && String(user.role || '') === 'operation_manager';
+}
+
 async function shopDrawingNotifyBellUsers(pool, runNotificationSafely, fields) {
   await runNotificationSafely('shopDrawingNotifyBellUsers', async () => {
     const ids = await shopDrawingGetBellRecipientIds(pool);
@@ -965,23 +981,31 @@ function registerShopDrawingRoutes(app, pool, deps) {
       if (contentCheck.error) return res.status(400).json({ error: contentCheck.error });
       const contentFlags = shopDrawingParseContentFlags(b);
 
+      // إرجاع OM → بعد التعديل يذهب مباشرة لـ pending_om؛ إرجاع PM → pending_pm.
+      const lastReturn = await shopDrawingLastReturnAction(pool, id);
+      const goToOm = lastReturn === 'om_return';
+      const nextStatus = goToOm ? 'pending_om' : 'pending_pm';
+      const assigneeId = goToOm ? null : parseInt(pm.id, 10);
+      const assigneeName = goToOm ? null : pm.name;
+
       const now = new Date().toISOString();
       await pool.query(
         `UPDATE shop_drawings SET project_id=$1, project_name=$2, notes=$3,
-         status='pending_pm', return_reason=NULL, external_url=$4,
-         content_sd=$5, content_qs=$6, content_dashboard=$7,
-         current_assignee_user_id=$8, current_assignee_user_name=$9,
-         updated_at=$10 WHERE id=$11`,
+         status=$4, return_reason=NULL, external_url=$5,
+         content_sd=$6, content_qs=$7, content_dashboard=$8,
+         current_assignee_user_id=$9, current_assignee_user_name=$10,
+         updated_at=$11 WHERE id=$12`,
         [
           project.project_id,
           project.project_name,
           notes || null,
+          nextStatus,
           contentCheck.externalUrl,
           contentFlags.content_sd,
           contentFlags.content_qs,
           contentFlags.content_dashboard,
-          parseInt(pm.id, 10),
-          pm.name,
+          assigneeId,
+          assigneeName,
           now,
           id,
         ],
@@ -1000,7 +1024,7 @@ function registerShopDrawingRoutes(app, pool, deps) {
 
       const title = shopDrawingNotifyTitle(
         shopDrawingNormalizeDocumentType(row.document_type),
-        'إعادة إرسال',
+        goToOm ? 'إعادة إرسال لمدير العمليات' : 'إعادة إرسال',
       );
       const body = shopDrawingNotificationBody(
         actor.name,
@@ -1008,11 +1032,13 @@ function registerShopDrawingRoutes(app, pool, deps) {
         project.project_name,
         now,
       );
-      await shopDrawingNotifyModuleUser(pool, runNotificationSafely, parseInt(pm.id, 10), {
-        title,
-        body,
-        shopDrawingId: id,
-      });
+      if (!goToOm) {
+        await shopDrawingNotifyModuleUser(pool, runNotificationSafely, parseInt(pm.id, 10), {
+          title,
+          body,
+          shopDrawingId: id,
+        });
+      }
       await shopDrawingNotifyBellUsers(pool, runNotificationSafely, {
         title,
         body,
@@ -1204,6 +1230,164 @@ function registerShopDrawingRoutes(app, pool, deps) {
         title,
         body: shopDrawingNotificationBody(actor.name, 'اعتماد نهائي لـ', projectName, now),
         shopDrawingId: id,
+      });
+
+      res.json(await shopDrawingLoadDetail(pool, id));
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  app.post('/shop-drawing/:id/om-return', async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const userId = parseInt(String(req.body?.userId ?? req.body?.user_id ?? ''), 10);
+      const reason = String(req.body?.reason ?? req.body?.comment ?? '').trim();
+      if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
+      if (!reason) return res.status(400).json({ error: 'reason_required' });
+
+      const actor = await shopDrawingGetUser(pool, userId, req);
+      if (!shopDrawingIsOmActor(actor)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const rq = await pool.query('SELECT * FROM shop_drawings WHERE id = $1', [id]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      const row = rq.rows[0];
+      if (String(row.status) !== 'pending_om') {
+        return res.status(400).json({ error: 'invalid_status' });
+      }
+
+      const creatorId = parseInt(row.created_by_user_id, 10);
+      const now = new Date().toISOString();
+      const creator = await shopDrawingGetUser(pool, creatorId);
+      await pool.query(
+        `UPDATE shop_drawings SET status='returned_to_to', return_reason=$1,
+         current_assignee_user_id=$2, current_assignee_user_name=$3, updated_at=$4
+         WHERE id=$5`,
+        [reason, creatorId, creator?.name || row.created_by_user_name, now, id],
+      );
+      await shopDrawingInsertAction(pool, {
+        drawingId: id,
+        actorUserId: userId,
+        actorUserName: actor.name,
+        action: 'om_return',
+        comment: reason,
+        createdAt: now,
+      });
+
+      const projectName = String(row.project_name || '');
+      const docType = shopDrawingNormalizeDocumentType(row.document_type);
+      const title = shopDrawingNotifyTitle(docType, 'إعادة للمراجعة من مدير العمليات');
+      const body = `أعاد ${actor.name} طلب مشروع «${projectName}» للمراجعة.\nالسبب: ${reason}\nيوم ${shopDrawingFormatArDateTime(now)}`;
+      await shopDrawingNotifyModuleUser(pool, runNotificationSafely, creatorId, {
+        title,
+        body,
+        shopDrawingId: id,
+      });
+      await shopDrawingNotifyBellUsers(pool, runNotificationSafely, {
+        title,
+        body,
+        shopDrawingId: id,
+      });
+
+      res.json(await shopDrawingLoadDetail(pool, id));
+    } catch (e) {
+      res.status(500).json({ error: String(e.message) });
+    }
+  });
+
+  /**
+   * تعديل OM قبل الاعتماد: checkboxes + رابط + استبدال دفعة المرفقات (إن أُرسلت).
+   * بدون attachments في الـ body تبقى المرفقات الحالية.
+   * بدون إشعار (حفظ صامت).
+   */
+  app.put('/shop-drawing/:id/om-edit', async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id || ''), 10);
+      const b = req.body || {};
+      const userId = parseInt(String(b.userId ?? b.user_id ?? ''), 10);
+      if (Number.isNaN(id) || Number.isNaN(userId)) return res.status(400).json({ error: 'invalid' });
+
+      const actor = await shopDrawingGetUser(pool, userId, req);
+      if (!shopDrawingIsOmActor(actor)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+
+      const rq = await pool.query('SELECT * FROM shop_drawings WHERE id = $1', [id]);
+      if (rq.rows.length === 0) return res.status(404).json({ error: 'not found' });
+      const row = rq.rows[0];
+      if (String(row.status) !== 'pending_om') {
+        return res.status(400).json({ error: 'not_editable' });
+      }
+
+      const replaceAttachments = Object.prototype.hasOwnProperty.call(b, 'attachments') ||
+        Object.prototype.hasOwnProperty.call(b, 'Attachments');
+      const attachments = Array.isArray(b.attachments) ? b.attachments : [];
+      const externalRaw = b.externalUrl ?? b.external_url;
+      const hasExternalKey =
+        Object.prototype.hasOwnProperty.call(b, 'externalUrl') ||
+        Object.prototype.hasOwnProperty.call(b, 'external_url');
+      const nextExternalRaw = hasExternalKey ? externalRaw : row.external_url;
+
+      let nextExternalUrl = row.external_url || null;
+      if (hasExternalKey) {
+        const urlResult = shopDrawingNormalizeExternalUrl(nextExternalRaw);
+        if (urlResult?.error) return res.status(400).json({ error: urlResult.error });
+        nextExternalUrl = urlResult?.url ?? null;
+      }
+
+      if (replaceAttachments) {
+        const attResult = shopDrawingValidateAttachmentsList(attachments);
+        if (attResult.error) return res.status(400).json({ error: attResult.error });
+      }
+
+      const existingAttCount = replaceAttachments
+        ? 0
+        : (
+            await pool.query(
+              'SELECT COUNT(*)::int AS count FROM shop_drawing_attachments WHERE drawing_id = $1',
+              [id],
+            )
+          ).rows[0]?.count || 0;
+      const hasFiles = replaceAttachments
+        ? attachments.length > 0
+        : existingAttCount > 0;
+      if (!hasFiles && !nextExternalUrl) {
+        return res.status(400).json({ error: 'file_or_url_required' });
+      }
+
+      const contentFlags = shopDrawingParseContentFlags(b);
+      const now = new Date().toISOString();
+      await pool.query(
+        `UPDATE shop_drawings SET
+           external_url=$1,
+           content_sd=$2, content_qs=$3, content_dashboard=$4,
+           updated_at=$5
+         WHERE id=$6`,
+        [
+          nextExternalUrl,
+          contentFlags.content_sd,
+          contentFlags.content_qs,
+          contentFlags.content_dashboard,
+          now,
+          id,
+        ],
+      );
+
+      if (replaceAttachments) {
+        await shopDrawingDeleteAttachments(pool, id);
+        if (attachments.length > 0) {
+          await shopDrawingInsertAttachments(pool, id, attachments, now);
+        }
+      }
+
+      await shopDrawingInsertAction(pool, {
+        drawingId: id,
+        actorUserId: userId,
+        actorUserName: actor.name,
+        action: 'om_edit',
+        createdAt: now,
       });
 
       res.json(await shopDrawingLoadDetail(pool, id));

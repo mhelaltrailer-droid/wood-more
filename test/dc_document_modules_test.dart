@@ -233,6 +233,51 @@ void main() {
       );
     });
 
+    test('معاد للمكتب الفني من مدير العمليات', () {
+      final d = ShopDrawingModel(
+        id: 22,
+        projectName: 'P2-OM',
+        status: ShopDrawingModel.statusReturnedToTo,
+        createdByUserId: 2,
+        createdByUserName: 'المكتب الفني',
+        createdAt: DateTime(2026, 6, 30, 9, 0),
+        updatedAt: DateTime(2026, 6, 30, 13, 0),
+        actions: [
+          ShopDrawingActionModel(
+            id: 1,
+            actorUserId: 2,
+            actorUserName: 'المكتب الفني',
+            action: 'created',
+            createdAt: DateTime(2026, 6, 30, 9, 0),
+          ),
+          ShopDrawingActionModel(
+            id: 2,
+            actorUserId: 3,
+            actorUserName: 'مدير PM',
+            action: 'pm_approve',
+            createdAt: DateTime(2026, 6, 30, 11, 0),
+          ),
+          ShopDrawingActionModel(
+            id: 3,
+            actorUserId: 4,
+            actorUserName: 'مدير OM',
+            action: 'om_return',
+            comment: 'مرفق ناقص',
+            createdAt: DateTime(2026, 6, 30, 13, 0),
+          ),
+        ],
+      );
+      final lines = buildShopDrawingStatusTimeline(d, formatter: fmt);
+      expect(
+        lines.any((l) => l.text.contains('من مدير العمليات')),
+        isTrue,
+      );
+      expect(
+        lines.last.text,
+        'في انتظار تعديل وإعادة إرسال من المكتب الفني',
+      );
+    });
+
     test('معتمد نهائياً', () {
       final d = ShopDrawingModel(
         id: 3,

@@ -83,6 +83,10 @@ class ShopDrawingActionModel {
         return 'اعتماد مدير المشروعات';
       case 'pm_return':
         return 'إعادة + مراجعة';
+      case 'om_return':
+        return 'إعادة للمكتب الفني من مدير العمليات';
+      case 'om_edit':
+        return 'تعديل المحتوى قبل الاعتماد';
       case 'om_approve':
         return 'اعتماد / حفظ نهائي';
       default:

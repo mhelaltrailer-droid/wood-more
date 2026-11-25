@@ -3135,6 +3135,52 @@ class ApiStorageService {
     );
   }
 
+  Future<ShopDrawingModel> omReturnShopDrawing({
+    required int drawingId,
+    required int userId,
+    required String reason,
+  }) async {
+    final uri = Uri.parse(_path('shop-drawing/$drawingId/om-return'));
+    final r = await http.post(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode({'userId': userId, 'reason': reason}),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ShopDrawingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
+  /// تعديل OM قبل الاعتماد. إن [attachments] = null تبقى المرفقات الحالية.
+  Future<ShopDrawingModel> omEditShopDrawing({
+    required int drawingId,
+    required int userId,
+    required bool contentSd,
+    required bool contentQs,
+    required bool contentDashboard,
+    String? externalUrl,
+    List<Map<String, dynamic>>? attachments,
+  }) async {
+    final uri = Uri.parse(_path('shop-drawing/$drawingId/om-edit'));
+    final r = await http.put(
+      uri,
+      headers: _reqHeaders({'Content-Type': 'application/json'}),
+      body: jsonEncode({
+        'userId': userId,
+        'contentSd': contentSd,
+        'contentQs': contentQs,
+        'contentDashboard': contentDashboard,
+        'externalUrl': externalUrl ?? '',
+        if (attachments != null) 'attachments': attachments,
+      }),
+    );
+    if (r.statusCode >= 400) throw Exception(r.body);
+    return ShopDrawingModel.fromMap(
+      Map<String, dynamic>.from(jsonDecode(r.body) as Map),
+    );
+  }
+
   Future<ShopDrawingModel> updateShopDrawingOmNotes({
     required int drawingId,
     required int userId,
