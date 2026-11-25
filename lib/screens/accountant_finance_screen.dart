@@ -10,6 +10,20 @@ import '../services/route_persistence.dart';
 import '../services/storage_service.dart';
 import 'home_screen.dart';
 
+/// آخر جمعة في أو قبل [day] (إن كان اليوم جمعة تُعاد نفسها).
+DateTime lastFridayOnOrBefore(DateTime day) {
+  final d = DateTime(day.year, day.month, day.day);
+  final delta = (d.weekday - DateTime.friday + 7) % 7;
+  return d.subtract(Duration(days: delta));
+}
+
+/// اسم ملف PDF آمن من اسم المستخدم.
+String sanitizePdfUserFileName(String name) {
+  final cleaned = name.trim().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+  if (cleaned.isEmpty) return 'مستخدم';
+  return cleaned;
+}
+
 /// واجهة الأرصدة / المصروفات: الاطلاع على أرصدة المستخدمين، إضافة/سحب رصيد، وإنشاء تقرير بكل الحركات
 class AccountantFinanceScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -35,6 +49,13 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
     'abdelrhmanellaithy828@gmail.com',
   };
   static const _aminEmail = 'ah-amin';
+
+  /// أصحاب الرصيد المشمولون في التقرير / PDF المنفرد.
+  static const _reportSubjectRoles = {
+    'site_engineer',
+    'purchaser',
+    'general_supervisor',
+  };
 
   /// مستخدمون لا يظهرون في قائمة أرصدة المستخدمين (بالبريد).
   static const _hiddenFromBalancesEmails = {
@@ -280,6 +301,9 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
   bool _isAminUser(UserModel u) =>
       u.email.trim().toLowerCase() == _aminEmail;
 
+  bool _isReportSubjectUser(UserModel u) =>
+      _reportSubjectRoles.contains(u.role.trim());
+
   bool _isAllowedReportActor({
     required int? actorUserId,
     required Map<int, String> emailById,
@@ -296,10 +320,14 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
   }
 
   Future<void> _showCreateReport() async {
-    DateTime dateFrom = DateTime.now().subtract(const Duration(days: 30));
-    DateTime dateTo = DateTime.now();
+    final now = DateTime.now();
+    DateTime dateFrom = lastFridayOnOrBefore(now);
+    DateTime dateTo = DateTime(now.year, now.month, now.day);
     // null = الكل
     UserModel? selectedEngineer;
+    final reportUsers = _users
+        .where((u) => _isReportSubjectUser(u) || _isAminUser(u))
+        .toList();
 
     final ok = await showDialog<bool>(
       context: context,
@@ -311,7 +339,10 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('المهندس', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'المستخدم',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 4),
                 InputDecorator(
                   decoration: const InputDecoration(
@@ -327,7 +358,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                           value: null,
                           child: Text('الكل'),
                         ),
-                        ..._users.map(
+                        ...reportUsers.map(
                           (u) => DropdownMenuItem<int?>(
                             value: u.id,
                             child: Text(u.name),
@@ -341,7 +372,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
                             return;
                           }
                           UserModel? found;
-                          for (final u in _users) {
+                          for (final u in reportUsers) {
                             if (u.id == id) {
                               found = u;
                               break;
@@ -408,6 +439,12 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       for (final u in allUsers) u.id: u.email.trim().toLowerCase(),
     };
     final nameById = {for (final u in allUsers) u.id: u.name};
+    final roleById = {for (final u in allUsers) u.id: u.role.trim()};
+
+    bool isSubjectBalanceUser(int userId) {
+      final role = roleById[userId];
+      return role != null && _reportSubjectRoles.contains(role);
+    }
 
     final custodyRecords = await _db.getCustodyRecords(userId: null);
     final combined = <Map<String, dynamic>>[];
@@ -435,11 +472,15 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
       if (targetId == null) continue;
 
       if (filterAmin) {
-        // ah-amin: كل ما نفّذه كمنفّذ (حتى على مهندسين آخرين)
+        // ah-amin: كل ما نفّذه كمنفّذ على أدوار التقرير فقط
         if (actorId != selectedEngineer!.id) continue;
+        if (!isSubjectBalanceUser(targetId)) continue;
       } else if (!filterAll) {
-        // مهندس معيّن: حركات تخص رصيده فقط
+        // مستخدم معيّن: حركات تخص رصيده فقط
         if (targetId != selectedEngineer!.id) continue;
+        if (!isSubjectBalanceUser(targetId)) continue;
+      } else if (!isSubjectBalanceUser(targetId)) {
+        continue;
       }
 
       final note = (e['note'] as String?)?.trim().isNotEmpty == true
@@ -472,6 +513,7 @@ class _AccountantFinanceScreenState extends State<AccountantFinanceScreen> {
         final approvalAt = s.respondedAt;
         if (approvalAt == null) continue;
         if (approvalAt.isBefore(from) || approvalAt.isAfter(toEnd)) continue;
+        if (!isSubjectBalanceUser(s.balanceUserId)) continue;
         if (!filterAll && s.balanceUserId != selectedEngineer!.id) continue;
 
         combined.add({
@@ -794,9 +836,20 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
 
   // عمود «الرصيد بعد» مخفي مؤقتاً — التخزين في الخلفية ما زال يعمل.
 
-  Future<void> _exportPdf(BuildContext context) async {
+  double _totalFor(List<Map<String, dynamic>> rows) => rows.fold<double>(
+        0,
+        (sum, e) {
+          if (!_countsTowardTotal(e)) return sum;
+          return sum + ((e['amount'] as num?)?.toDouble() ?? 0);
+        },
+      );
+
+  Future<Uint8List> _buildPdfBytes({
+    required List<Map<String, dynamic>> rows,
+    String? userTitle,
+  }) async {
     final dateFormat = DateFormat('yyyy/MM/dd', 'ar');
-    final totalLabel = _totalAmount.toStringAsFixed(2);
+    final totalLabel = _totalFor(rows).toStringAsFixed(2);
     final fontBase = await PdfGoogleFonts.tajawalRegular();
     final fontBold = await PdfGoogleFonts.tajawalBold();
     final theme = pw.ThemeData.withFont(base: fontBase, bold: fontBold);
@@ -806,6 +859,9 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
       logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
     } catch (_) {}
     final logo = logoImage;
+    final heading = userTitle == null || userTitle.trim().isEmpty
+        ? 'تقرير الحركات المالية (إضافة/سحب + صرف معتمد)'
+        : 'تقرير الحركات المالية — $userTitle';
     final doc = pw.Document();
     doc.addPage(
       pw.MultiPage(
@@ -830,7 +886,7 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
             ),
             child: pw.Center(
               child: pw.Text(
-                'تقرير الحركات المالية (إضافة/سحب + صرف معتمد)',
+                heading,
                 textDirection: pw.TextDirection.rtl,
                 style: pw.TextStyle(
                   fontSize: 13,
@@ -871,7 +927,7 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
                   _cell('التاريخ', true),
                 ],
               ),
-              ...movements.map((e) {
+              ...rows.map((e) {
                 final dt = DateTime.parse(e['created_at'] as String);
                 final isBalance = _isBalanceMovement(e);
                 final textColor =
@@ -908,12 +964,54 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
         ],
       ),
     );
-    final bytes = await doc.save();
+    return doc.save();
+  }
+
+  Future<void> _exportPdfAll(BuildContext context) async {
+    final dateFormat = DateFormat('yyyy/MM/dd', 'ar');
+    final bytes = await _buildPdfBytes(rows: movements);
     await Printing.sharePdf(
       bytes: bytes,
       filename:
           'تقرير_مالي_${dateFormat.format(dateFrom)}_${dateFormat.format(dateTo)}.pdf',
     );
+  }
+
+  /// تصدير PDF منفصل لكل مستخدم ظاهر في التقرير (مشاركة متتابعة).
+  Future<void> _exportPdfPerUser(BuildContext context) async {
+    final byUser = <int, List<Map<String, dynamic>>>{};
+    final names = <int, String>{};
+    for (final e in movements) {
+      final rawId = e['user_id'];
+      final id = rawId is int ? rawId : int.tryParse('$rawId');
+      if (id == null) continue;
+      byUser.putIfAbsent(id, () => []).add(e);
+      names[id] = _userName(e);
+    }
+    if (byUser.isEmpty) return;
+
+    final orderedIds = byUser.keys.toList()
+      ..sort((a, b) => (names[a] ?? '').compareTo(names[b] ?? ''));
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'جاري تصدير ${orderedIds.length} ملف PDF — أكمل المشاركة لكل مستخدم',
+          ),
+        ),
+      );
+    }
+
+    for (final id in orderedIds) {
+      final rows = byUser[id]!;
+      final name = names[id] ?? 'مستخدم';
+      final bytes = await _buildPdfBytes(rows: rows, userTitle: name);
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: '${sanitizePdfUserFileName(name)}.pdf',
+      );
+    }
   }
 
   static pw.Widget _cell(
@@ -1057,10 +1155,22 @@ class _AccountantFinanceReportScreen extends StatelessWidget {
             const SizedBox(height: 24),
             FilledButton.icon(
               icon: const Icon(Icons.picture_as_pdf),
-              label: const Text('Export PDF'),
-              onPressed: () => _exportPdf(context),
+              label: const Text('Export PDF الكل'),
+              onPressed: () => _exportPdfAll(context),
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF1B5E20),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.folder_shared_outlined),
+              label: const Text('Export PDF لكل مستخدم'),
+              onPressed: () => _exportPdfPerUser(context),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF1B5E20),
+                side: const BorderSide(color: Color(0xFF1B5E20)),
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 minimumSize: const Size(double.infinity, 48),
               ),
