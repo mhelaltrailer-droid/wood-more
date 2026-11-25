@@ -1,8 +1,11 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'dart:ui' show TextDirection;
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/shop_drawing_constants.dart';
 import '../models/reports_sys_model.dart';
 import '../models/shop_drawing_model.dart';
 import '../models/user_model.dart';
@@ -12,6 +15,20 @@ import '../widgets/reports_sys_attachments_panel.dart';
 import '../widgets/shop_drawing_content_flags_panel.dart';
 import '../widgets/shop_drawing_timeline.dart';
 import 'shop_drawing_form_screen.dart';
+
+class _OmPendingAttachment {
+  final String fileName;
+  final String mimeType;
+  final String dataBase64;
+  final int sizeBytes;
+
+  const _OmPendingAttachment({
+    required this.fileName,
+    required this.mimeType,
+    required this.dataBase64,
+    required this.sizeBytes,
+  });
+}
 
 class ShopDrawingDetailScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -32,14 +49,28 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
   final _storage = getStorage();
   final _returnReasonController = TextEditingController();
   final _omNotesController = TextEditingController();
+  final _omUrlController = TextEditingController();
 
   ShopDrawingModel? _drawing;
   bool _loading = true;
   bool _acting = false;
   String? _error;
 
+  bool _editContentSd = false;
+  bool _editContentQs = false;
+  bool _editContentDashboard = false;
+  final List<_OmPendingAttachment> _omReplacementAttachments = [];
+
   void _syncOmNotesController(ShopDrawingModel drawing) {
     _omNotesController.text = drawing.omNotes?.trim() ?? '';
+  }
+
+  void _syncOmEditFields(ShopDrawingModel drawing) {
+    _editContentSd = drawing.contentSd;
+    _editContentQs = drawing.contentQs;
+    _editContentDashboard = drawing.contentDashboard;
+    _omUrlController.text = drawing.externalUrl?.trim() ?? '';
+    _omReplacementAttachments.clear();
   }
 
   @override
@@ -52,6 +83,7 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
   void dispose() {
     _returnReasonController.dispose();
     _omNotesController.dispose();
+    _omUrlController.dispose();
     super.dispose();
   }
 
@@ -71,6 +103,7 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
         _loading = false;
       });
       _syncOmNotesController(drawing);
+      _syncOmEditFields(drawing);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -166,6 +199,182 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
     }
   }
 
+  Future<void> _omReturn() async {
+    if (_storage is! ApiStorageService) return;
+    final reason = _returnReasonController.text.trim();
+    if (reason.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('سبب الإعادة مطلوب')),
+      );
+      return;
+    }
+    setState(() => _acting = true);
+    try {
+      await _storage.omReturnShopDrawing(
+        drawingId: widget.drawingId,
+        userId: widget.currentUser.id,
+        reason: reason,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
+  bool _isAllowedFile(String name, String? mime) {
+    final n = name.toLowerCase();
+    final m = (mime ?? '').toLowerCase();
+    final isPdf = m == 'application/pdf' || n.endsWith('.pdf');
+    final isDmg = m == 'application/x-apple-diskimage' ||
+        m == 'application/octet-stream' && n.endsWith('.dmg') ||
+        n.endsWith('.dmg');
+    final isImage = m.startsWith('image/') ||
+        n.endsWith('.jpg') ||
+        n.endsWith('.jpeg') ||
+        n.endsWith('.png') ||
+        n.endsWith('.gif') ||
+        n.endsWith('.webp');
+    return isPdf || isDmg || isImage;
+  }
+
+  String _mimeFromExtension(String? extension) {
+    switch (extension?.toLowerCase()) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'dmg':
+        return 'application/x-apple-diskimage';
+      default:
+        return 'image/${extension ?? 'jpeg'}';
+    }
+  }
+
+  Future<void> _pickOmReplacementFiles() async {
+    final result = await FilePicker.pickFiles(
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: const [
+        'pdf', 'dmg', 'jpg', 'jpeg', 'png', 'gif', 'webp',
+      ],
+      withData: true,
+    );
+    if (result == null) return;
+
+    final added = <_OmPendingAttachment>[];
+    for (final f in result.files) {
+      if (added.length >= shopDrawingMaxAttachments) break;
+      final bytes = f.bytes;
+      if (bytes == null) continue;
+      if (bytes.length > shopDrawingMaxAttachmentBytes) {
+        if (!mounted) continue;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('الملف ${f.name} أكبر من 5 ميجا'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        continue;
+      }
+      final mime = _mimeFromExtension(f.extension);
+      if (!_isAllowedFile(f.name, mime)) continue;
+      added.add(
+        _OmPendingAttachment(
+          fileName: f.name,
+          mimeType: mime,
+          dataBase64: base64Encode(bytes),
+          sizeBytes: bytes.length,
+        ),
+      );
+    }
+    if (added.isEmpty) return;
+    setState(() {
+      _omReplacementAttachments
+        ..clear()
+        ..addAll(added);
+    });
+  }
+
+  Future<void> _omSaveEdits() async {
+    if (_storage is! ApiStorageService) return;
+    final drawing = _drawing;
+    if (drawing == null) return;
+
+    String? externalUrl;
+    try {
+      externalUrl = normalizeShopDrawingExternalUrl(_omUrlController.text);
+    } on FormatException {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('الرابط غير صالح — استخدم http أو https'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final replacing = _omReplacementAttachments.isNotEmpty;
+    final hasExistingFiles = drawing.attachments.isNotEmpty;
+    if (!replacing && !hasExistingFiles && externalUrl == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('أبقِ مرفقاً أو رابطاً واحداً على الأقل'),
+        ),
+      );
+      return;
+    }
+    if (replacing && _omReplacementAttachments.isEmpty && externalUrl == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('أرفق ملفاً أو أدخل رابطاً واحداً على الأقل'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _acting = true);
+    try {
+      final updated = await _storage.omEditShopDrawing(
+        drawingId: widget.drawingId,
+        userId: widget.currentUser.id,
+        contentSd: _editContentSd,
+        contentQs: _editContentQs,
+        contentDashboard: _editContentDashboard,
+        externalUrl: externalUrl,
+        attachments: replacing
+            ? _omReplacementAttachments
+                .map(
+                  (a) => {
+                    'file_name': a.fileName,
+                    'mime_type': a.mimeType,
+                    'data_base64': a.dataBase64,
+                    'size_bytes': a.sizeBytes,
+                  },
+                )
+                .toList()
+            : null,
+      );
+      if (!mounted) return;
+      setState(() => _drawing = updated);
+      _syncOmNotesController(updated);
+      _syncOmEditFields(updated);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم حفظ التعديلات')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _acting = false);
+    }
+  }
+
   Future<void> _saveOmNotes() async {
     if (_storage is! ApiStorageService) return;
     setState(() => _acting = true);
@@ -225,7 +434,9 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              readOnly ? 'ملاحظات مدير العمليات' : 'ملاحظات مدير العمليات (اختياري)',
+              readOnly
+                  ? 'ملاحظات مدير العمليات'
+                  : 'ملاحظات مدير العمليات (اختياري)',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
@@ -246,6 +457,85 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
                   backgroundColor: const Color(0xFF1B5E20),
                 ),
                 child: Text(saveLabel ?? 'حفظ الملاحظات'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOmEditPanel(ShopDrawingModel drawing) {
+    return Card(
+      color: const Color(0xFFFFF8E1),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'تعديل قبل الاعتماد',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 12),
+            ShopDrawingContentFlagsPanel(
+              contentSd: _editContentSd,
+              contentQs: _editContentQs,
+              contentDashboard: _editContentDashboard,
+              onSdChanged: (v) => setState(() => _editContentSd = v),
+              onQsChanged: (v) => setState(() => _editContentQs = v),
+              onDashboardChanged: (v) =>
+                  setState(() => _editContentDashboard = v),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _omUrlController,
+              decoration: const InputDecoration(
+                labelText: 'رابط خارجي (اختياري)',
+                border: OutlineInputBorder(),
+              ),
+              textDirection: TextDirection.ltr,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _omReplacementAttachments.isEmpty
+                  ? 'المرفقات الحالية: ${drawing.attachments.length} — اتركها كما هي أو استبدلها دفعة واحدة'
+                  : 'سيتم استبدال المرفقات بـ ${_omReplacementAttachments.length} ملف جديد',
+              style: TextStyle(color: Colors.grey.shade800),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _acting ? null : _pickOmReplacementFiles,
+              icon: const Icon(Icons.attach_file),
+              label: Text(
+                _omReplacementAttachments.isEmpty
+                    ? 'استبدال المرفقات'
+                    : 'تغيير الملفات المختارة',
+              ),
+            ),
+            if (_omReplacementAttachments.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              ..._omReplacementAttachments.map(
+                (a) => ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.insert_drive_file_outlined),
+                  title: Text(a.fileName),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: _acting
+                        ? null
+                        : () => setState(
+                              () => _omReplacementAttachments.remove(a),
+                            ),
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: _acting
+                    ? null
+                    : () => setState(_omReplacementAttachments.clear),
+                child: const Text('إلغاء الاستبدال والاحتفاظ بالمرفقات الحالية'),
               ),
             ],
           ],
@@ -388,7 +678,12 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.red)))
+              ? Center(
+                  child: Text(
+                    _error!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
+                )
               : _buildBody(fmt),
     );
   }
@@ -398,7 +693,7 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
     final user = widget.currentUser;
     final canPmAct = user.canActAsShopDrawingProjectManager &&
         d.status == ShopDrawingModel.statusPendingPm;
-    final canOmAct = user.canApproveShopDrawingAsOm &&
+    final canOmAct = user.canEditOrReturnShopDrawingAsOm &&
         d.status == ShopDrawingModel.statusPendingOm;
     final canOmEditNotes = user.canApproveShopDrawingAsOm &&
         d.status == ShopDrawingModel.statusApproved;
@@ -430,7 +725,10 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('الملاحظات', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text(
+                    'الملاحظات',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 8),
                   Text(d.notes!),
                 ],
@@ -458,7 +756,9 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
             ),
           ),
         ],
-        if (d.externalUrl != null && d.externalUrl!.trim().isNotEmpty) ...[
+        if (!canOmAct &&
+            d.externalUrl != null &&
+            d.externalUrl!.trim().isNotEmpty) ...[
           const SizedBox(height: 12),
           _buildExternalUrlCard(d.externalUrl!.trim()),
         ],
@@ -476,13 +776,15 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
             readOnly: true,
           ),
         ],
-        const SizedBox(height: 20),
-        ShopDrawingContentFlagsPanel(
-          contentSd: d.contentSd,
-          contentQs: d.contentQs,
-          contentDashboard: d.contentDashboard,
-          readOnly: true,
-        ),
+        if (!canOmAct) ...[
+          const SizedBox(height: 20),
+          ShopDrawingContentFlagsPanel(
+            contentSd: d.contentSd,
+            contentQs: d.contentQs,
+            contentDashboard: d.contentDashboard,
+            readOnly: true,
+          ),
+        ],
         const SizedBox(height: 12),
         ShopDrawingTimeline(actions: d.actions),
         if (showOmNotesReadOnly) ...[
@@ -533,6 +835,33 @@ class _ShopDrawingDetailScreenState extends State<ShopDrawingDetailScreen> {
           ),
         ],
         if (canOmAct) ...[
+          const SizedBox(height: 16),
+          _buildOmEditPanel(d),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _acting ? null : _omSaveEdits,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('حفظ التعديلات'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFEF6C00),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _returnReasonController,
+            decoration: const InputDecoration(
+              labelText: 'سبب الإعادة للمكتب الفني (عند الإرجاع)',
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 3,
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _acting ? null : _omReturn,
+            icon: const Icon(Icons.undo),
+            label: const Text('إرجاع للمكتب الفني'),
+          ),
           const SizedBox(height: 16),
           _buildOmNotesEditor(readOnly: false),
           const SizedBox(height: 12),

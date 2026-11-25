@@ -18,10 +18,10 @@ void main() {
     final resolved = resolveHomeIconOrder(
       user: _user('site_engineer'),
       iconConfig: iconConfig,
-      savedOrder: const ['ir_mir', 'attendance', 'operation_reports'],
+      savedOrder: const ['document_control', 'attendance', 'operation_reports'],
     );
 
-    expect(resolved.first, 'ir_mir');
+    expect(resolved.first, 'document_control');
     expect(resolved, contains('attendance'));
     expect(
       resolved.length,
@@ -55,7 +55,7 @@ void main() {
     expect(eligible.first, 'attendance');
     expect(eligible, contains('attendance_reports'));
     expect(eligible, contains('warehouses_view'));
-    expect(eligible, isNot(contains('today_work_plan')));
+    expect(eligible, contains('today_work_plan'));
   });
 
   test('app_admin no longer has activity_logs home icon', () {

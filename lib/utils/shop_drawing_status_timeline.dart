@@ -56,6 +56,20 @@ List<ShopDrawingStatusLine> buildShopDrawingStatusTimeline(
             ),
           );
           break;
+        case 'om_return':
+          lines.add(
+            ShopDrawingStatusLine(
+              'أُعيد للمكتب الفني من مدير العمليات — ${fmt.format(action.createdAt)}',
+            ),
+          );
+          break;
+        case 'om_edit':
+          lines.add(
+            ShopDrawingStatusLine(
+              'عدّل مدير العمليات المحتوى قبل الاعتماد — ${fmt.format(action.createdAt)}',
+            ),
+          );
+          break;
         case 'om_approve':
           lines.add(
             ShopDrawingStatusLine(

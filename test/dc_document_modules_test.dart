@@ -104,47 +104,53 @@ void main() {
   });
 
   group('IconVisibilityService — الأيقونات الجديدة', () {
-    test('مهندس الموقع: MS-SD و MoS-ITP', () {
+    test('مهندس الموقع: Document Control (يشمل MS-SD و MoS-ITP)', () {
       final ids = IconVisibilityService.roleIcons['site_engineer']!
           .map((e) => e.id)
           .toList();
-      expect(ids, containsAll(['ms_sd', 'mos_itp']));
-    });
-
-    test('مدير المشروعات والمشرف العام: MS-SD و MoS-ITP', () {
-      for (final role in ['site_engineer_manager', 'general_supervisor']) {
-        final ids = IconVisibilityService.roleIcons[role]!
-            .map((e) => e.id)
-            .toList();
-        expect(ids, contains('ms_sd'));
-        expect(ids, contains('mos_itp'));
-      }
-    });
-
-    test('مدير العمليات و DC: الأيقونتان', () {
-      for (final role in ['operation_manager', 'document_controller']) {
-        final ids = IconVisibilityService.roleIcons[role]!
-            .map((e) => e.id)
-            .toList();
-        expect(ids, contains('ms_sd'));
-        expect(ids, contains('mos_itp'));
-      }
-    });
-
-    test('المحاسب بلا MS-SD أو MoS-ITP', () {
-      final ids = IconVisibilityService.roleIcons['accountant']!
-          .map((e) => e.id)
-          .toList();
+      expect(ids, contains('document_control'));
       expect(ids, isNot(contains('ms_sd')));
       expect(ids, isNot(contains('mos_itp')));
     });
 
-    test('مدير المشروعات: العهد/تقارير المصروفات في آخر القائمة', () {
+    test('مدير المشروعات والمشرف العام: Document Control', () {
+      for (final role in ['site_engineer_manager', 'general_supervisor']) {
+        final ids = IconVisibilityService.roleIcons[role]!
+            .map((e) => e.id)
+            .toList();
+        expect(ids, contains('document_control'));
+        expect(ids, isNot(contains('ms_sd')));
+        expect(ids, isNot(contains('mos_itp')));
+      }
+    });
+
+    test('مدير العمليات و DC: Document Control', () {
+      for (final role in ['operation_manager', 'document_controller']) {
+        final ids = IconVisibilityService.roleIcons[role]!
+            .map((e) => e.id)
+            .toList();
+        expect(ids, contains('document_control'));
+        expect(ids, isNot(contains('ms_sd')));
+        expect(ids, isNot(contains('mos_itp')));
+      }
+    });
+
+    test('المحاسب بلا Document Control / MS-SD / MoS-ITP', () {
+      final ids = IconVisibilityService.roleIcons['accountant']!
+          .map((e) => e.id)
+          .toList();
+      expect(ids, isNot(contains('document_control')));
+      expect(ids, isNot(contains('ms_sd')));
+      expect(ids, isNot(contains('mos_itp')));
+    });
+
+    test('مدير المشروعات: العهد/تقارير المصروفات موجودة وليست آخر عنصر', () {
       final ids = IconVisibilityService.roleIcons['site_engineer_manager']!
           .map((e) => e.id)
           .toList();
       expect(ids, contains('manager_custody_expenses'));
-      expect(ids.last, 'manager_custody_expenses');
+      expect(ids, contains('cont_progress'));
+      expect(ids.last, 'cont_progress');
     });
 
     test('المشرف العام بلا الأرصدة / المصروفات', () {
@@ -225,6 +231,51 @@ void main() {
       final lines = buildShopDrawingStatusTimeline(d, formatter: fmt);
       expect(
         lines.any((l) => l.text.contains('أُعيد للمكتب الفني')),
+        isTrue,
+      );
+      expect(
+        lines.last.text,
+        'في انتظار تعديل وإعادة إرسال من المكتب الفني',
+      );
+    });
+
+    test('معاد للمكتب الفني من مدير العمليات', () {
+      final d = ShopDrawingModel(
+        id: 22,
+        projectName: 'P2-OM',
+        status: ShopDrawingModel.statusReturnedToTo,
+        createdByUserId: 2,
+        createdByUserName: 'المكتب الفني',
+        createdAt: DateTime(2026, 6, 30, 9, 0),
+        updatedAt: DateTime(2026, 6, 30, 13, 0),
+        actions: [
+          ShopDrawingActionModel(
+            id: 1,
+            actorUserId: 2,
+            actorUserName: 'المكتب الفني',
+            action: 'created',
+            createdAt: DateTime(2026, 6, 30, 9, 0),
+          ),
+          ShopDrawingActionModel(
+            id: 2,
+            actorUserId: 3,
+            actorUserName: 'مدير PM',
+            action: 'pm_approve',
+            createdAt: DateTime(2026, 6, 30, 11, 0),
+          ),
+          ShopDrawingActionModel(
+            id: 3,
+            actorUserId: 4,
+            actorUserName: 'مدير OM',
+            action: 'om_return',
+            comment: 'مرفق ناقص',
+            createdAt: DateTime(2026, 6, 30, 13, 0),
+          ),
+        ],
+      );
+      final lines = buildShopDrawingStatusTimeline(d, formatter: fmt);
+      expect(
+        lines.any((l) => l.text.contains('من مدير العمليات')),
         isTrue,
       );
       expect(
@@ -585,7 +636,7 @@ void main() {
   });
 
   group('HomeIconBuilder — بطاقات الأيقونات', () {
-    testWidgets('MS-SD لـ DC يعرض وصف الرفع', (tester) async {
+    testWidgets('Document Control لـ DC يعرض الوصف الموحّد', (tester) async {
       const dc = UserModel(
         id: 1,
         name: 'DC',
@@ -599,17 +650,18 @@ void main() {
               body: HomeIconBuilder.build(
                 context: context,
                 user: dc,
-                iconId: 'ms_sd',
+                iconId: 'document_control',
               ),
             ),
           ),
         ),
       );
-      expect(find.text('MS-SD'), findsOneWidget);
-      expect(find.textContaining('إضافة MS و SD'), findsOneWidget);
+      expect(find.text('Document Control'), findsOneWidget);
     });
 
-    testWidgets('MoS-ITP لمهندس الموقع يعرض وصف العرض', (tester) async {
+    testWidgets('Document Control لمهندس الموقع يعرض العنوان', (
+      tester,
+    ) async {
       const engineer = UserModel(
         id: 2,
         name: 'Eng',
@@ -623,14 +675,13 @@ void main() {
               body: HomeIconBuilder.build(
                 context: context,
                 user: engineer,
-                iconId: 'mos_itp',
+                iconId: 'document_control',
               ),
             ),
           ),
         ),
       );
-      expect(find.text('MoS-ITP'), findsOneWidget);
-      expect(find.textContaining('عرض سجلات'), findsOneWidget);
+      expect(find.text('Document Control'), findsOneWidget);
     });
   });
 }

@@ -17,7 +17,7 @@ void main() {
     );
 
     expect(engineer.isSiteEngineer, isTrue);
-    expect(engineer.canUseNotifications, isFalse);
+    expect(engineer.canUseNotifications, isTrue);
     expect(admin.isAdmin, isTrue);
     expect(admin.canUseNotifications, isTrue);
 

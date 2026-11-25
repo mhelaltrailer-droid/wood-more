@@ -382,6 +382,9 @@ class UserModel {
   /// اعتماد نهائي من مدير العمليات.
   bool get canApproveShopDrawingAsOm => isOperationManager;
 
+  /// إرجاع OM للمكتب الفني + تعديل checkboxes/مرفقات قبل الاعتماد.
+  bool get canEditOrReturnShopDrawingAsOm => isOperationManager;
+
   /// عرض Shop-Drawing & PO للقراءة فقط (Top Management).
   bool get canViewShopDrawingReadOnly => isTopManagement;
 
